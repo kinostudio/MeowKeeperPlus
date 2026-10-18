@@ -6,9 +6,9 @@ Windows本地寵物AI監控套件：共享攝影機串流、事件影片、Teleg
 
 ## 最新下載
 
-[r106 發布說明與下載](https://github.com/kinostudio/MeowKeeperPlus/releases/tag/r106)
+[r107 發布說明與下載](https://github.com/kinostudio/MeowKeeperPlus/releases/tag/r107)
 
-- 修正MSE流暢預覽的發布依賴；加入CPU溫度觀測與工程故障回歸保護。
+- 首頁硬體指標新增即時採樣倒數環、數值滾動與環形／指針平滑過渡；沿用既有狀態快照，不增加輪詢。
 - 提供完整Windows可攜包（內附Python、FFmpeg、模型），不要求終端使用者執行pip。
 - 大型ZIP使用分卷資產；請依Release提供的下載腳本完成合併與SHA-256校驗，勿單獨解壓part檔案。
 - 可攜開啟 `MeowKeeperPlus.cmd`；正式安裝／升級由使用者自行以管理員執行 `Install-MeowKeeperPlus.cmd -Upgrade`。
