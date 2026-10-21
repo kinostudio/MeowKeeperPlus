@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="content-heading"><div><p class="eyebrow">健康與相容性</p><h2>系統診斷</h2></div></div>
+<div class="notice"><strong>不知道問題在哪裡？</strong><p>先到總覽查看畫面、AI 與通知狀態。下方是供技術排查的詳細資料：running 表示程序正在執行（請配合{{ term_help('execution', '實際運算方式') }}確認），disabled 表示未啟用，not_checked 表示尚未驗證（{{ term_help('data_missing', '缺資料') }}不等於0或失敗）；程序執行中不等於已收到有效影像。</p></div>
+<section class="panel" id="xiaomi-control-diagnostics" aria-labelledby="xiaomi-control-diagnostics-title">
+  <div class="panel-heading"><div><h3 id="xiaomi-control-diagnostics-title">小米鏡頭控制診斷</h3><p class="muted">這裡會說明隱私模式或 PTZ 指令是否送出、是否讀回；「指令已接受」不代表鏡頭已移動。</p></div></div>
+  <p id="xiaomi-control-diagnostics-summary" role="status" aria-live="polite">正在讀取最近的控制紀錄…</p>
+  <details><summary>查看技術細節</summary><pre id="xiaomi-control-diagnostics-output">尚未載入。</pre></details>
+</section>
+<section class="panel"><pre id="diagnostics-output">正在讀取診斷資料…</pre></section>
+<script>
+(() => {
+  const statusNames={confirmed_success:"已讀回確認",command_accepted_unverified:"控制端已接受，尚未確認移動",unsupported:"此機型未驗證此操作",timeout:"操作逾時",readback_failed:"讀回失敗",confirmed_no_change:"已確認狀態未改變",failed:"操作失敗"};
+  const actionNames={privacy_hide:"啟用隱私模式",privacy_show:"恢復監控",ptz_move:"方向移動",ptz_stop:"停止",ptz_position:"座標定位"};
+  const summary=document.getElementById('xiaomi-control-diagnostics-summary');
+  const output=document.getElementById('xiaomi-control-diagnostics-output');
+  const operationId=new URLSearchParams(location.search).get('operation_id');
+  const operationQuery=operationId?`?operation_id=${encodeURIComponent(operationId)}`:'';
+  fetch(`/api/v1/cameras/xiaomi/control/diagnostics${operationQuery}`,{cache:'no-store'}).then(r=>r.ok?r.json():Promise.reject(new Error(`HTTP ${r.status}`))).then(data=>{
+    const item=Array.isArray(data.items)?data.items[0]:null;
+    output.textContent=JSON.stringify(data,null,2);
+    if(!item){summary.textContent=data.message_zh_tw||'目前沒有小米鏡頭控制紀錄。';return;}
+    const time=new Date(item.request_time).toLocaleString('zh-TW',{hour12:false});
+    const type=actionNames[item.operation_type]||item.operation_type||'鏡頭操作';
+    const status=statusNames[item.final_status]||'狀態未分類';
+    const reason=item.failure_reason?`下一步：${item.failure_reason}`:'目前沒有錯誤原因。';
+    summary.textContent=`最近操作：${type}｜${time}｜${status}。${reason}`;
+  }).catch(()=>{summary.textContent='目前無法讀取控制診斷；請確認已登入且 Host 正在執行。';output.textContent='診斷資料尚未載入。';});
+  fetch('/api/v1/diagnostics').then(r=>r.ok?r.json():Promise.reject()).then(data=>document.getElementById('diagnostics-output').textContent=JSON.stringify(data,null,2)).catch(()=>document.getElementById('diagnostics-output').textContent='需要登入後才能查看診斷資料。');
+})();
+</script>
+{% endblock %}

@@ -1,0 +1,120 @@
+{
+  "schema_version": 3,
+  "dashboard": {
+    "lan_access_enabled": false,
+    "host": "127.0.0.1",
+    "port": 8000
+  },
+  "web": {
+    "enabled": true,
+    "host": "127.0.0.1",
+    "port": 8000,
+    "token_secret_id": "web_dashboard_token",
+    "tailscale_serve_enabled": false,
+    "funnel_enabled": false,
+    "dashboard_auto_open": false
+  },
+  "tray": {
+    "enabled": true,
+    "auto_start_after_login": false
+  },
+  "go2rtc": {
+    "rtsp_lan_access_enabled": false
+  },
+  "integrations": {
+    "tailscale": {
+      "enabled": false,
+      "subnet_router_enabled": false,
+      "serve_target": "http://127.0.0.1:8000"
+    },
+    "xiaomi_go2rtc": {
+      "enabled": false,
+      "bind_host": "127.0.0.1",
+      "status": "not_checked"
+    }
+  },
+  "locale": "zh-TW",
+  "performance": {
+    "profile": "mx250_minimum",
+    "overrides": {}
+  },
+  "inference": {
+    "normal_yolo_fps": 3.0,
+    "active_yolo_fps": 5.0,
+    "quiet_yolo_fps": 1.0,
+    "active_mode_seconds": 30.0,
+    "identity_recheck_interval_seconds": 10.0,
+    "identity_max_pending_tasks": 2,
+    "identity_timeout_seconds": 3.0,
+    "identity_minimum_crop_pixels": 96,
+    "gpu_poll_interval_seconds": 10.0
+  },
+  "dashboard_settings": {
+    "confidence_threshold": 0.45,
+    "analysis_fps": 5,
+    "analysis_width": 640,
+    "activity_fps": 5,
+    "cooldown_seconds": 180,
+    "event_pre_seconds": 5,
+    "event_post_seconds": 10,
+    "retention_seconds": 60,
+    "ring_maximum_size_mb": 512,
+    "dashboard_auto_open": false,
+    "telegram_startup_notice": false
+  },
+  "media": {
+    "source_type": "mock",
+    "rtsp": {
+      "url": ""
+    },
+    "youtube": {
+      "url": "",
+      "max_height": 720,
+      "video": true,
+      "audio": false
+    },
+    "ring_buffer_seconds": 60,
+    "live_pre_seconds": 5,
+    "live_post_seconds": 0,
+    "ring_buffer": {
+      "enabled": true,
+      "segment_seconds": 1,
+      "retention_seconds": 60,
+      "storage_mode": "disk",
+      "temp_directory": "data/cache/ring",
+      "maximum_size_mb": 512,
+      "prefer_stream_copy": true
+    },
+    "events": {
+      "pre_seconds": 5,
+      "post_seconds": 10,
+      "live_pre_seconds": 5,
+      "live_post_seconds": 0,
+      "telegram_max_bytes": 52428800
+    }
+  },
+  "telegram": {
+    "enabled": false,
+    "bot_secret_id": "telegram_primary",
+    "users": []
+  },
+  "pets": [],
+  "identity": {
+    "model_profile": "dinov2_vits14",
+    "accepted_threshold": 0.62,
+    "unknown_threshold": 0.45,
+    "minimum_margin": 0.08,
+    "temporal_vote_window": 5,
+    "identity_sampling_fps": 1.0
+  },
+  "behavior": {
+    "threshold_profile": "default",
+    "cooldown_seconds": 180,
+    "zones": [],
+    "behavior_sampling_hz": 1.0
+  },
+  "storage": {
+    "database_path": "data/meowkeeper.db",
+    "event_retention_days": 7
+  }
+}

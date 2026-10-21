@@ -1,0 +1,111 @@
+{% from '_term_help.html' import term_help with context %}
+<section class="panel vision-center" aria-labelledby="vision-title">
+  <div class="panel-heading vision-title-row"><div><p class="eyebrow">選用功能 · 不影響本機守護</p><h3 id="vision-title">{{ term_help('ai_provider', 'AI 動作分析管理中心') }}</h3></div><span id="vision-overview-status" class="status-pill status-unknown">讀取中</span></div>
+  <p class="vision-intro">啟用後，系統會把事件中的{{ term_help('storyboard', '多時點貓框參考圖') }}透過{{ term_help('ai_queue', '分析排程') }}發送{{ term_help('ai_request', 'AI 服務請求') }}，協助整理活動候選標籤（超額或停用時會自動{{ term_help('ai_skip', '略過 AI 分析') }}）。不啟用也不影響本機監控、事件錄影與 Telegram 影片通知。</p>
+  <div class="vision-overview-grid" aria-label="AI 分析即時摘要">
+    <article class="vision-summary-card"><span>目前狀態</span><strong id="vision-summary-state">讀取中</strong><small id="vision-summary-health">尚未確認服務</small></article>
+    <article class="vision-summary-card"><span>服務與模型</span><strong id="vision-summary-model">尚未設定</strong><small id="vision-summary-provider">—</small></article>
+    <article class="vision-summary-card"><span>今天完成分析</span><strong id="vision-summary-success">0</strong><small id="vision-summary-last-success">尚無成功紀錄</small></article>
+    <article class="vision-summary-card"><span>今天使用預算</span><strong id="vision-summary-budget">0 / 400 次</strong><small id="vision-summary-remaining">尚未送出分析</small></article>
+  </div>
+  <div class="vision-tabs" role="tablist" aria-label="AI 分析管理區塊">
+    <button type="button" role="tab" id="vision-tab-config" aria-controls="vision-config-panel" aria-selected="true" data-vision-tab="config">設定與額度</button>
+    <button type="button" role="tab" id="vision-tab-performance" aria-controls="vision-performance-panel" aria-selected="false" data-vision-tab="performance">分析表現</button>
+  </div>
+  <div id="vision-config-panel" class="vision-tab-panel" role="tabpanel" aria-labelledby="vision-tab-config">
+    <div class="vision-main-grid">
+      <div class="vision-card">
+        <div class="vision-section-heading"><div><h4>服務設定</h4><p>照三步設定；API Key 會獨立加密保存。</p></div><span class="step-chip">1—3</span></div>
+        <form id="vision-settings-form" class="vision-form">
+          <fieldset class="vision-provider-picker"><legend>1. 選擇服務</legend>
+            <label class="vision-provider-card"><input type="radio" name="vision-provider" value="gemini"><span><strong>Google Gemini</strong><small>雲端圖片分析 · 需要 API Key</small></span></label>
+            <label class="vision-provider-card"><input type="radio" name="vision-provider" value="openai_compatible"><span><strong>OpenAI 格式相容服務</strong><small>支援相容雲端服務與本機圖片模型</small></span></label>
+          </fieldset>
+          <label>2. 選擇圖片模型
+            <select id="vision-model-choice" aria-describedby="vision-model-help"><option value="">從常用或已探測模型清單選擇…</option><option value="__custom__">自訂模型 ID</option></select>
+            <input id="vision-model" type="text" maxlength="120" autocomplete="off" placeholder="從上方選單點選，或直接貼上服務商模型 ID" aria-describedby="vision-model-help">
+            <span id="vision-model-help" class="field-help">可直接從上方選單選擇推薦模型（或選「自訂模型 ID」手動輸入），填妥後安全保存 API Key 即可按「檢查連線」更新服務商最新模型清單。同一服務商切換模型時會自動沿用已保存的金鑰。</span>
+          </label>
+          <label id="vision-endpoint-label">服務 API 網址
+            <input id="vision-endpoint" type="url" maxlength="2048" placeholder="貼上服務商文件中的完整圖片 API 網址" autocomplete="off" aria-describedby="vision-endpoint-help">
+            <span id="vision-endpoint-help" class="field-help">不是聊天網頁，也不要把 API Key 加在網址。遠端服務使用 HTTPS；HTTP 僅限本機 127.0.0.1。</span>
+          </label>
+          <div class="vision-inline-actions"><button class="button secondary" id="vision-health-check" type="button">檢查連線</button><span id="vision-health-result" role="status" class="field-help">只讀取服務模型清單，不傳圖片。</span></div>
+          <div class="vision-inline-actions"><button class="button secondary" id="vision-image-test" type="button">測試圖片理解</button><span id="vision-image-test-result" role="status" class="field-help">只傳程式繪製的合成示範貓插圖；不會使用攝影機畫面。</span></div>
+          <div class="vision-inline-actions"><button class="button secondary" id="vision-count-tokens" type="button">估算圖片 Token</button><span id="vision-count-tokens-result" role="status" class="field-help">僅 Gemini 可用；按下後會以合成示範圖呼叫 countTokens，不會呼叫模型推論。</span></div>
+          <div class="vision-switch-row"><label class="vision-switch"><input id="vision-enabled" type="checkbox"><span aria-hidden="true"></span></label><div><strong>啟用 AI 圖片分析</strong><small>關閉時只停止送圖，不會停止攝影機、錄影或 Telegram。</small></div></div>
+          <div class="vision-consent-box"><label class="checkbox-line"><input id="vision-consent" type="checkbox">我同意將事件圖片送到目前顯示的服務</label><p id="vision-destination" class="field-help">尚未指定圖片接收服務。</p><small>只傳事件的逐貓圖片拼貼，不傳短影片、不呼叫工具。更換服務或模型後需重新同意；停用後不再送出新圖片。</small></div>
+          <div class="vision-consent-box vision-reference-consent">
+            <label class="checkbox-line"><input id="vision-scene-references" type="checkbox">在事件拼貼旁附上已登錄物件的參考拼貼（選用）</label>
+            <p class="field-help">最多取目前來源已啟用的 8 個標記，例如飯碗、水盆、貓砂盆。這些參考裁切與標記名稱會和事件圖片一起傳給目前服務，只協助辨認場景物件，不作為貓咪身分或行為證據。關閉時完全不送出。</p>
+            <label class="checkbox-line"><input id="vision-scene-reference-consent" type="checkbox">我另外同意將上述場景參考裁切與標記名稱送到此服務</label>
+            <small>參考圖片平時只保存在本機。換服務或模型需重新同意；取消勾選「附上參考拼貼」會停止後續送出。</small>
+          </div>
+          <div class="vision-presets" role="group" aria-label="圖片分析品質預設"><span>圖片品質</span><button type="button" data-quality-preset="economy">節省用量</button><button type="button" data-quality-preset="balanced">平衡（預設）</button><button type="button" data-quality-preset="detail">重視細節</button><button type="button" data-quality-preset="balanced" aria-label="還原平衡模式建議值">還原建議值</button></div>
+          <details class="vision-advanced"><summary>進階設定與服務商配額（不確定可先使用預設）</summary>
+            <div class="vision-range-grid">
+              <label>每天最多分析 <output id="vision-daily-value">400 次</output><input id="vision-daily-limit" type="range" min="1" max="500" step="1" value="400"><small>本機安全預算，預設 400 次；不是 Google 官方上限。失敗的已送出請求仍會計入。</small></label>
+              <label>每分鐘最多安排 <output id="vision-rpm-value">12 次</output><input id="vision-rpm-limit" type="range" min="1" max="15" step="1" value="12"><small>預設保留部分空間，降低碰到服務限流的機會。</small></label>
+              <label>額度警告門檻 <output id="vision-warning-value">80%</output><input id="vision-warning-threshold" type="range" min="50" max="95" step="1" value="80"><small>達到此比例時在頁面提醒；不會改動服務商額度。</small></label>
+              <label>{{ term_help('ai_grace', '影片準備後最多多等 AI') }} <output id="vision-grace-value">5 秒</output><input id="vision-grace" type="range" min="0" max="10" step="1" value="5"><small>超過就照常發送原始事件影片，不讓 AI 延遲通知。</small></label>
+              <label>每張拼貼影格數 <output id="vision-frame-count-value">4 張</output><input id="vision-frame-count" type="range" min="2" max="8" step="1" value="4"><small>只選不同時間的逐貓裁切畫面。</small></label>
+              <label>拼貼 JPEG 品質 <output id="vision-jpeg-quality-value">82</output><input id="vision-jpeg-quality" type="range" min="60" max="95" step="1" value="82"><small>提高可能改善細節，也可能增加圖片 Token 與傳輸量。</small></label>
+              <label>圖片解析度<select id="vision-media-resolution" aria-describedby="vision-resolution-help"><option value="auto">自動（預設）</option><option value="low">低（較省用量）</option><option value="medium">中</option><option value="high">高（較多細節）</option></select><small id="vision-resolution-help">Gemini 會依此調整送出的拼貼尺寸；OpenAI 格式相容服務會使用支援的圖片細節欄位。不同服務的效果不一定相同，請先用合成示範圖測試。</small></label>
+              <label>拼貼畫布上限<select id="vision-canvas-size"><option value="1280x960">節省：1280 × 960</option><option value="1536x1024">平衡：1536 × 1024</option><option value="2048x1365">精細：2048 × 1365</option></select><small>控制合成拼貼圖片的本機尺寸；Gemini 選低／中／高時會改用對應尺寸，自動模式才使用此上限。</small></label>
+              <label>相同軌跡分析冷卻 <output id="vision-cooldown-value">關閉</output><input id="vision-cooldown" type="range" min="0" max="3600" step="30" value="0"><small>只略過同一來源、同一事件類型、同一攝影機軌跡的重複雲端分析；其他軌跡（可能是另一隻貓）不會被略過。缺少軌跡依據時不套用冷卻。預設關閉；本機監控、錄影與 Telegram 不受影響。</small></label>
+            </div>
+            <div class="vision-provider-limits"><h5>服務商額度（請從服務商專案頁查看後手動填）</h5><p>這些不是即時同步資料；留 0 代表未知、不作服務商上限推算。</p>
+              <label>服務商每日上限 <input id="vision-provider-daily-limit" type="number" min="0" max="10000000" step="1" value="0"></label>
+              <label>服務商每分鐘請求上限 <input id="vision-provider-rpm-limit" type="number" min="0" max="10000" step="1" value="0"></label>
+              <label>服務商每分鐘 Token 上限 <input id="vision-provider-tpm-limit" type="number" min="0" max="100000000" step="1000" value="0"></label>
+              <label>單次預估 Token <input id="vision-token-estimate" type="number" min="0" max="100000000" step="100" value="0"><small>0 表示用近期實際用量估算；歷史不足且設定 TPM 上限時，為避免超額會先略過。</small></label>
+            </div>
+            <label class="checkbox-line"><input id="vision-timestamps" type="checkbox" checked>拼貼標示觀察時間</label>
+              <label class="checkbox-line"><input id="vision-zones" type="checkbox" checked>附上事件當下已校正的區域資訊</label>
+            <label class="checkbox-line"><input id="vision-json" type="checkbox">服務商文件確認支援 JSON 格式</label>
+          </details>
+          <button class="button" type="submit">保存設定</button>
+          <p id="vision-save-status" class="field-help" role="status" aria-live="polite"></p>
+        </form>
+        <form id="vision-key-form" class="vision-key-form">
+          <label>API Key（服務商要求時才填）<input id="vision-key" type="password" maxlength="4096" autocomplete="new-password" placeholder="輸入後安全保存，不會回顯"><button id="vision-key-toggle" type="button" class="button secondary" aria-pressed="false">顯示金鑰</button></label>
+          <small>金鑰優先存於 Windows 安全憑證庫；背景服務無法使用時，改用 Windows 帳號加密（DPAPI）保存在本機。絕不寫入設定檔、SQLite、瀏覽器儲存或日誌；換電腦需重新輸入。</small>
+          <label class="checkbox-line"><input id="vision-key-confirm" type="checkbox" required>確認修改或清除目前服務的金鑰</label>
+          <div class="actions"><button class="button secondary" type="submit">安全保存金鑰</button><button id="vision-key-clear" class="button secondary" type="button">清除金鑰</button></div>
+        </form>
+      </div>
+      <aside class="vision-card vision-quota-card"><div class="vision-section-heading"><div><h4>今天的用量</h4><p id="vision-reset-note">依本機記錄估算</p></div></div>
+        <div class="vision-quota-metric"><div><span>分析請求</span><strong id="vision-quota-daily">0 / 400</strong></div><progress id="vision-quota-daily-progress" max="100" value="0"></progress><small id="vision-quota-daily-note">尚無使用紀錄。</small></div>
+        <div class="vision-quota-metric"><div><span>最近 1 分鐘請求</span><strong id="vision-quota-rpm">0 / 12</strong></div><progress id="vision-quota-rpm-progress" max="100" value="0"></progress></div>
+        <div class="vision-quota-metric"><div><span>最近 1 分鐘 Token</span><strong id="vision-quota-tpm">尚無資料</strong></div><progress id="vision-quota-tpm-progress" max="100" value="0"></progress><small id="vision-quota-tpm-note">實際值優先；否則分開顯示估算與未知。</small></div>
+        <p class="vision-estimate-note">服務商上限依你手動填寫；MeowKeeper+ 只統計本機這個設定。其他程式共用同一服務專案時，實際剩餘額度可能不同。</p>
+      </aside>
+    </div>
+  </div>
+  <div id="vision-performance-panel" class="vision-tab-panel" role="tabpanel" aria-labelledby="vision-tab-performance" hidden>
+    <div class="vision-performance-heading"><div><h4>分析表現</h4><p>只顯示本機 SQLite 已記錄的呼叫，不補造或推算成功紀錄。</p></div><div class="vision-range-selector" role="group" aria-label="用量時間範圍"><button type="button" data-vision-hours="1">1 小時</button><button type="button" data-vision-hours="24" aria-pressed="true">24 小時</button><button type="button" data-vision-hours="168">7 天</button><button type="button" data-vision-hours="720">30 天</button></div></div>
+    <div class="vision-performance-kpis"><article><span>分析請求</span><strong id="vision-perf-requests">—</strong></article><article><span>成功比例</span><strong id="vision-perf-success">—</strong></article><article><span>平均回應</span><strong id="vision-perf-mean">—</strong></article><article><span>P95 回應</span><strong id="vision-perf-p95">—</strong><small>P95 是 95% 請求不超過的時間</small></article><article><span>平均每次 Input Tokens</span><strong id="vision-perf-input">—</strong></article><article><span>本日 Token 用量</span><strong id="vision-perf-today-tokens">—</strong></article><article><span>估算／未知</span><strong id="vision-perf-estimated">—</strong></article><article><span>額度略過</span><strong id="vision-perf-skipped">—</strong></article><article><span>逾時</span><strong id="vision-perf-timeouts">—</strong></article></div>
+    <div class="vision-chart-grid"><figure class="vision-chart-card"><figcaption>呼叫與成功情況</figcaption><div id="vision-request-chart" class="vision-bar-chart" role="img" aria-label="各時間區段的分析請求數"></div></figure><figure class="vision-chart-card"><figcaption>Token 使用趨勢</figcaption><div id="vision-token-chart" class="vision-bar-chart" role="img" aria-label="各時間區段的實際與估算 Token"></div></figure><figure class="vision-chart-card"><figcaption>API 平均回應時間</figcaption><div id="vision-latency-chart" class="vision-bar-chart" role="img" aria-label="各時間區段的 API 平均回應時間"></div></figure><figure class="vision-chart-card"><figcaption>因預算或排程略過</figcaption><div id="vision-skipped-chart" class="vision-bar-chart" role="img" aria-label="各時間區段因額度或排程略過的事件數"></div></figure></div>
+    <div class="vision-table-wrap"><h5>模型使用比例（本機紀錄）</h5><div id="vision-model-usage" class="vision-model-usage"><p class="vision-empty">尚無使用紀錄。</p></div></div>
+    <div class="vision-table-wrap">
+      <h5>分析紀錄與搜尋</h5>
+      <p class="field-help">依選擇的時間範圍逐頁載入本機紀錄。搜尋與篩選只套用已載入的資料；按「載入更多」可查較舊紀錄。</p>
+      <div class="vision-record-filters" role="search" aria-label="篩選 AI 分析紀錄">
+        <label>搜尋紀錄<input id="vision-record-search" type="search" maxlength="120" placeholder="模型、事件、貓名或動作"></label>
+        <label>分析結果<select id="vision-record-status"><option value="all">全部</option><option value="completed">分析完成</option><option value="attention">未完成／略過</option></select></label>
+        <label>身分紀錄<select id="vision-record-identity"><option value="all">全部</option><option value="identified">已有身分紀錄</option><option value="unknown">尚未確認</option></select></label>
+        <label>Telegram 回條<select id="vision-record-telegram"><option value="all">全部</option><option value="accepted">有成功回條</option><option value="failed">未成功／失敗</option><option value="none">沒有傳送回條</option></select></label>
+      </div>
+      <p id="vision-record-count" class="vision-record-count" aria-live="polite">尚未載入紀錄。</p>
+      <p id="vision-usage-empty" class="vision-empty">尚無使用紀錄。</p>
+      <table id="vision-usage-table"><thead><tr><th>時間</th><th>模型</th><th>結果</th><th>HTTP</th><th>耗時</th><th>Input／Output Tokens</th><th>請求送出</th><th>事件摘要</th><th>細節</th></tr></thead><tbody id="vision-usage-rows"></tbody></table>
+      <button id="vision-usage-more" class="button secondary vision-more-button" type="button" hidden>載入更多</button>
+    </div>
+  </div>
+  <p id="vision-message" role="status" class="vision-message">正在讀取設定…</p>
+  <p id="vision-policy-status" class="field-help">請求防護狀態尚未取得。</p>
+  <p id="vision-capabilities" class="field-help">尚未讀取服務能力。</p>
+  <p class="vision-safety-note">AI 候選標籤不是已確認的寵物身分。API 逾時、錯誤或額度用完時，系統會略過雲端分析；本機監控、錄影、事件保存與 Telegram 原始影片通知繼續運作。</p>
+  <p class="field-help"><a href="/dashboard#home-semantic-summary">查看背景分析狀態與取消操作</a>。取消只影響 AI 分析，不會停止本機監控、錄影或 Telegram 通知。啟用狀態與圖片品質變更需重啟 Host 套用。</p>
+</section>
+<script src="/static/js/vision-settings.js?v={{ release_info.cache_key }}" defer></script>

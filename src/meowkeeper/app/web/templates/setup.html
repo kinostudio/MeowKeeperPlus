@@ -1,0 +1,77 @@
+<!doctype html>
+{% from '_icons.html' import icon %}
+<html lang="zh-Hant">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><link rel="stylesheet" href="/static/style.css"><title>首次設定｜喵喵守護者+</title></head>
+<body>
+<link rel="stylesheet" href="/static/css/experience.css?v=20261002">
+<link rel="stylesheet" href="/static/css/redesign.css">
+<main class="content narrow">
+  <section class="panel">
+    <p class="eyebrow">MeowKeeper+ — Local AI Pet Guardian</p>
+    <h1>喵喵守護者+ 首次設定</h1>
+    <p>建立這台電腦唯一的本機管理者帳號，之後用它登入控制台。密碼至少 12 個字元，不必與小米或 Telegram 相同；系統不會保存可讀取的密碼原文。</p>
+    <h2>完成後</h2>
+    <section aria-label="新手啟用流程" class="onboarding-flow">
+      <article><span class="feature-mark">{{ icon('account') }}</span><h3>1 · 註冊儀表板</h3><p>在下方建立本機管理者，之後登入此 Dashboard。這不是小米或 Telegram 的帳號。</p></article>
+      <article><span class="feature-mark">{{ icon('camera') }}</span><h3>2 · 綁定攝影機</h3><p>登入後到「來源與攝影機」。選小米、RTSP 或 YouTube，保存並啟動監控；看到有效新影格才算接通。</p></article>
+      <article><span class="feature-mark">{{ icon('send') }}</span><h3>3 · 讓手機和 Apple Watch 收到貓咪影片</h3><p>到「通知設定」，依引導建立 Bot、傳送 /start、安全保存收件者，再啟用通知並發送測試。手機收到測試，才算設定完成。家中偵測到貓咪時，喵喵守護者+ 會把事件影片傳到 Telegram；Apple Watch 可直接收到並播放。上班不方便拿手機時，也能從手錶快速查看事件影片、關心家中貓咪。這是事件影片，不是持續直播。</p></article>
+    </section>
+    <p class="field-help">基本流程：註冊 → 接通畫面 → 驗證通知。停止監控會停止影音與 AI；只關閉網頁不會停止背景守護。</p>
+    <details class="help-drawer"><summary>可選功能：認識貓咪與遠端存取</summary><div class="onboarding-flow">
+      <article><span class="feature-mark">{{ icon('pet') }}</span><h3>寵物登錄（可選）</h3><p>在「寵物檔案」新增顯示名稱與清楚參考照片，再建立身分特徵。身分與行為仍是實驗性候選；未登錄也能偵測貓咪。</p></article>
+      <article><span class="feature-mark">{{ icon('shield') }}</span><h3>人在外面用手機看家（進階、可選）</h3><p>MeowKeeper+ 以本機運作為核心，預設不會把監控服務公開到網際網路。在家中主機和手機安裝 <a href="https://tailscale.com/download" target="_blank" rel="noopener noreferrer">官方 Tailscale</a>，並登入同一個私人網路；主機保持開機後，到「連線與安全」檢查遠端網址。人在外面即可透過加密的私人連線安全開啟家中即時畫面和控制介面。Tailscale 會嘗試點對點直連，若網路限制則可能使用加密中繼；兩種都不會開放公網。可操作功能依攝影機來源支援而定。</p></article>
+    </div></details>
+    <ol>
+      <li>使用剛建立的管理者帳號登入。</li>
+      <li>到「設定 → 來源與攝影機」加入 RTSP 或 YouTube 來源；小米攝影機可使用專用設定精靈。</li>
+      <li>到「設定 → Telegram」設定通知。</li>
+    </ol>
+    <p class="muted">請只在本機 Dashboard 設定 RTSP 密碼與 Telegram Bot Token；不要把密碼、Token 或攝影機網址貼到 Codex 或其他聊天。</p>
+    <form id="setup-form" class="login-form">
+      <label>管理者帳號<input id="setup-username" autocomplete="username" required minlength="3" maxlength="80"></label>
+      <label>密碼<input id="setup-password" type="password" autocomplete="new-password" required minlength="12"></label>
+      <label>再次輸入密碼<input id="setup-confirm" type="password" autocomplete="new-password" required minlength="12"></label>
+      <button id="setup-submit" class="button" type="submit">建立管理者</button>
+    </form>
+    <p id="setup-message" class="muted" role="status" aria-live="polite" aria-atomic="true"></p>
+  </section>
+</main>
+<script>
+const setupToken = {{ setup_token|tojson }};
+document.getElementById('setup-form').addEventListener('submit', async (event) => {
+  event.preventDefault();
+  const message = document.getElementById('setup-message');
+  const submit = document.getElementById('setup-submit');
+  const password = document.getElementById('setup-password').value;
+  if (password !== document.getElementById('setup-confirm').value) {
+    message.textContent = '兩次密碼不一致，請重新確認。';
+    document.getElementById('setup-confirm').focus();
+    return;
+  }
+  submit.disabled = true;
+  submit.textContent = '正在建立…';
+  message.textContent = '正在安全地建立本機管理者…';
+  try {
+    const response = await fetch('/api/v1/auth/setup', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json', 'X-MeowKeeper-CSRF': setupToken},
+      body: JSON.stringify({username: document.getElementById('setup-username').value, password, setup_token: setupToken})
+    });
+    if (response.ok) {
+      message.textContent = '管理者已建立，正在前往登入頁…';
+      window.location.href = '/login';
+      return;
+    }
+    message.textContent = response.status === 409
+      ? '本機管理者已建立，請前往登入頁。'
+      : '建立失敗。請確認帳號與密碼格式後重試；若服務未連線，請稍後再試。';
+    if (response.status === 409) window.location.href = '/login';
+  } catch (_error) {
+    message.textContent = '目前無法連線到 Dashboard。請確認服務仍在執行後重試。';
+  } finally {
+    submit.disabled = false;
+    submit.textContent = '建立管理者';
+  }
+});
+</script>
+</body></html>

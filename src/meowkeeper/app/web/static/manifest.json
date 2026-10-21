@@ -1,0 +1,9 @@
+{
+  "name": "喵喵守護者+",
+  "short_name": "MeowKeeper+",
+  "start_url": "/",
+  "display": "standalone",
+  "theme_color": "#18263d",
+  "background_color": "#f4f7fb",
+  "icons": []
+}
