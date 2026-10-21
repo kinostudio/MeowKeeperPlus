@@ -33,4 +33,6 @@ Windows 舊中繼拒絕未授權 POST 時先有界讀取本文，避免未讀取
 
 四個指定模組原先的63項測試不代表全專案驗收。本次另執行完整 unittest、故障回歸門檻、Ruff、compileall 及 JavaScript 執行測試。
 
+本次公開來源覆核：完整 unittest 987項通過、無失敗或略過；其中明確啟用合成 FFmpeg/go2rtc loopback 影音。故障回歸門檻121項、7組 JavaScript runtime、Ruff與compileall均通過。此為開發環境程式回歸，不是家庭實機驗收；原始日誌與個別設備資料不公開。
+
 本次沒有建置 Windows 發布包、安裝或重啟正式 Host，也沒有進行真實攝影機、GPU、Telegram 或長時間硬體驗收；隔離合成影音不能充當實機證據。測試摘要由本次合併審查與交接 manifest 的固定提交關聯，原始日誌留在本機。
