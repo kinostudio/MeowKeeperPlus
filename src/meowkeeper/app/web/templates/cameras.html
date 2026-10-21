@@ -1,0 +1,19 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="content-heading"><div><p class="eyebrow">來源管理</p><h2>攝影機</h2></div></div>
+<section class="panel">
+  <p>MeowKeeper+ 只維持一條本地影音 ingest；瀏覽器不會直接連接小米雲端或攝影機。</p>
+  <p><a class="button" href="/cameras/xiaomi/setup">設定小米 Mi Home 攝影機</a></p>
+  <p id="camera-summary" class="muted">正在讀取來源狀態…</p>
+</section>
+<script>
+(async function () {
+  const target = document.getElementById("camera-summary");
+  try {
+    const response = await fetch("/api/v1/cameras", {headers: {Accept: "application/json"}});
+    const data = await response.json();
+    target.textContent = `目前裝置 ${data.items?.length || 0} 台；設定階段：${data.setup?.setup_stage || "not_installed"}`;
+  } catch (_error) { target.textContent = "目前需要登入後才能讀取攝影機狀態。"; }
+})();
+</script>
+{% endblock %}

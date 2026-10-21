@@ -1,0 +1,23 @@
+{
+  "schema": "meowkeeper-design-reference-v1",
+  "basis": "experience.css observed values plus explicitly proposed design scales",
+  "colors_existing": {
+    "canvas": "#F5F0E7", "panel": "#FFFDF8", "text": "#392E25",
+    "text_secondary": "#66584B", "border": "#D9CBB9", "accent": "#735338",
+    "topbar": "#493728", "sidebar": "#EEE5D7", "success": "#536647",
+    "warning": "#80551C", "error": "#9B4839", "focus": "#AA6828"
+  },
+  "geometry_existing_px": {"sidebar": 222, "topbar_min_height": 88, "content_max_width": 1440,
+    "panel_radius": 16, "button_radius": 9, "input_radius": 8, "button_min_height": 44,
+    "input_min_height": 46},
+  "proposed_spacing_px": [4, 8, 12, 16, 24, 32, 40, 48, 64],
+  "proposed_type_px": {"caption": 12, "body_small": 14, "body": 16, "section": 20, "page": 28, "hero": 36},
+  "proposed_frames_px": [360, 390, 768, 1280, 1440],
+  "font_design": "Noto Sans TC",
+  "font_runtime_existing": ["Segoe UI", "Microsoft JhengHei", "Noto Sans TC", "sans-serif"],
+  "states": ["unknown", "loading", "ready", "streaming", "reconnecting", "offline", "disabled",
+    "unsupported", "failed", "stale", "experimental", "saved_pending_apply"],
+  "notes": ["Reference JSON; plugin import compatibility not verified.",
+    "Contrast must be checked for actual foreground/background pairs; no blanket WCAG claim.",
+    "No external runtime font CDN or added camera connections."]
+}

@@ -1,0 +1,14 @@
+{% extends 'base.html' %}
+{% from '_icons.html' import icon %}
+{% block content %}
+<h2>使用教學</h2>
+<p>把喵喵守護者+想成家中的守護員：主機持續看攝影機畫面，發現貓咪後保存事件，再依設定通知你。先完成「接通畫面」和「收到測試通知」兩件事即可開始。</p>
+<section class="onboarding-flow" aria-label="基本啟用流程">
+<article>{{ icon('account') }}<h3>1 · 登入 Dashboard</h3><p>首次使用在本機建立管理者帳號；這與米家、Telegram 帳號不同。日後使用同一帳號登入，不必重新註冊。</p></article>
+<article>{{ icon('camera') }}<h3>2 · 讓主機看到家裡畫面</h3><p>到「來源與攝影機」選攝影機，按保存並啟動監控。回到「即時畫面」，看到畫面持續更新才算接通；只看到攝影機名稱不代表已連上。</p><a class="button secondary" href="/settings/source">設定來源</a></article>
+<article>{{ icon('send') }}<h3>3 · 讓手機和 Apple Watch 收到貓咪影片</h3><p>在 Telegram 對 Bot 傳送 /start，到「通知設定」保存收件者並啟用通知，再傳送測試訊息。手機實際收到測試，才代表通知通了。家中偵測到貓咪時，喵喵守護者+ 會把事件影片傳到 Telegram；Apple Watch 可直接收到並播放。比如你上班不方便拿手機時，也能從手錶看事件影片，快速了解家中貓咪近況。這是偵測後傳送的影片，不是持續直播。</p><a class="button secondary" href="/settings/telegram">通知設定</a></article>
+</section>
+<section class="panel"><h3>可選 · 認識每隻貓</h3><p>如果家裡有多隻貓，可在「寵物檔案」新增名字和清楚照片，再建立身分特徵。這讓系統嘗試分辨個體；目前仍是輔助判斷，結果不確定時會顯示「尚未確認」。</p><a class="button secondary" href="/settings/pets">寵物檔案</a></section>
+<section class="panel"><h3>進階 · 人在外面用手機看家</h3><p>在家中主機和手機安裝官方 Tailscale，並登入同一個私人網路。主機保持開機和監控服務運作後，到「連線與安全」檢查遠端網址；人在外面便可透過 Tailscale 加密連回家中，開啟即時畫面和控制介面。可操作的攝影機功能依來源支援而定。這不是公開網站，不要分享給不在你私人網路中的人。</p><a class="button secondary" href="/settings/tailscale">連線與安全</a></section>
+<p class="field-help">啟動／停止監控控制整條影音與 AI 管線；更多操作中的關閉程式會停止整個應用。設定或報告應先確認你正在操作哪台 Host。</p>
+{% endblock %}

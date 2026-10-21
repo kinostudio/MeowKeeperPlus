@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><link rel="stylesheet" href="/static/style.css"><title>登入｜喵喵守護者+</title></head>
+<body>
+<link rel="stylesheet" href="/static/css/experience.css?v=20261002">
+<main class="content narrow">
+  <section class="panel">
+    <p class="eyebrow">MeowKeeper+ — Local AI Pet Guardian</p>
+    <h1>登入喵喵守護者+</h1>
+    <p class="muted">回到牠的日常。請使用首次設定時建立的管理者帳號；這不是小米或 Telegram 帳號。</p>
+    <form id="login-page-form" class="login-form">
+      <label>管理者帳號<input id="login-page-username" autocomplete="username" required></label>
+      <label>管理者密碼<input id="login-page-password" type="password" autocomplete="current-password" required></label>
+      <button class="button" type="submit">登入</button>
+    </form>
+    <p id="login-page-message" class="muted" role="status" aria-live="polite"></p>
+  </section>
+</main>
+<script>
+document.getElementById('login-page-form').addEventListener('submit', async (event) => {
+  event.preventDefault();
+  const button = event.currentTarget.querySelector('button');
+  const message = document.getElementById('login-page-message');
+  button.disabled = true; message.textContent = '正在登入…';
+  try {
+    const response = await fetch('/api/v1/auth/login', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({username:document.getElementById('login-page-username').value,password:document.getElementById('login-page-password').value})});
+    if (response.ok) { window.location.href='/dashboard'; }
+    else { message.textContent = response.status === 429 ? '登入嘗試較頻繁，請稍後再試。' : response.status >= 500 ? '服務暫時無法處理登入，請稍後再試。' : '帳號或密碼不正確，請確認使用的是本機管理者帳號。'; }
+  } catch (_) { message.textContent = '目前無法連線到服務，請確認喵喵守護者+ 已啟動。'; }
+  finally { button.disabled = false; }
+});
+</script>
+</body></html>

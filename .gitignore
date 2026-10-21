@@ -1,0 +1,61 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyd
+*.so
+.Python
+.venv/
+venv/
+env/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+htmlcov/
+.coverage
+coverage.xml
+dist/
+build/
+runtime/
+vendor/javascript/
+*.egg-info/
+
+# Secrets and local configuration
+.env
+.env.*
+!.env.example
+config.json
+config.local.json
+*.secrets.json
+
+# Runtime data and downloaded models
+data/
+logs/
+recordings/
+snapshots/
+models/
+vendor/
+*.dpapi
+*.pem
+!configs/update-public.pem
+*.key
+*.pfx
+*.p12
+*.zip
+.argon-*
+ARGON_UNCOMMITTED.diff
+HANDOFF_TO_CODEX*
+*.db
+*.db-shm
+*.db-wal
+*.sqlite
+*.sqlite3
+
+# IDE and OS
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# Phase 0 local reports
+reports/

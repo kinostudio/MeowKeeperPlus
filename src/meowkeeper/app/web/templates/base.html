@@ -1,0 +1,76 @@
+<!doctype html>
+{% from '_icons.html' import icon %}
+{% from '_term_help.html' import term_help with context %}
+{% if release_info is not defined %}{% set release_info = {"version": "版本未驗證", "date": "尚未提供", "mode": "未知執行方式", "cache_key": "redesign-20261012"} %}{% endif %}
+{% set ui_cache_key = release_info.cache_key ~ "-ui6" %}
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="stylesheet" href="/static/style.css?v={{ ui_cache_key }}">
+  <link rel="stylesheet" href="/static/css/experience.css?v={{ ui_cache_key }}">
+  <link rel="stylesheet" href="/static/css/redesign.css?v={{ ui_cache_key }}">
+  <link rel="stylesheet" href="/static/css/vision.css?v={{ ui_cache_key }}">
+  <link rel="stylesheet" href="/static/css/term-help.css?v={{ ui_cache_key }}">
+  <link rel="stylesheet" href="/static/css/monitor.css?v={{ ui_cache_key }}">
+  <meta name="theme-color" content="#F4EDE3">
+  <script src="/static/js/request-id.js?v={{ ui_cache_key }}" defer></script>
+  <script src="/static/js/mse-player.js?v={{ ui_cache_key }}" defer></script>
+  <script src="/static/js/rtc-player.js?v={{ ui_cache_key }}" defer></script>
+  <script src="/static/js/ai-overlay.js?v={{ ui_cache_key }}" defer></script>
+  <script src="/static/js/preview-hud.js?v={{ ui_cache_key }}" defer></script>
+  <script src="/static/js/shared-preview.js?v={{ ui_cache_key }}" defer></script>
+  <script src="/static/js/monitor-ui.js?v={{ ui_cache_key }}" defer></script>
+  <script src="/static/js/term-help.js?v={{ ui_cache_key }}" defer></script>
+  <title>{{ page_title }}｜喵喵守護者+</title>
+</head>
+<body>
+  <a class="skip-link" href="#main-content">跳至主要內容</a>
+  {% if preview_banner %}<p class="notice" role="note">{{ preview_banner }}</p>{% endif %}
+  <header class="topbar">
+    <a class="brand" href="/dashboard" aria-label="喵喵守護者+ 總覽">
+      <svg class="brand-mark" viewBox="0 0 48 48" fill="none" aria-hidden="true"><path d="M10 23V9l12 7h4l12-7v14c0 12-6 18-14 18S10 35 10 23Z" stroke="currentColor" stroke-width="2.5" stroke-linejoin="round"/><path d="M17 26h1m12 0h1m-10 6 3 2 3-2" stroke="currentColor" stroke-width="3" stroke-linecap="round"/></svg>
+      <div><p class="eyebrow">MeowKeeper+ — Local AI Pet Guardian</p><h1>喵喵守護者<span>+</span></h1></div>
+    </a>
+    <div class="topbar-actions">
+      <span class="shell-label">本地 AI・安心守護</span>
+      <span class="sr-only" id="monitor-help">停止監控會停止來源接收、AI、環形錄影與新增事件通知；Dashboard 與 Tray 仍可操作。關閉程式則停止整個服務。</span>
+      <span class="sr-only" id="restart-help">重新啟動服務會短暫中斷監控，並載入已保存的設定。</span>
+      <button class="button" id="monitor-toggle" type="button" disabled aria-describedby="monitor-help">正在確認監控</button>
+      <details class="service-menu"><summary class="button secondary">更多操作</summary><div class="service-menu-items"><a class="button secondary" href="/help">使用教學</a><button class="button secondary" id="host-restart" type="button" aria-describedby="restart-help">重啟服務</button><button class="button danger" id="host-close" type="button">關閉程式</button></div></details>
+      <button class="button secondary nav-toggle" id="nav-toggle" type="button" aria-controls="primary-nav" aria-expanded="true" hidden>收合選單</button>
+    </div>
+  </header>
+  <p id="service-action-message" class="service-action-message" role="status" aria-live="polite"></p>
+  <div class="layout" id="app-layout">
+    <nav class="sidebar" id="primary-nav" aria-label="主要導覽">
+      <div class="sidebar-header">
+        <p class="nav-label">守護日常</p>
+        <button class="sidebar-collapse-btn" id="sidebar-collapse" type="button" aria-label="收合側邊導覽列" aria-expanded="true" title="收合／展開側邊導覽列"><span aria-hidden="true">«</span></button>
+      </div>
+      <a href="/" title="總覽" class="{% if page_path in ['/', '/dashboard'] %}active{% endif %}">{{ icon('overview') }}<span class="nav-link-text">總覽</span></a>
+      <a href="/live" title="即時畫面" class="{% if page_path == '/live' %}active{% endif %}">{{ icon('camera') }}<span class="nav-link-text">即時畫面</span></a>
+      <a href="/events" title="事件與回報" class="{% if page_path == '/events' %}active{% endif %}">{{ icon('review') }}<span class="nav-link-text">事件與回報</span></a>
+      <a href="/analytics" title="趨勢分析" class="{% if page_path == '/analytics' %}active{% endif %}">{{ icon('chart') }}<span class="nav-link-text">趨勢分析</span></a>
+      <p class="nav-label">管理 · 設定</p>
+      <a href="/settings/source" title="來源與攝影機" class="{% if page_path in ['/settings/source', '/cameras', '/cameras/xiaomi/setup'] %}active{% endif %}">{{ icon('camera') }}<span class="nav-link-text">來源與攝影機</span></a>
+      <a href="/settings/pets" title="寵物檔案" class="{% if page_path == '/settings/pets' %}active{% endif %}">{{ icon('pet') }}<span class="nav-link-text">寵物檔案</span></a>
+      <a href="/settings/telegram" title="通知設定" class="{% if page_path == '/settings/telegram' %}active{% endif %}">{{ icon('send') }}<span class="nav-link-text">通知設定</span></a>
+      <p class="nav-label">系統 · 維護</p>
+      <a href="/settings/ai" title="AI 與錄影" class="{% if page_path == '/settings/ai' %}active{% endif %}">{{ icon('brain') }}<span class="nav-link-text">AI 與錄影</span></a>
+      <a href="/settings/tailscale" title="連線與安全" class="{% if page_path == '/settings/tailscale' %}active{% endif %}">{{ icon('shield') }}<span class="nav-link-text">連線與安全</span></a>
+      <a href="/diagnostics" title="維護中心" class="{% if page_path == '/diagnostics' %}active{% endif %}">{{ icon('tools') }}<span class="nav-link-text">維護中心</span></a>
+      <div class="nav-subpages" role="group" aria-label="維護工具">
+      <a href="/logs" title="日誌" class="{% if page_path == '/logs' %}active{% endif %}">{{ icon('review') }}<span class="nav-link-text">日誌</span></a>
+      <a href="/settings/advanced" title="進階設定" class="{% if page_path == '/settings/advanced' %}active{% endif %}">{{ icon('tools') }}<span class="nav-link-text">進階設定</span></a>
+      </div>
+    </nav>
+    <main class="content" id="main-content" tabindex="-1">
+      {% block content %}{% endblock %}
+      <footer class="footer"><span>MeowKeeper+ · 本地 AI 全天候守護每一隻貓咪</span><span id="release-version">{{ release_info.version }} · {{ release_info.date }} · {{ release_info.mode }}</span><span>關閉網頁，背景服務仍會繼續執行。</span></footer>
+    </main>
+  </div>
+  <script src="/static/app.js?v={{ ui_cache_key }}" defer></script>
+  <script src="/static/js/experience.js?v={{ ui_cache_key }}" defer></script>
+</body>
+</html>

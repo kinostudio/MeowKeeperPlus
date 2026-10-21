@@ -1,0 +1,10 @@
+<details id="home-ptz" class="help-drawer">
+  <summary>PTZ 微調／隱私模式</summary>
+  <p class="field-help">只控制目前接入的單一攝影機；每次方向操作短步移動後送出停止，不新增影音連線。位置與隱私設定請到即時畫面確認。</p>
+  <div class="actions" id="home-ptz-buttons">
+    {% for direction, name in [('up','向上'),('down','向下'),('left','向左'),('right','向右')] %}<button class="button secondary" type="button" data-home-direction="{{ direction }}" aria-label="{{ name }}短步移動" disabled>{{ name }}</button>{% endfor %}
+    <button class="button danger" id="home-ptz-stop" type="button" disabled>停止移動</button>
+    <a href="/live" class="button secondary">位置讀回與隱私設定</a>
+  </div>
+  <p id="home-ptz-result" role="status" aria-live="polite">展開後確認目前攝影機與控制能力。</p>
+</details>

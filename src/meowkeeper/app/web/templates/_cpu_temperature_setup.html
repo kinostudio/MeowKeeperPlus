@@ -1,0 +1,14 @@
+<details id="cpu-temperature-setup" class="panel">
+  <summary>啟用／檢查 CPU 溫度監測</summary>
+  <p>想知道電腦是否過熱？這是選用功能；尚未啟用不影響攝影機、錄影或 Telegram。</p>
+  <ol>
+    <li>在<strong>執行監控的那台電腦</strong>開啟本機儀表板，按下方按鈕。</li>
+    <li>親自確認提示、Windows 管理員授權與官方 PawnIO 安裝視窗；只選官方受限版，不選 Unrestricted。</li>
+    <li>完成後按「更新溫度狀態」，等候背景採樣。只有取得真正感測值才算成功；官方若要求重新開機，請自行安排。</li>
+  </ol>
+  <p>會從官方來源下載並驗證 PawnIO 2.2.0，建立僅讀 CPU 的受限 SYSTEM 測溫工作；不更改 Host 帳號、不自動重開機，也不會自動安裝。</p>
+  <button id="cpu-setup-launch" type="button" class="button" disabled>開啟 CPU 測溫啟用視窗</button>
+  <p id="cpu-setup-message" class="field-help" role="status">正在確認此主機能否開啟授權視窗…</p>
+  <p>從手機或另一台電腦觀看時，無法在這裡啟動安裝。請到監控主機操作；也可在程式主資料夾雙擊 <code>Enable-CPU-Temperature.cmd</code>，不需輸入命令。</p>
+</details>
+<script src="/static/js/cpu-temperature-setup.js?v={{ release_info.cache_key }}" defer></script>

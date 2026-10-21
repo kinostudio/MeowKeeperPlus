@@ -1,0 +1,480 @@
+{% extends "base.html" %}
+{% from "_help.html" import hint %}
+{% block content %}
+<div class="content-heading"><div><p class="eyebrow">設定</p><h2>{{ page_title }}</h2></div></div>
+{% if page_path == '/settings/source' %}
+<section class="panel">
+  <div class="panel-heading"><h3>單一影音來源</h3><span id="source-runtime-status" class="muted">狀態讀取中…</span></div>
+  <p>先選擇要看的來源、填入網址，再按「保存後開始監控」。小米攝影機請使用下方專用設定入口。預覽、辨識與錄影會共用同一個來源。</p>
+  <form id="source-config-form" class="settings-grid">
+    <label>來源類型
+      <select id="source-type" required>
+        <option value="youtube">YouTube 公開影片／直播</option>
+        <option value="rtsp">RTSP 攝影機</option>
+        <option value="video">本機測試影片</option>
+        <option value="mock">示範測試（Mock，沒有真實影像）</option>
+      </select>
+      {{ hint('source-type', 'RTSP 是攝影機的串流連線；YouTube 可使用影片或直播頁面網址。示範測試只檢查流程，不會顯示攝影機畫面。') }}
+    </label>
+    <label id="source-url-label">來源頁面網址／路徑
+      <input id="source-url" type="text" maxlength="2048" autocomplete="off" placeholder="https://www.youtube.com/watch?v=…">
+      {{ hint('source-url', 'YouTube 請貼上分享網址。RTSP 請向攝影機說明書確認路徑；此欄不接受含帳號或密碼的網址。本機路徑是執行服務的電腦上的檔案。') }}
+    </label>
+    <label id="youtube-height-label">YouTube 最高畫質
+      <select id="youtube-height"><option>360</option><option>480</option><option selected>720</option><option>1080</option></select>
+      {{ hint('youtube-height', '數字是畫面高度（像素）。720 通常兼顧清晰與負載；網路慢可選 360 或 480。實際畫質也受來源提供的格式限制。') }}
+    </label>
+    <label class="checkbox-line"><input id="youtube-video" type="checkbox" checked> YouTube 影像</label>
+    <label class="checkbox-line"><input id="youtube-audio" type="checkbox" aria-describedby="youtube-options-help"> YouTube 音訊（預設關閉）</label>
+    <p id="youtube-options-help" class="field-help field-note">若要分析畫面，請保留影像勾選。保留音訊不等於啟用叫聲辨識；目前不要以此選項判定具備聲音 AI。</p>
+    <div class="actions settings-actions">
+      <button class="button" type="submit">保存來源設定</button>
+      <button class="button secondary" id="start-source" type="button">保存後開始監控</button>
+      <button class="button secondary" id="stop-source" type="button">停止監控</button>
+    </div>
+  </form>
+  <p id="source-message" class="muted" role="status"></p>
+  <p class="muted">YouTube 只保存原始頁面網址。需要帳密的 RTSP 目前無法由此頁安全設定，需由維護者處理；小米請使用下方精靈。受私人、會員、年齡或版權保護的 YouTube 內容目前不支援。</p>
+</section>
+<section class="panel">
+  <div class="panel-heading"><h3>使用小米攝影機？從這裡開始</h3><span class="muted">部分型號仍在驗證中</span></div>
+  <p>設定精靈會帶你完成小米登入、載入裝置、測試畫面與接入監控。裝置出現在清單後，仍需取得真實畫面才能確認可用。</p>
+  <a class="button secondary" href="/cameras/xiaomi/setup">開啟小米攝影機設定</a>
+</section>
+<script src="/static/js/source.js" defer></script>
+{% elif page_path == '/settings/ai' %}
+<section class="panel">
+  <div class="panel-heading"><h3>AI 與行為參數</h3><span id="ai-runtime-status" class="muted">設定讀取中…</span></div>
+    <div id="ai-adaptive-status" class="muted" role="status" aria-live="polite">正在讀取 AI 負載與回退狀態…</div>
+    <p class="field-help">長期負載目標 40%，不是瞬間硬限制。CPU：85°C 持續降級／95°C 暫停；GPU：80°C 持續降級／85°C 暫停。這是保守初始值，尚未逐硬體驗收；讀不到溫度不視為低溫。AI 降級不修改攝影機畫質。</p>
+    <button id="ai-adaptive-retry" class="button secondary" type="button">依已保存的分析上限重新嘗試 AI</button>
+    <p class="field-help">降階後不會自動提高負載。確認溫度與記憶體正常後，可按此重試原本的解析度／FPS 上限；這不保證達到設定 FPS，若處理仍太慢或持續超載，保護機制會再次降階。</p>
+  <p>第一次使用可保留預設值。若誤報太多，再調整信心門檻與通知間隔。保存後，請按上方「重新啟動服務」套用；監控會短暫中斷。</p>
+  <form id="ai-settings-form" class="settings-grid">
+    <fieldset class="fieldset-group settings-grid"><legend>推論引擎與分析畫質</legend>
+    <label>{{ term_help('execution', 'AI 運算裝置') }}
+      <select id="ai-inference-device">
+        <option value="auto">自動（NVIDIA → Intel → CPU）</option>
+        <option value="cpu">CPU 處理器</option>
+        <option value="intel:gpu">GPU 內顯（Intel OpenVINO）</option>
+        <option value="onnx:cuda">GPU 外顯（NVIDIA CUDA，例如 MX250）</option>
+      </select>
+      {{ hint('ai-inference-device', '保存後重新啟動服務套用，下次啟動沿用。指定 GPU 不可用時降級 CPU，不偷偷改用另一張 GPU；請以上方實際後端為準。GPU 只加速模型，解碼、縮放與通知仍需 CPU。選擇 CPU 不會刪除內附 GPU 函式庫，也不會自動修改驅動。') }}
+    </label>
+    <label>分析模式
+      <select id="ai-analyzer-mode"><option value="yolo">基本找貓（預設）</option><option value="v02">V0.2 追蹤與規則行為（實驗性）</option></select>
+      <span id="ai-analyzer-note" class="muted">基本找貓用於貓咪事件；實驗性模式的身分與行為尚未完成家庭準確率驗收。更改需重新啟動服務。</span>
+    </label>
+    <label>YOLO 貓咪信心門檻
+      <input id="ai-confidence-threshold" type="number" min="0" max="1" step="0.01" required>
+      {{ hint('ai-confidence-threshold', '建議先用 0.45。提高可減少部分誤報，但可能漏掉遠處或被遮住的貓；降低會更敏感。這是模型分數門檻，0.45 不代表 45% 準確率。') }}
+    </label>
+    <label>影像分析 FPS（最高 5）
+      <input id="ai-analysis-fps" type="number" min="1" max="5" step="1" required>
+      {{ hint('ai-analysis-fps', '每秒交給 AI 分析的畫面張數。5 較容易捕捉動作；電腦負載高可降低。這不會改變攝影機原始錄影幀率。') }}
+      </label>
+      <label>AI 分析解析度（長邊）
+        <select id="ai-analysis-width"><option value="640">640（最低負載，建議）</option><option value="960">960</option><option value="1280">1280</option><option value="1920">1920（最高負載）</option></select>
+        {{ hint('ai-analysis-width', '這是模型分析畫面大小，不會改攝影機或錄影解析度。來源像素不足時不會放大補細節。尺寸越大越可能看清小目標，也越耗 CPU／GPU；遇到負載會逐級降回 640。變更需重新啟動 Host。') }}
+      </label>
+    </fieldset>
+    <fieldset class="fieldset-group settings-grid"><legend>行為採樣與共享影格寬度</legend>
+    <label>行為採樣 FPS（實驗性）
+      <input id="ai-activity-fps" type="number" min="1" max="5" step="1" required>
+      {{ hint('ai-activity-fps', '實驗性行為分析每秒取樣的張數；基本找貓模式不使用這項行為設定。先保留預設值。') }}
+    </label>
+    <label>JPEG／AI 共用影格寬度上限
+      <select id="ai-preview-frame-width" aria-describedby="ai-preview-frame-width-help"><option value="640">640（省資源）</option><option value="1280">1280（720p 級）</option><option value="1920">1920（預設，保留 1080p）</option></select>
+      {{ hint('ai-preview-frame-width', '這是共享 JPEG 分支的軟體上限，不是攝影機、錄影或流暢影片的最高畫質。橫向 16:9 的 1920 寬對應 1080p；MSE 原碼播放仍可能解碼 4K。共用影格寬度取此項、AI 需求及身分需求的最大值，不新增攝影機連線。較大會增加影格記憶體與 JPEG 處理成本；來源不足不會補細節。保存後重啟 Host 套用。') }}
+    </label>
+    <label>身分裁切需要的共享影格寬度（實驗性）
+      <select id="ai-identity-frame-width" aria-describedby="ai-identity-frame-width-help"><option value="640">640（較省資源）</option><option value="960">960（折衷）</option><option value="1280">1280（預設，較清晰）</option></select>
+      {{ hint('ai-identity-frame-width', '只在 V0.2 模式保留較清晰的共享影格，供貓咪身分裁切。提高會增加解碼後縮放與 JPEG 處理負載，不增加攝影機連線。若來源本來只有低畫質，不會放大補細節；請先在即時畫面選擇已驗證的較高畫質。貓咪裁切不足 96×96 時仍跳過身分辨識，不停止錄影。保存後重新啟動服務套用。') }}
+    </label>
+    </fieldset>
+    <fieldset class="fieldset-group settings-grid"><legend>事件錄影與環形快取</legend>
+    <label>同類事件冷卻（秒）
+      <input id="ai-cooldown-seconds" type="number" min="0" max="86400" step="1" required>
+      {{ hint('ai-cooldown-seconds', '同類告警送出後，多久才允許下一次。180 秒就是 3 分鐘，可避免連續洗版；設為 0 可能產生大量通知。') }}
+    </label>
+    <label>事件預錄（秒）
+      <input id="ai-event-pre-seconds" type="number" min="0" max="120" step="1" required>
+      {{ hint('ai-event-pre-seconds', '保留事件發生前幾秒，方便看清楚前因。建議 5 秒；不得超過下方快取時間。剛啟動時可能尚未累積足夠畫面。') }}
+    </label>
+    <label>事件後錄（秒）
+      <input id="ai-event-post-seconds" type="number" min="0" max="180" step="1" required>
+      {{ hint('ai-event-post-seconds', '事件發生後繼續錄幾秒。建議 10 秒；影片會等後錄完成再傳送，時間越長，通知影片越晚到。') }}
+    </label>
+    <label>壓縮環形快取（秒）
+      <input id="ai-retention-seconds" type="number" min="10" max="120" step="1" required>
+      {{ hint('ai-retention-seconds', '循環保留最近多少秒的壓縮影音，舊片段會輪替。建議 60 秒；這不是事件影片保存天數。') }}
+    </label>
+    <label>環形快取上限（MB）
+      <input id="ai-ring-maximum-size-mb" type="number" min="16" max="4096" step="1" required>
+      {{ hint('ai-ring-maximum-size-mb', '暫存影音最多使用多少磁碟空間。建議 512 MB；高畫質來源若先達容量上限，實際可預錄時間可能變短。') }}
+    </label>
+    </fieldset>
+    <div class="actions settings-actions">
+      <button class="button" type="submit">保存 AI／行為設定</button>
+      <button class="button secondary" id="reset-ai-settings" type="button">恢復預設值</button>
+    </div>
+  </form>
+  <p id="ai-message" class="muted" role="status"></p>
+  <p class="muted">YOLO cat-only 與媒體事件參數已接線；寵物身分及家庭行為準確率仍是 experimental，不能把參數保存視為已完成辨識。</p>
+</section>
+<script src="/static/js/ai.js" defer></script>
+{% from '_term_help.html' import term_help with context %}
+{% include '_vision_center.html' %}
+{% if false %}
+<section class="panel" aria-labelledby="vision-title">
+  <h3 id="vision-title">AI 動作分析（選用）{{ term_help('ai_provider') }}</h3>
+  <p>不設定也能正常監控、找貓、錄影和傳送 Telegram 事件影片。啟用後，系統只會把事件圖片送到你選擇的 AI 服務，不會上傳整段影片；分析結果僅供參考，不會自動確認是哪一隻貓。</p>
+  <div class="notice">
+    <strong>設定只要三步</strong>
+    <ol class="setup-steps">
+      <li>選服務商，填服務網址和圖片模型名稱，先保存。</li>
+      <li>若服務要求金鑰，到下方安全保存 API Key。</li>
+      <li>確認圖片送往哪裡，開啟分析、勾選同意，再保存一次。</li>
+    </ol>
+    <span class="field-help">啟用狀態要重新啟動 Host 才會生效；一般監控不受影響。</span>
+  </div>
+  <form id="vision-settings-form" class="settings-grid">
+    <label>AI 服務商<select id="vision-provider" aria-describedby="vision-provider-help"><option value="openai_compatible">OpenAI 格式相容服務</option><option value="gemini">Google Gemini</option></select><span id="vision-provider-help" class="field-help">選擇你準備使用的 AI 服務；可使用支援圖片的雲端或本機服務。</span></label>
+    <label>圖片模型名稱<input id="vision-model" type="text" maxlength="120" autocomplete="off" aria-describedby="vision-model-help"><span id="vision-model-help" class="field-help">照服務商提供的名稱填寫，並確認該模型支援圖片。Gemini 的模型名稱也要放在上方網址中。</span></label>
+    <label class="field-note">服務 API 網址<input id="vision-endpoint" type="url" maxlength="2048" placeholder="複製服務商提供的完整 API 網址" autocomplete="off" aria-describedby="vision-endpoint-help"><span id="vision-endpoint-help" class="field-help">填 API 文件中的圖片服務網址，不是網站首頁或聊天頁面。不要把 API Key 放進網址；HTTP 只允許本機 127.0.0.1。</span></label>
+    <details class="field-note vision-advanced">
+      <summary>網址範例與進階選項（通常不用調整）</summary>
+      <div class="settings-grid">
+        <p id="vision-endpoint-example" class="field-help field-note">OpenAI 格式相容服務：請依服務商文件填入完整的圖片 API 網址，例如結尾為 /v1/chat/completions。</p>
+        <label>影片準備後，多等 AI 幾秒{{ term_help('ai_grace') }}<input id="vision-grace" type="number" min="0" max="10" step="1" value="5" aria-describedby="vision-grace-help"><span id="vision-grace-help" class="field-help">事件影片準備好後，再等 AI 分析的時間；預設 5 秒，範圍 0～10 秒。時間到仍會照常送出影片。</span></label>
+        <label class="checkbox-line"><input id="vision-json" type="checkbox" aria-describedby="vision-json-help">服務商文件確認支援 JSON 格式</label>
+        <p id="vision-json-help" class="field-help field-note">只有服務商明確說支援時才勾選；不確定就保持未勾選。</p>
+        <label>每天最多分析幾次<input id="vision-daily-limit" type="number" min="1" max="10000" step="1" value="100" aria-describedby="vision-daily-limit-help"><span id="vision-daily-limit-help" class="field-help">達上限後暫停 AI 圖片分析；本機監控、錄影和 Telegram 通知照常運作。失敗的請求也會計入次數。</span></label>
+      </div>
+    </details>
+    <label class="checkbox-line"><input id="vision-enabled" type="checkbox">啟用 AI 圖片分析</label>
+    <label class="checkbox-line"><input id="vision-consent" type="checkbox">我同意將事件圖片送到下方顯示的服務</label>
+    <p id="vision-destination" class="field-help field-note">尚未指定服務。送出前請確認服務商的圖片保存與使用規定；換服務網址或模型後，需要重新確認。</p>
+    <p class="field-help field-note">只傳事件圖片，不傳短影片，也不會讓 AI 操作電腦或執行工具。停止送圖不會停止監控；已送出的分析可能仍會完成。</p>
+    <button class="button" type="submit">保存 AI 分析設定</button>
+  </form>
+  <form id="vision-key-form" class="settings-grid">
+    <p class="field-note"><a href="/dashboard#home-semantic-summary">查看背景分析狀態與取消操作</a>。取消只影響 AI 分析，不會停止本機監控、錄影或 Telegram 通知。</p>
+    <label>服務 API Key（服務商要求時才填）<input id="vision-key" type="password" maxlength="4096" autocomplete="new-password" aria-describedby="vision-key-help"><span id="vision-key-help" class="field-help">從服務商取得金鑰後貼在這裡，不要放進網址。保存後不會顯示；不需金鑰的本機服務可略過。</span></label>
+    <label class="checkbox-line"><input id="vision-key-confirm" type="checkbox" required>確認修改目前服務的金鑰</label>
+    <details class="field-note"><summary>換電腦或 Windows 帳號時要注意</summary><p class="field-help">金鑰會用目前 Windows 帳號加密，不能直接搬給另一個帳號；完整備份不包含此金鑰，換電腦後需重新輸入。</p></details>
+    <div class="actions field-note"><button class="button secondary" type="submit">安全保存 API Key</button><button id="vision-key-clear" class="button secondary" type="button">清除已保存的 Key</button></div>
+  </form>
+  <p id="vision-message" role="status">正在讀取設定…</p>
+  <p id="vision-policy-status" class="field-help">請求防護狀態尚未取得。</p>
+  <button class="button secondary" id="vision-health-check" type="button">檢查服務是否連得上（不送圖片）</button>
+  <p id="vision-capabilities" class="field-help">能力尚未取得。</p>
+  <p class="field-help">連線檢查只確認服務回應，不會測試圖片辨識效果。啟用或停用後，需重新啟動 Host 才會套用。</p>
+</section>
+<script src="/static/js/vision-settings.js" defer></script>
+{% endif %}
+<section class="panel" id="cat-feedback-panel">
+  <div class="panel-heading"><h3>貓咪告警人工回饋</h3><span id="cat-feedback-status" class="muted">統計載入中…</span></div>
+  <p>回饋採個人自願參與，預設關閉。每位已授權的 Telegram 使用者可自行傳送 <code>/feedback on</code> 開啟、<code>/feedback off</code> 關閉，或用 <code>/feedback status</code> 查詢；不參與仍會照常收到貓咪告警。參與者的告警會附「是貓咪／不是貓咪」按鈕。回饋目前不會自動改門檻或重新訓練模型。</p>
+  <details><summary>如何閱讀回饋統計？</summary><p class="field-help">Precision 是已發送且已回覆告警中，確認為貓咪的比例。95% Wilson 區間用來表達樣本的不確定性；範圍越寬，越需要更多回饋。這些數據看不到沒發出告警的事件，因此不能代表整體準確率或漏報率。</p></details>
+  <p id="cat-feedback-summary" role="status">需要登入後讀取。</p>
+  <div id="cat-feedback-buckets" class="muted"></div>
+</section>
+<details class="panel" id="scene-registry-panel" open>
+  <summary><strong>場景參考與行為標記（實驗性）</strong></summary>
+  <p>在畫面上直接拖曳圈出飯碗、水盆、貓砂盆等位置，不用輸入座標。也可以上傳參考照片；照片和標記預設只保存在本機。</p>
+  <div id="register-panel-views" class="scene-register-layout">
+    <div class="scene-reference-controls">
+      <div class="scene-reference-current"><img id="scene-current-preview" alt="目前攝影機畫面" hidden><span>目前來源的即時畫面</span></div>
+      <label>這張參考圖的名稱<input id="scene-view-name" maxlength="80" placeholder="例如：飯碗與水盆" autocomplete="off"></label>
+      <label class="checkbox-line"><input id="scene-frame-confirm" type="checkbox">確認即時畫面穩定，並要把這個畫面保存為參考圖</label>
+      <div class="actions">
+        <button class="button" id="scene-save-view" type="button">儲存目前畫面</button>
+        <label class="button secondary scene-file-button" for="scene-reference-file">上傳參考照片</label>
+        <input id="scene-reference-file" type="file" accept="image/jpeg,image/png,image/webp" hidden>
+        <button class="button secondary" id="scene-upload-reference" type="button">保存上傳照片</button>
+        <button class="button secondary" id="scene-views-reload" type="button">重新載入</button>
+      </div>
+      <p class="field-help">支援單張 JPG、PNG 或 WebP，最多 4 MB。上傳圖片會先標示為「未核對」；它仍可作為你選擇的 API 參考，但不會直接啟用行為區域判斷。</p>
+    </div>
+    <div class="scene-object-editor">
+      <label>選擇要編輯的參考圖<select id="scene-view-select"></select></label>
+      <label>圈選方式<select id="scene-shape"><option value="rectangle">拖曳方框</option><option value="polygon">逐點多邊形</option></select></label>
+      <button class="button secondary" id="scene-align-view" type="button">確認背景一致，啟用行為區域</button>
+      <p id="scene-selection-status" class="field-help">先選參考圖，再在圖片上拖曳圈出物件。</p>
+      <canvas id="scene-object-canvas" tabindex="0" role="img" aria-label="在參考畫面上拖曳圈選物件；方向鍵可微調，Escape 可清除選取"></canvas>
+      <div class="scene-hidden-bounds" aria-hidden="true">
+        <input id="scene-object-x" type="hidden" value="0"><input id="scene-object-y" type="hidden" value="0">
+        <input id="scene-object-width" type="hidden" value="0"><input id="scene-object-height" type="hidden" value="0">
+      </div>
+      <div class="field-grid">
+        <label>標記名稱<input id="scene-object-name" maxlength="80" placeholder="例如：客廳飯碗" autocomplete="off"></label>
+        <label>標記用途<select id="scene-object-kind"><option value="food">飯碗／食物區</option><option value="water">水盆／飲水區</option><option value="litter_box">貓砂盆／如廁區</option><option value="bed">睡覺／休息區</option><option value="play_area">玩耍區</option><option value="excluded">隱私／排除區</option></select></label>
+      </div>
+      <details><summary>進階：連結不同參考圖中的同一物件</summary>
+        <label>同一物件<select id="scene-logical-object"><option value="">新增獨立物件</option></select></label>
+        <p class="field-help">例如攝影機轉動後，同一個飯碗在另一個視角出現時，才需要連結；不確定可忽略。</p>
+      </details>
+      <div class="actions">
+        <button class="button secondary" id="scene-new-object" type="button">新增標記</button>
+        <button class="button secondary" id="scene-clear-selection" type="button">清除圈選</button>
+        <button class="button" id="scene-save-object" type="button">保存這個標記</button>
+      </div>
+      <div id="scene-object-list" class="scene-object-list" aria-live="polite"></div>
+      <div class="actions"><button class="button secondary" id="scene-preview-collage" type="button">預覽 API 參考拼貼</button></div>
+      <figure id="scene-collage-figure" hidden><figcaption>僅包含已啟用的物件裁切，預設只在本機產生</figcaption><img id="scene-collage-preview" alt="由已登錄物件組成的本機 API 參考拼貼"></figure>
+      <p id="scene-message" role="status" aria-live="polite"></p>
+      <p class="field-help">拼貼最多取目前來源已啟用的 8 個標記。前往下方「AI 動作分析管理中心」可選擇是否送出這張物件參考拼貼；不勾選就不會送出。</p>
+    </div>
+  </div>
+</details>
+<script src="/static/js/scene-registry.js" defer></script>
+{% elif page_path == '/settings/pets' %}
+<section class="panel">
+  <div class="panel-heading"><h3>寵物參考照片</h3><span id="pets-status" class="muted">資料載入中…</span></div>
+  <p>為每隻貓登錄名稱和清楚照片，讓 AI 建立外觀參考資料、協助{{ term_help('local_identity', '比對事件中的貓咪身分') }}。照片保存在本機，不需要設定{{ term_help('ptz_zone', '攝影機角度或物件位置') }}。</p>
+  <details class="panel"><summary>AI 看圖辨認是哪隻貓（實驗性）</summary>
+    <p>上傳一張只包含單隻貓的清楚 JPG，AI 會拿它和已登錄的參考照片比較，顯示可能的貓名與相似照片。多隻貓請分別比對；這項功能不能判斷照片裡有沒有貓。</p>
+    <form id="pet-compare-form"><label>比對照片（JPG，最多 2 MB）<input id="pet-compare-image" type="file" accept="image/jpeg" required></label><button class="button" type="submit">讓 AI 比對身分</button></form>
+    <img id="pet-compare-preview" alt="本次 AI 比對的貓咪照片" hidden style="max-width:100%;max-height:240px;object-fit:contain">
+    <p id="pet-compare-message" role="status"></p><div id="pet-compare-results" class="cards"></div>
+    <p class="field-help">比對分數不是準確率；不確定時會保留「{{ term_help('unknown', '尚未確認') }}」。這張測試照片不會保存或加入寵物參考照片；新增參考照片後，系統會自動準備 AI 比對資料，不必重新訓練找貓模型。</p>
+  </details><script src="/static/js/pet-comparison.js" defer></script>
+  <p>AI 會從這些照片建立辨識用參考資料，之後拿來和畫面中的貓咪比對；不會重新訓練 YOLO，也不會把照片上傳到雲端。</p>
+  <div class="notice">
+    <strong>建議流程</strong>
+    <ol>
+      <li>為每隻貓建立一筆資料。</li>
+      <li>上傳 3～10 張清楚的 JPG；不同姿勢、距離或光線的照片更有幫助，不必對應攝影機角度。</li>
+      <li>送出後系統會在背景準備 AI 比對資料，不會停止監控。</li>
+    <li>之後 Telegram 回饋與{{ term_help('tag_review', '人工回報') }}會顯示你登錄的名字，供逐隻確認身分與動作。</li>
+    </ol>
+    <p class="muted">通常不需額外操作，系統會自動準備 AI 比對資料。若暫時失敗，照片仍會保留，寵物卡片會提供重試按鈕。</p>
+    <details><summary>技術狀態（排錯時查看）</summary><p class="field-help">AI 比對資料需本機 DINOv2 模型與 PyTorch。照片仍會先保存在本機；若照片數多於已準備的資料，卡片會顯示重試按鈕。</p></details>
+  </div>
+  <form id="pet-enrollment-form" class="settings-grid" enctype="multipart/form-data">
+    <label>顯示名稱
+      <input id="pet-display-name" name="display_name" maxlength="80" required placeholder="例如：貓甲">
+      {{ hint('pet-display-name', '這個名稱會顯示在本機 Dashboard 與 Telegram 回饋選項；不會寫死在程式碼。') }}
+    </label>
+    <label>固定識別碼（可留白）
+      <input id="pet-id" name="pet_id" maxlength="64" pattern="[A-Za-z0-9_-]{1,64}" placeholder="例如：pet_a">
+      {{ hint('pet-id', '只可使用英數字、底線或連字號。留白會自動產生，不建議日後任意更改。') }}
+    </label>
+    <label>毛色描述（可選）
+      <input id="pet-coat" name="coat_description" maxlength="200" placeholder="例如：橘色">
+    </label>
+    <label>花紋描述（可選）
+      <input id="pet-pattern" name="pattern_description" maxlength="200" placeholder="例如：虎斑">
+    </label>
+    <label class="settings-actions">參考照片（JPG，可複選）
+      <input id="pet-images" name="images" type="file" accept="image/jpeg,.jpg,.jpeg" multiple required>
+      {{ hint('pet-images', '每張最多 8 MB，建議至少 3 張清楚照片；姿勢、距離或光線不同更有幫助。太小、模糊或重複照片會被拒絕。') }}
+    </label>
+    <div class="actions settings-actions">
+      <button class="button" type="submit">保存照片並建立 AI 參考資料</button>
+      <button class="button secondary" id="pets-reload" type="button">重新整理</button>
+    </div>
+  </form>
+  <p id="pet-enrollment-message" class="muted" role="status"></p>
+</section>
+<section class="panel" id="pet-edit-panel">
+  <div class="panel-heading"><h3>編輯已登錄寵物</h3><span class="muted">可修改名稱、外觀描述、啟用狀態或追加照片</span></div>
+  <form id="pet-edit-form" class="settings-grid" enctype="multipart/form-data" hidden>
+    <input id="pet-edit-id" type="hidden">
+    <label>顯示名稱
+      <input id="pet-edit-display-name" maxlength="80" required>
+    </label>
+    <label>毛色描述
+      <input id="pet-edit-coat" maxlength="200">
+    </label>
+    <label>花紋描述
+      <input id="pet-edit-pattern" maxlength="200">
+    </label>
+    <label class="checkbox-line"><input id="pet-edit-enabled" type="checkbox"> 啟用這隻寵物的身分辨識</label>
+    <label class="settings-actions">追加參考照片（可選，JPG）
+      <input id="pet-edit-images" type="file" accept="image/jpeg,.jpg,.jpeg" multiple>
+      {{ hint('pet-edit-images', '追加照片後會自動更新 AI 比對資料，不會刪除既有照片或回饋紀錄。') }}
+    </label>
+    <div class="actions settings-actions">
+      <button class="button" type="submit">保存編輯</button>
+      <button class="button secondary" id="pet-edit-cancel" type="button">取消</button>
+    </div>
+    <p id="pet-edit-message" class="muted" role="status"></p>
+  </form>
+</section>
+<section class="panel" id="pet-track-candidates-panel">
+  <div class="panel-heading">
+    <div>
+      <h3>從近期攝影機軌跡截圖一鍵加入特徵</h3>
+      <p class="muted" style="margin:4px 0 0">系統已自動過濾近期單貓不重疊、尺寸足夠（≥96px）且非模糊的監視器實拍裁切圖。直接點選貓咪名稱即可同步提取 DINOv2 向量並寫入受保護特徵庫（<code>feedback_embeddings.npz</code>），大幅提升實機攝影機視角與夜視下的辨識率。</p>
+    </div>
+    <span id="pet-track-candidates-status" class="status-pill status-info">載入中…</span>
+  </div>
+  <div class="track-candidates-toolbar">
+    <div class="actions" role="group" aria-label="篩選軌跡截圖狀態">
+      <button type="button" class="button secondary is-active" data-track-filter="all">全部近期截圖</button>
+      <button type="button" class="button secondary" data-track-filter="unlabeled">待標註</button>
+      <button type="button" class="button secondary" data-track-filter="enrolled">已入庫特徵</button>
+    </div>
+    <button type="button" class="button secondary" id="pet-track-candidates-reload">重新整理截圖</button>
+  </div>
+  <p id="pet-track-candidates-message" class="field-help" role="status" aria-live="polite"></p>
+  <div id="pet-track-candidates-grid" class="track-candidates-grid"><p class="muted">正在載入近期攝影機軌跡截圖…</p></div>
+</section>
+<section class="panel">
+  <div class="panel-heading"><h3>已登錄寵物</h3><span class="muted">身分辨識仍屬實驗性</span></div>
+  <div id="pets-list" class="event-list"><p class="muted">尚無登錄資料。</p></div>
+</section>
+<script src="/static/js/pets.js?v={{ release_info.cache_key }}" defer></script>
+<dialog id="pet-crop-dialog" aria-labelledby="pet-crop-title"><h3 id="pet-crop-title">選出照片中的這隻貓（選用）</h3>
+<p>只有照片裡有多隻貓、人物或背景太多時才需要框選。只圈住這隻貓，AI 才能用正確範圍整理參考資料。</p>
+<label>框選方式<select id="pet-crop-mode"><option value="rectangle">拖曳長方形</option><option value="polygon">逐點圈選不規則範圍</option></select></label>
+<canvas id="pet-crop-canvas" width="640" height="480" tabindex="0" aria-label="寵物照片圈選區，滑鼠拖曳或逐點圈選"></canvas>
+<p>長方形：拖曳對角；多邊形：依邊緣逐點點選至少3點，系統自動封閉。鍵盤方向鍵可建立／移動長方形，Shift加方向鍵改大小。</p>
+<button class="button secondary" id="pet-crop-clear" type="button">清除重畫</button>
+<label class="checkbox-line"><input type="checkbox" id="pet-crop-confirm">我確認此範圍只有這隻貓</label>
+<p id="pet-crop-message" role="status"></p><button class="button" id="pet-crop-save" type="button">保存裁切並更新 AI 參考資料</button><button class="button secondary" id="pet-crop-close" type="button">取消</button></dialog>
+<script src="/static/js/pet-crop.js?v={{ release_info.cache_key }}" defer></script>
+{% elif page_path == '/settings/telegram' %}
+<section class="panel telegram-panel">
+  <div class="panel-heading"><h3>Telegram 事件通知</h3><span id="telegram-runtime-status" class="muted">狀態讀取中…</span></div>
+  <p>找到貓咪並符合通知間隔時，系統會經過{{ term_help('telegram_queue', '發送佇列') }}、{{ term_help('extra_wait', '額外等待 AI 摘要') }}、{{ term_help('telegram_caption', '通知文字整理') }}與{{ term_help('telegram_upload', '影片上傳') }}，最後取得{{ term_help('telegram_accepted', 'Telegram 伺服器回條') }}。建議依序完成：保存憑證 → 選擇對象 → 啟用 → 傳送測試文字。</p>
+  <div class="telegram-top-compact">
+    <label>Telegram Bot Token
+      <input id="telegram-bot-token" type="password" autocomplete="new-password" placeholder="只在本機頁面輸入，不會回填">
+    </label>
+    <div class="telegram-status-box">
+      <label class="checkbox-line telegram-enabled-toggle"><input id="telegram-enabled" type="checkbox"> 啟用事件 Telegram 通知</label>
+      <p id="telegram-credentials-status" class="muted" style="margin:0;font-size:.78rem">安全憑證狀態讀取中…</p>
+    </div>
+    <div class="actions" style="margin:0">
+      <button class="button" id="save-telegram-credentials" type="button">安全保存憑證</button>
+      <button class="button secondary" id="clear-telegram-credentials" type="button">清除憑證</button>
+    </div>
+  </div>
+  {{ hint('telegram-bot-token', 'BotFather 提供的機器人通行證，不是你的 Telegram 登入密碼。已保存時欄位留白不代表遺失；請以上方憑證狀態為準。') }}
+  <details class="help-drawer"><summary>初次設定？查看 Bot Token 與 Chat ID 安全引導</summary>
+    <ol class="field-help" style="margin:.4rem 0 .2rem;padding-left:1.25rem">
+      <li>在 Telegram 的 <code>@BotFather</code> 建立 Bot，複製 Bot Token。</li>
+      <li>先對你的 Bot 傳送 <code>/start</code>，再在下方「通知對象」區逐一填入 Chat ID；每列可設定別名及是否接收通知。</li>
+      <li>按「安全保存憑證」；秘密只會送到目前登入的本機 Dashboard，並保存於 Windows Credential Manager。</li>
+      <li>按「啟用 Telegram 並重新啟動 Host」；Host 重新載入憑證後才會開始傳送事件。</li>
+    </ol>
+  </details>
+  <div class="telegram-recipients-section">
+    <div class="telegram-recipients-header">
+      <div>
+        <h4>Telegram 通知對象</h4>
+        <small id="telegram-chat-id-help" class="muted">個人對話請填數字 Chat ID（先傳 <code>/start</code> 給機器人取得）；勾選代表 Host 啟動時接通。</small>
+      </div>
+      <div class="actions" style="margin:0">
+        <button class="button secondary" id="add-telegram-recipient" type="button">＋ 新增對象</button>
+        <button class="button secondary" id="save-telegram-recipients" type="button">保存通知對象</button>
+      </div>
+    </div>
+    <div id="telegram-recipient-list" class="telegram-recipients-list">
+      <div class="telegram-recipient-row settings-grid" data-fallback-row="true">
+        <label>別名
+          <input type="text" maxlength="80" autocomplete="off" placeholder="例如家人手機" aria-label="Telegram 通知對象別名">
+        </label>
+        <label>Chat ID
+          <input type="text" maxlength="128" autocomplete="off" placeholder="先傳 /start，再填入 Chat ID" aria-label="Telegram Chat ID" aria-describedby="telegram-chat-id-help">
+        </label>
+        <label class="checkbox-line recipient-check"><input type="checkbox" checked aria-label="啟用此 Telegram 通知對象">接收通知</label>
+        <button class="button secondary recipient-remove-btn" type="button" data-remove-fallback="true">移除</button>
+      </div>
+    </div>
+    <p id="telegram-recipient-selection" class="field-help" role="status">目前 1 列待填寫；只有勾選且有 Chat ID 的對象會在 Host 啟動時接通。</p>
+  </div>
+  <label class="checkbox-line"><input id="telegram-startup-notice" type="checkbox"> Host 啟動並確認 Dashboard 健康後，傳送狀態摘要</label>
+  <p class="field-help">啟用後只會傳送本機／區網 Dashboard 網址、來源類型與 Tailscale 可用狀態；不會包含 RTSP URL、密碼、Token、Cookie 或來源參數。此選項預設關閉，需重新啟動 Host 才套用。</p>
+  <div class="actions settings-actions">
+    <button class="button" id="save-telegram" type="button">僅保存啟用設定</button>
+    <button class="button" id="apply-telegram" type="button">啟用 Telegram 並重新啟動 Host</button>
+    <button class="button secondary" id="test-telegram" type="button">傳送測試文字</button>
+  </div>
+  <p id="telegram-message" class="muted" role="status"></p>
+  <p class="field-help">「僅保存啟用設定」不會改變目前執行中的 Host；要立即套用請使用上方啟用按鈕。環境變數 <code>MEOWKEEPER_TELEGRAM_BOT_TOKEN</code>、<code>MEOWKEEPER_TELEGRAM_CHAT_IDS</code> 仍可作為替代來源。</p>
+</section>
+<script src="/static/js/telegram.js?v=recipient-editor-20260926" defer></script>
+{% elif page_path == '/settings/tailscale' %}
+<section class="panel">
+  <div class="panel-heading"><h3>Tailscale 遠端存取</h3><span id="tailscale-runtime-status" class="muted">狀態讀取中…</span></div>
+  <div class="notice"><strong>本機優先，遠端連線由你選擇</strong><p>MeowKeeper+ 以本機運作為核心，預設不將監控服務公開到網際網路。出門在外時，請在家中主機與手機安裝官方 Tailscale，登入同一個私人網路，透過加密的私人連線安全連回家中觀看貓咪。Tailscale 會嘗試點對點直連；若網路環境不允許，可能改走 Tailscale 加密中繼，仍不會開放公網。</p></div>
+  <p>先在兩端安裝並登入 Tailscale，再按「檢查 Tailscale」。這裡只讀取官方狀態，不會替你更改網路。</p>
+  <ol class="field-help"><li>家中這台電腦與遠端手機／電腦都先安裝 <a href="https://tailscale.com/download" target="_blank" rel="noopener noreferrer">官方 Tailscale（下載與安裝）</a>。</li><li>兩端登入同一個私人網路，或使用你已明確授權的共享裝置。</li><li>按「檢查 Tailscale」，確認登入及 Dashboard 遠端網址。不要把 0.0.0.0 當成連線網址。</li></ol>
+  <div class="notice"><strong>已登入，不一定已能遠端開啟</strong><p>仍需有可用的 Dashboard 網址及存取設定。Subnet（子網路）則用來連到遠端住處的攝影機；必須由該住處的裝置提供路由，只有一個 100.x 位址不代表攝影機已可達。</p></div>
+  <div class="settings-grid">
+    <label>登入狀態 <strong id="tailscale-login-status">尚未檢查</strong></label>
+    <label>Tailscale IP <strong id="tailscale-ip">未取得</strong></label>
+    <label>遠端控制台 <strong id="tailscale-remote-status">尚未檢查</strong></label>
+    <label>可用網址 <strong id="tailscale-remote-url">未設定</strong></label>
+  </div>
+  <div class="actions settings-actions">
+    <button class="button" id="tailscale-check" type="button">檢查 Tailscale</button>
+    <a class="button secondary" href="https://login.tailscale.com/admin" target="_blank" rel="noopener">開啟 Tailscale Admin</a>
+  </div>
+  <p id="tailscale-message" class="muted" role="status"></p>
+  <section class="tailscale-devices" aria-labelledby="tailscale-devices-heading">
+    <div class="panel-heading"><h3 id="tailscale-devices-heading">裝置與觀看狀態</h3><span id="tailscale-device-updated" class="muted">尚未更新</span></div>
+    <p id="tailscale-device-summary" class="field-help">Tailscale 在線、近期活動、Dashboard 使用中與即時畫面連線分開計算。</p>
+    <div id="tailscale-device-list" class="tailscale-device-list" aria-live="polite"><p class="muted">正在讀取裝置清單。</p></div>
+  </section>
+  <p class="muted">Dashboard 必須明確允許區網存取或由使用者自行設定官方 Serve，才可能有可用的遠端網址。`0.0.0.0` 只代表監聽所有網卡，不是可分享網址。</p>
+</section>
+<script src="/static/js/tailscale.js?v={{ release_info.cache_key }}" defer></script>
+{% else %}
+<section class="notice"><strong>讓其他裝置查看 Dashboard</strong><p>平常只在這台電腦使用時，保留預設即可。若要用同一住處的手機查看，可啟用下方區網存取，保存後重新啟動服務；其他裝置仍需要登入。</p></section>
+{% endif %}
+{% if page_path == '/settings/advanced' %}
+<section class="panel">
+  <div class="panel-heading"><h3>程式更新</h3><span>不影響目前監控</span></div>
+  <p>只從 kinostudio／MeowKeeperPlus 官方發布區下載，驗證簽章與完整性。此處不會自動安裝、不會觸發 UAC，也不會把你的資料上傳。身分與行為仍屬實驗性。</p>
+  <div class="actions"><button class="button" id="update-check" type="button">檢查新版</button><button class="button secondary" id="update-prepare" type="button" disabled>下載並驗證</button></div>
+  <p id="update-message" role="status">尚未檢查。</p>
+  <div id="update-progress-region" class="update-progress-region" role="status" hidden>
+    <progress id="update-progress" max="100" value="0" aria-label="更新準備進度"></progress>
+    <p id="update-progress-label"></p>
+  </div>
+  <pre id="update-command" hidden></pre>
+</section>
+<script src="/static/js/updates.js?v=2" defer></script>
+<section class="panel">
+  <div class="panel-heading"><h3>完整資料備份（加密 ZIP）</h3></div>
+  <p>完整備份會包含一般設定、Telegram 通知偏好、SQLite 事件／回饋、寵物登錄資料、參考照片、embeddings，以及已完成事件影片與截圖。暫存 ring cache、模型、FFmpeg 與 Python runtime 不會放入備份。</p>
+  <p class="muted">備份密碼至少 6 個字元。ZIP 內的資料以 AES-GCM 加密；遺失密碼無法還原。匯入前會先驗證完整性，成功後請重新啟動 Host。</p>
+  <div class="settings-grid">
+    <label>完整備份密碼 <input id="full-backup-password" type="password" minlength="6" autocomplete="new-password" placeholder="至少 6 個字元"></label>
+    <label>選擇完整 ZIP 備份 <input id="full-backup-file" type="file" accept=".zip,application/zip"></label>
+  </div>
+  <div class="actions settings-actions">
+    <button class="button" id="export-full-backup" type="button">匯出完整資料 ZIP</button>
+    <button class="button secondary" id="import-full-backup" type="button">匯入完整資料 ZIP</button>
+  </div>
+  <div id="full-backup-progress-region" class="backup-progress-region" role="region" aria-label="完整資料備份進度" hidden>
+    <progress id="full-backup-progress" max="100" value="0" aria-label="完整資料備份進度"></progress>
+    <p id="full-backup-progress-label" class="muted" role="status" aria-live="polite"></p>
+    <ol id="full-backup-progress-items" class="backup-progress-items" aria-label="最近處理項目"></ol>
+  </div>
+  <p id="full-backup-message" class="muted" role="status"></p>
+</section>
+<section class="panel">
+  <div class="panel-heading"><h3>區網 Dashboard</h3><span id="lan-firewall-status" class="muted">狀態讀取中…</span></div>
+  <form id="lan-settings-form" class="login-form">
+    <label><input id="lan-access-enabled" type="checkbox"> 允許同一區網存取{{ hint('lan-access-enabled', '開啟後，同一網路的裝置可連到登入頁。只在自己的可信任網路使用；它不會自動建立網際網路公開網址。') }}</label>
+    <label>控制台連接埠（Port） <input id="dashboard-port" type="number" min="1024" max="65535" required>{{ hint('dashboard-port', '網址冒號後的數字。通常保留目前值；若被其他程式占用才調整。更改後必須使用新的網址。') }}</label>
+    <button class="button" type="submit">儲存並提示重新啟動</button>
+    <button class="button secondary" id="copy-lan-url" type="button">複製區網網址</button>
+  </form>
+  <p id="lan-url-list" class="muted">尚未讀取可用區網網址。</p>
+  <p id="lan-restart-message" class="muted" role="status"></p>
+  <div class="actions">
+    <button class="button secondary" data-firewall-action="enable" type="button">允許私人網路連入</button>
+    <button class="button secondary" data-firewall-action="disable" type="button">移除私人網路允許規則</button>
+  </div>
+  <p class="muted">這個按鈕只調整 Dashboard 的 Windows「私人網路」防火牆規則，不會關閉防火牆。Windows 若將網路判為「公用」，此規則不適用；修改規則需要系統管理員權限。</p>
+</section>
+<script src="/static/js/settings.js?v=3" defer></script>
+{% endif %}
+{% endblock %}

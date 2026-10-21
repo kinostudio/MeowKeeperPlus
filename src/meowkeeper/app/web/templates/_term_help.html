@@ -1,0 +1,19 @@
+{% macro term_help(key, text=None) -%}
+{% if help_terms is defined and key in help_terms -%}
+{% set term = help_terms[key] -%}
+{% set display_text = text if text is not none else term.label -%}
+<span class="term-help" data-term-key="{{ key }}" data-help-term="{{ key }}">
+  <button type="button" class="term-help-trigger" aria-expanded="false" aria-controls="term-help-{{ key }}-{{ range(1000, 9999) | random }}" aria-label="說明：{{ term.label }}">{{ display_text }}</button>
+  <span class="term-help-card" role="region" aria-label="{{ term.label }}說明" hidden>
+    <strong>{{ term.label }}</strong>
+    <span><b>這是什麼：</b>{{ term.what }}</span>
+    <span><b>為什麼重要：</b>{{ term.why_it_matters }}</span>
+    <span><b>怎麼看：</b>{{ term.how_to_read }}</span>
+    <span><b>異常時怎麼做：</b>{{ term.when_abnormal }}</span>
+    <small>{{ term.important_note }}</small>
+  </span>
+</span>
+{% elif text is not none -%}
+{{ text }}
+{% endif -%}
+{%- endmacro %}

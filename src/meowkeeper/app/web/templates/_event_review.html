@@ -1,0 +1,40 @@
+{% from '_term_help.html' import term_help with context %}
+<dialog id="event-review-dialog" aria-labelledby="event-review-title">
+<div class="panel-heading"><h3 id="event-review-title">人工回報</h3><button class="button secondary" id="event-review-close" type="button">關閉</button></div>
+<p class="field-help">先確認貓咪個體與數量，再逐隻選擇行為，最後確認提交。這是對此事件的人工標籤，不會自動重訓模型，也不會冒用軌跡編號。</p>
+<p class="field-help">先播放影片確認畫面，再開始回報。若載入失敗可重新載入；影片準備完成後才能保存。</p>
+<video id="event-review-video" controls playsinline preload="metadata" hidden></video>
+<button class="button secondary" id="event-review-video-retry" type="button" hidden>重新載入影片</button>
+<details><summary>選用：匯出含 AI 標記影片</summary>
+<p class="field-help">保留原檔，另外輸出 H.264 影片；只分析此事件，不連線攝影機。每秒重新偵測一次貓咪，框顯示 0.5 秒，不是假裝逐幀追蹤；不標示未確認身分或行為。限 60 秒內，可能暫時增加 CPU／記憶體用量。影片仍維持原本時間連續性，不自動發送 Telegram。</p>
+<label><input id="event-export-compare" type="checkbox">比較帶框／不帶框轉碼時間（額外轉碼一次）</label>
+<button class="button secondary" id="event-export-annotated" type="button">匯出含 AI 標記影片</button>
+<p id="event-export-status" role="status"></p>
+</details>
+<fieldset><legend>{{ term_help('tag_review', '這次回報的影片範圍') }}</legend>
+<p id="event-review-segment-help" class="field-help">秒數從影片開頭計算。可只回報一小段；多段不同動作請分別保存，歷史會全部保留。</p>
+<p>在同一條時間軸拖動兩個控制點：左側選片段起點、右側選終點。</p>
+<div class="review-segment-timeline" id="event-review-timeline" role="group" aria-label="選擇人工回報片段的起點與終點">
+  <span class="review-segment-track" aria-hidden="true"></span><span class="review-segment-selected" aria-hidden="true"></span>
+  <input id="event-review-range-start" type="range" min="0" max="0" step="0.1" value="0" aria-label="片段起點" aria-describedby="event-review-segment-help">
+  <input id="event-review-range-end" type="range" min="0" max="0" step="0.1" value="0" aria-label="片段終點" aria-describedby="event-review-segment-help">
+</div>
+<div class="review-segment-times"><label>起點秒數<input id="event-review-segment-start" type="number" min="0" step="0.1" value="0" aria-describedby="event-review-segment-help"></label><label>終點秒數<input id="event-review-segment-end" type="number" min="0" step="0.1" value="0" aria-describedby="event-review-segment-help"></label></div>
+<div class="actions"><button class="button secondary" id="event-review-mark-start" type="button">以目前播放位置設為起點</button><button class="button secondary" id="event-review-mark-end" type="button">以目前播放位置設為終點</button><button class="button secondary" id="event-review-play-segment" type="button">播放選取片段</button></div>
+</fieldset>
+<div id="event-review-candidates" class="notice" role="status"></div>
+<section aria-label="事件是否適合評估"><h4>{{ term_help('valid_event', '這筆事件適合拿來評估 AI 嗎？') }}</h4><p class="field-help">例如誤觸發或壞片可標無效；看不清則保留不確定。這只影響辨識品質分組，已送出的API失敗、等待與費用不會因此消失。</p><div id="event-review-validity"></div></section>
+<button class="button secondary" id="event-review-reanalyze" type="button">重新分析這筆事件（可選）</button>
+<p class="field-help">只重用24小時內尚未清理的{{ term_help('storyboard', '貓框時序拼貼') }}，不拿現在畫面冒充舊影片。需已開啟並同意目前服務，仍受每日預算限制；每筆事件30秒最多一次，可能產生服務費用。不會重傳Telegram影片或覆寫人工答案。</p>
+<section aria-label="逐項覆核AI候選"><h4>逐項確認 AI 有沒有看對</h4>
+<p class="field-help">請先播放影片，再接受或駁回每個候選（經過{{ term_help('ai_validate', 'AI 結果檢查') }}的候選標籤）。只確認這條軌跡的標籤，不會自動認定貓咪身分、批准學習或改寫原始 AI 答案；精準起迄請用上方片段範圍另存人工回報。</p><div id="event-review-candidate-actions"></div></section>
+<details><summary>{{ term_help('ai_merge', 'AI 候選歷史（不是人工確認）') }}</summary><div id="event-review-semantic-history"></div></details>
+<details><summary>通知花了多久？（{{ term_help('pipeline_total', '總處理時間') }}）</summary>
+<p class="field-help">先{{ term_help('media_ready', '準備影片') }}，再{{ term_help('ai_grace', '額外等 AI') }}，最後{{ term_help('telegram_upload', '傳到 Telegram') }}；AI 也可能早已完成。各步驟可能重疊，不應直接相加。Telegram 接受不代表手機已讀。</p>
+<div id="event-review-delivery-history"></div></details>
+<details><summary>這次哪些工作同時進行？（{{ term_help('waterfall', '步驟時間軸') }}）</summary>
+<p class="field-help">重疊的時間條代表{{ term_help('parallel', '同時進行') }}，不能相加。虛線是{{ term_help('ai_queue', '排隊等待') }}或{{ term_help('ai_grace', '補等待 AI') }}，實線是處理；點選可看開始、結束與狀態。缺少時間的步驟不補成0，不推測排隊原因。</p><div id="event-review-waterfall"></div></details>
+<ol class="review-steps" aria-label="回報步驟"><li>確認貓咪</li><li>逐隻行為</li><li>確認保存</li></ol>
+<div id="event-review-stage"></div><div class="actions"><button class="button secondary" id="event-review-back" type="button">上一步</button><button class="button" id="event-review-next" type="button">下一步</button></div>
+<p id="event-review-message" class="notice" role="status"></p><details><summary>已保存的人工回報與修訂歷史</summary><div id="event-review-history"></div></details>
+</dialog>
