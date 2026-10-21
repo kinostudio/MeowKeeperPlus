@@ -1,0 +1,58 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyd
+*.so
+.Python
+.venv/
+venv/
+env/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+htmlcov/
+.coverage
+coverage.xml
+dist/
+build/
+runtime/
+vendor/javascript/
+*.egg-info/
+
+# Secrets and local configuration
+.env
+.env.*
+!.env.example
+config.json
+config.local.json
+*.secrets.json
+
+# Runtime data and downloaded models
+data/
+logs/
+recordings/
+snapshots/
+models/
+!models/
+!models/yolo11n.pt
+!models/model_manifest.json
+!models/README.md
+!models/identity/
+!models/identity/dinov2_vits14/
+!models/identity/dinov2_vits14/dinov2_vits14_pretrain.pth
+!models/identity/dinov2_vits14/model_manifest.json
+*.db
+*.db-shm
+*.db-wal
+*.sqlite
+*.sqlite3
+
+# IDE and OS
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# Phase 0 local reports
+reports/

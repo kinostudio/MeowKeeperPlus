@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="content-heading"><div><p class="eyebrow">繁體中文日誌</p><h2>日誌</h2></div></div>
+<section class="panel">
+  <p>僅已登入的管理者可查看最近 200 筆 Host 訊息；內容會遮罩 URL 與秘密，不直接公開日誌檔案。</p>
+  <pre id="recent-log-lines" aria-live="polite">正在讀取最近訊息…</pre>
+</section>
+<script>
+(function () {
+  const output = document.getElementById("recent-log-lines");
+  async function refresh() {
+    if (document.hidden) return;
+    try {
+      const response = await fetch("/api/v1/logs", {cache: "no-store"});
+      if (response.status === 401) { location.assign("/login"); return; }
+      if (!response.ok) throw new Error();
+      const data = await response.json();
+      output.textContent = (data.items || []).join("\n") || "目前沒有 Host 訊息。";
+    } catch (_) { output.textContent = "目前無法讀取 Host 訊息；請稍後再試。"; }
+  }
+  refresh();
+  window.setInterval(refresh, 5000);
+})();
+</script>
+{% endblock %}

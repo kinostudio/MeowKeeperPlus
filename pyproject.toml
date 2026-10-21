@@ -1,0 +1,82 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "meowkeeper-plus"
+version = "0.0.1"
+description = "MeowKeeper+ local pet monitoring core, Web Dashboard and probe interfaces"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "Proprietary prototype; third-party license review required before distribution" }
+authors = [{ name = "MeowKeeper+ contributors" }]
+dependencies = []
+
+[project.optional-dependencies]
+build = [
+  "requests>=2.31,<3",
+  "onnx==1.19.1",
+]
+dev = [
+  "mypy>=1.10",
+  "pytest>=8.0",
+  "ruff>=0.5",
+]
+runtime = [
+  "numpy>=1.24,<3",
+  "yt-dlp==2026.7.4",
+  "yt-dlp-ejs==0.8.0",
+  "ultralytics>=8.3,<9",
+  "lapx>=0.5.12",
+  "onnxruntime-gpu[cuda,cudnn]==1.23.2",
+  "openvino==2024.6.0; python_version < '3.13'",
+  "openvino==2025.4.1; python_version >= '3.13'",
+  "nvidia-cuda-runtime-cu12==12.4.127",
+  "nvidia-cudnn-cu12==9.1.1.17",
+  "nvidia-cublas-cu12==12.4.5.8",
+  "torch>=2.1,<3",
+  "torchvision>=0.16,<1",
+  "fastapi>=0.110,<0.116",
+  "uvicorn>=0.30,<0.35",
+  "pydantic>=2,<3",
+  "jinja2>=3.1,<4",
+  "tzdata>=2024.1",
+  "pystray>=0.19,<1",
+  "pillow>=10,<12",
+  "psutil>=5.9,<8",
+  "pycryptodome==3.23.0",
+  "websockets==15.0.1",
+  "aiortc==1.15.0",
+  "av==17.1.0",
+]
+web = [
+  "aiortc==1.15.0",
+  "av==17.1.0",
+  "fastapi>=0.110,<0.116",
+  "uvicorn>=0.30,<0.35",
+  "pydantic>=2,<3",
+  "jinja2>=3.1,<4",
+  "python-multipart>=0.0.9,<1",
+  "itsdangerous>=2.1,<3",
+  "httpx>=0.27,<0.29",
+  "websockets==15.0.1",
+]
+tray = [
+  "pystray>=0.19,<1",
+  "pillow>=10,<12",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+"meowkeeper.app.web" = ["*.json", "templates/*.html", "static/*.css", "static/*.js", "static/*.json", "static/css/*.css", "static/js/*.js"]
+
+[tool.ruff]
+target-version = "py310"
+line-length = 100
+
+[tool.mypy]
+python_version = "3.10"
+strict = true
+packages = ["meowkeeper"]

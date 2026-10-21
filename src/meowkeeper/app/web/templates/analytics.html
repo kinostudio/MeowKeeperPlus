@@ -1,0 +1,82 @@
+{% extends "base.html" %}
+{% from '_term_help.html' import term_help with context %}
+{% block content %}
+<section class="panel" aria-labelledby="cpu-temperature-title">
+  <h2 id="cpu-temperature-title">CPU 溫度</h2>
+  <p id="cpu-temperature-value" role="status">正在確認感測器…</p>
+  <p id="cpu-temperature-context">CPU 溫度與主機板溫度不同，不能互相替代。沒有可信感測值時會標示{{ term_help('data_missing', '缺資料') }}，不顯示 0°C。</p>
+  <p id="cpu-temperature-hour"></p>
+  <button class="button secondary" id="cpu-temperature-refresh" type="button">更新溫度狀態</button>
+  <details><summary>查看原因與感測器說明</summary>
+    <p id="cpu-temperature-reason">尚未取得診斷。</p>
+    <p>CPU Package 是處理器內部感測器回報的封裝溫度；若只取得單一核心，會明確標示。資料過期代表一段時間沒有新讀值，暫時隱藏舊數字，並非溫度降到零。</p>
+    <p>一般權限可能無法存取感測驅動；不會自動要求 UAC、安裝驅動或提升整個 Host。無法測溫不影響基本貓咪監控。</p>
+    <dl id="cpu-temperature-details"></dl>
+  </details>
+  <noscript><p>請啟用 JavaScript 後更新感測器狀態。</p></noscript>
+</section>
+{% include '_cpu_temperature_setup.html' %}
+<section class="panel" aria-labelledby="resource-title">
+  <h2 id="resource-title">電腦與守護者・資源趨勢</h2>
+  <p>每分鐘記錄一次，保留 90 天；不開網頁也持續記錄。長期間折線顯示分段平均，不代表瞬間峰值。將滑鼠移到圖表上、在觸控螢幕點一下，或用鍵盤方向鍵，可查看時間點與數值。服務關閉的期間不會補造資料。</p>
+  <label for="resource-period">查看期間</label>
+  <select id="resource-period"><option value="1">最近 1 小時</option><option value="24" selected>最近 24 小時</option><option value="168">最近 7 天</option><option value="720">最近 30 天</option><option value="2160">最近 90 天</option></select>
+  <button class="button secondary" id="resource-load" type="button">更新圖表</button>
+  <p id="resource-message" role="status">正在載入資源歷史…</p>
+  <div id="resource-charts" class="dashboard-charts"></div>
+  <p>CPU 以整台電腦容量為 100%；守護者 RAM 是相關程序的記憶體總和，共享頁面可能重複計入。包含 Host、AI 子程序、Tray、go2rtc 及 FFmpeg，不是只計算網頁。</p>
+  <p>磁碟每 15 分鐘統計「程式＋模型＋執行環境」及「事件影片＋資料庫＋快取＋寵物資料」。顯示檔案大小總和，不是整顆硬碟使用量；不計開發用 dist 舊發布包、Git 與 reports，連結目錄不追蹤。</p>
+  <p class="field-help">新版內附 NVIDIA CUDA／cuDNN 與 Intel OpenVINO，程式占用可能比舊版大；這不是啟用 GPU 後每次推論產生的新檔。總占用＝程式與模型＋資料與影片，不要把三條曲線再相加。選用 CPU 仍保留這些依賴，方便之後切回 GPU。</p>
+  <noscript><p>請啟用 JavaScript 才能查看折線圖。</p></noscript>
+</section>
+<section class="panel behavior-summary-panel" aria-labelledby="behavior-summary-title">
+  <div class="panel-heading">
+    <div>
+      <p class="eyebrow">行為分布與累計時長</p>
+      <h2 id="behavior-summary-title">行為統計（實驗性候選結果）</h2>
+    </div>
+  </div>
+  <p class="muted">顯示已保存且已結束的行為事件（可搭配{{ term_help('tag_review', '人工回報標籤') }}對照），不代表家庭實拍準確率已驗收。沒有事件不等於睡眠或沒有活動。</p>
+  <div class="behavior-toolbar">
+    <div class="behavior-date-controls">
+      <label>開始日期 <input id="summary-start" type="date"></label>
+      <label>結束日期（含當日） <input id="summary-end" type="date"></label>
+      <button id="summary-load" class="button" type="button">查詢統計</button>
+    </div>
+    <div class="behavior-quick-ranges" role="group" aria-label="快速日期範圍">
+      <button type="button" class="button secondary is-active" data-range-days="1">今日</button>
+      <button type="button" class="button secondary" data-range-days="7">近 7 天</button>
+      <button type="button" class="button secondary" data-range-days="30">近 30 天</button>
+    </div>
+  </div>
+  <p id="summary-message" class="field-help" role="status"></p>
+  <div id="summary-results" class="behavior-results-grid"></div>
+</section>
+<script src="/static/js/analytics.js?v={{ release_info.cache_key }}-ui6" defer></script>
+<script src="/static/js/dashboard-resource-charts.js?v={{ release_info.cache_key }}" defer></script>
+<script src="/static/js/resource-history.js?v={{ release_info.cache_key }}" defer></script>
+<section class="panel" aria-labelledby="semantic-performance-title">
+  <h2 id="semantic-performance-title">AI 候選與通知・{{ term_help('pipeline_total', '處理效能') }}（實驗性）</h2>
+  <p>只讀取本機已保存的模型貓咪事件，不會重新分析影片或呼叫外部 API。不同工作可能{{ term_help('parallel', '並行處理') }}，下面時間不能直接相加。</p>
+  <p class="field-help">預設合併本期間紀錄；可依服務、模型、{{ term_help('valid_event', '影像有效性') }}及輸入方式分開查看。篩選不會刪除原紀錄或更改已發生的費用。</p>
+  <label for="semantic-performance-limit">最近多少筆事件</label>
+  <select id="semantic-performance-limit"><option value="25">25 筆</option><option value="100" selected>100 筆</option><option value="200">200 筆</option></select>
+  <label>統計範圍<select id="semantic-performance-window"><option value="">最近筆數</option><option value="1">近1小時完整區間</option><option value="24">近24小時完整區間</option><option value="168">近7天完整區間</option><option value="720">近30天完整區間</option></select></label>
+  <details><summary>自訂時間與比較條件</summary>
+    <p class="field-help">開始與結束都填才使用自訂區間（最多31天），依這部裝置的時間輸入；結束時刻不包含在內。清空時間即可回到上方範圍。</p>
+    <label>開始時間<input id="semantic-range-start" type="datetime-local"></label>
+    <label>結束時間<input id="semantic-range-end" type="datetime-local"></label>
+    <label>分析服務<select id="semantic-provider"><option value="">全部服務</option></select></label>
+    <label>模型<select id="semantic-model"><option value="">全部模型</option></select></label>
+    <label>人工影像評估<select id="semantic-validity"><option value="">全部評估</option><option value="valid">確認有效</option><option value="invalid">確認無效</option><option value="unclear">看不清</option><option value="conflict">覆核有衝突</option><option value="unreviewed">尚未覆核</option></select></label>
+    <label>分析輸入<select id="semantic-input-mode"><option value="">全部輸入</option><option value="storyboard">多時點貓框參考圖</option><option value="representative">單張代表圖（舊紀錄）</option><option value="unknown">輸入方式未知</option></select></label>
+  </details>
+  <button class="button secondary" id="semantic-performance-load" type="button">更新處理統計</button>
+  <p id="semantic-performance-message" role="status">正在讀取已保存的處理紀錄…</p>
+  <p class="field-help">以下指標包含 {{ term_help('avg_latency', '平均耗時') }}、{{ term_help('p50_latency', 'P50 中位數') }}、{{ term_help('p95_latency', 'P95 慢速尾端') }} 與 {{ term_help('ai_grace', 'AI 補等待時間') }}（皆依 {{ term_help('sample_size', '有效樣本數') }} 統計）。</p>
+  <div id="semantic-performance-results"></div>
+  <p class="field-help">{{ term_help('ai_success', 'API 成功率') }}只以可確認已送出的請求為分母，{{ term_help('timeout_rate', '逾時比例') }}、{{ term_help('ai_coverage', 'AI 覆蓋率') }}與未知證據另列；「沒有紀錄」不是 0 秒或 100% 成功。API 回應時間不包含參考圖準備、金鑰讀取與子程序啟動。{{ term_help('telegram_accepted', 'Telegram 接受率') }}按上傳嘗試計算，不是使用者已讀或影片已播放。</p>
+  <noscript><p>請啟用 JavaScript 才能查詢處理統計。</p></noscript>
+</section>
+<script src="/static/js/semantic-performance.js" defer></script>
+{% endblock %}

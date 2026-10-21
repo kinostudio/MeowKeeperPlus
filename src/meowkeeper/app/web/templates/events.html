@@ -1,0 +1,16 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="content-heading"><div><p class="eyebrow">留住值得留意的片刻</p><h2>事件與回報</h2></div><small>只有登入後才能查看、播放與{{ term_help('tag_review', '人工回報') }}。</small></div>
+<p class="muted">事件是 AI 判斷的候選紀錄（個體尚未達到門檻時會標示為{{ term_help('unknown', '尚未確認') }}）；信心分數不是準確率。影片尚未完成或已超過保存期限時，可能沒有播放按鈕。</p>
+<section class="panel events-scroll-panel"><div class="events-page-toolbar"><label for="events-kind-filter">顯示 <select id="events-kind-filter"><option value="all">全部事件</option><option value="cat_detected">貓咪偵測</option></select></label><div class="actions"><button id="events-previous" class="button secondary" type="button" disabled>上一頁</button><span id="events-page-number" role="status">第 1 頁</span><button id="events-next" class="button secondary" type="button">下一頁</button></div></div><div id="events-page-list" class="events-list-scroll" tabindex="0" role="region" aria-label="事件紀錄，可捲動"><p class="muted">正在讀取事件紀錄…</p></div></section>
+{% include '_event_review.html' %}
+{% include '_identity_detail.html' %}
+<dialog id="event-playback-dialog" aria-labelledby="event-playback-title">
+  <div class="panel-heading"><h3 id="event-playback-title">事件影片</h3><button class="button secondary" id="event-playback-close" type="button">關閉</button></div>
+  <p id="event-playback-status" class="field-help" role="status">選擇事件後播放。</p>
+  <video id="event-playback-video" controls playsinline preload="none" aria-label="事件原始影片"></video>
+  <button class="button secondary" id="event-playback-retry" type="button" hidden>改用瀏覽器相容格式播放</button>
+</dialog>
+<script src="/static/js/event-list.js?v={{ release_info.cache_key }}" defer></script>
+<script src="/static/js/event-review.js?v={{ release_info.cache_key }}" defer></script>
+{% endblock %}

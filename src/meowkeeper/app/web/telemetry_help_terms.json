@@ -1,0 +1,259 @@
+{
+  "schema_version": 1,
+  "locale": "zh-TW",
+  "purpose": "MeowKeeper+ telemetry screens and process stages contextual explanations",
+  "terms": {
+    "pipeline_total": {
+      "label": "從發現貓咪到通知完成",
+      "technical_alias": "偵測到通知",
+      "what": "系統第一次在畫面中偵測到貓咪，到 Telegram 伺服器接受通知所花的時間。",
+      "why_or_next_step": "如果很長，打開下方各步驟查看是哪裡花時間。",
+      "important_note": "偵測到不一定等於貓咪真正開始動作；Telegram 接受不代表手機已讀。"
+    },
+    "event_detection": {
+      "label": "發現貓咪",
+      "technical_alias": "YOLO / detect",
+      "what": "系統在攝影機畫面中第一次偵測到貓咪，開始建立這次活動紀錄。",
+      "why_or_next_step": "如果長時間沒偵測到，檢查攝影機是否有新畫面及找貓功能是否正常。",
+      "important_note": "不是動作真正開始的瞬間。"
+    },
+    "event_create": {
+      "label": "建立活動紀錄",
+      "technical_alias": "event / event_id",
+      "what": "為這次活動建立專屬記錄，讓影片、AI 分析和回報能放在一起。",
+      "why_or_next_step": "若失敗，查看系統狀態和儲存空間。",
+      "important_note": "此步驟不代表影片已製作好。"
+    },
+    "storyboard": {
+      "label": "整理 AI 參考圖片",
+      "technical_alias": "Storyboard",
+      "what": "從活動中的不同時間挑出幾張代表性畫面，讓 AI 能理解動作的先後。",
+      "why_or_next_step": "如果很慢，可能需要等待足夠影格或圖片處理較忙。",
+      "important_note": "圖片不夠時不能假裝看過整段影片。"
+    },
+    "local_identity": {
+      "label": "比對是哪隻貓",
+      "technical_alias": "DINOv2 / Re-ID",
+      "what": "把拍到的貓咪和已登錄的參考照片比一比，提出可能的身分。",
+      "why_or_next_step": "若總是無法確認，可以補充不同角度的清楚參考照片。",
+      "important_note": "相似度不是辨識正確率；無法確定時保留未知。"
+    },
+    "ai_provider": {
+      "label": "請 AI 協助理解動作",
+      "technical_alias": "第三方 AI API",
+      "what": "將選好的圖片或短片交給你主動啟用的 AI 服務，請它提出例如理毛、進食或喝水的候選標籤。",
+      "why_or_next_step": "如果太慢或失敗，系統會略過這一步，仍照常傳送事件影片。",
+      "important_note": "若是雲端服務，可能會傳送家庭影像；預設關閉，須明確同意。"
+    },
+    "ai_queue": {
+      "label": "等待 AI 工作輪到它",
+      "technical_alias": "AI queue",
+      "what": "AI 處理區前面還有其他工作，這次活動暫時在等候。",
+      "why_or_next_step": "排隊常很久時，查看同時處理的工作數與負載。",
+      "important_note": "此處不是外部 AI 已經開始回答的時間。"
+    },
+    "ai_request": {
+      "label": "等待 AI 服務回覆",
+      "technical_alias": "AI request / response",
+      "what": "圖片已送出，正在等待所選 AI 服務回傳分析。",
+      "why_or_next_step": "如果經常超時，調整服務或減少不必要的分析請求。",
+      "important_note": "回覆後還需要確認格式與內容是否可用。"
+    },
+    "ai_validate": {
+      "label": "檢查 AI 答案能不能用",
+      "technical_alias": "validation",
+      "what": "確認 AI 回傳的動作名稱、時間與資料格式符合規則，避免把不合理的結果放入事件。",
+      "why_or_next_step": "若常失敗，查看模型回傳內容是否符合指定格式。",
+      "important_note": "格式成功不代表行為就一定正確。"
+    },
+    "ai_merge": {
+      "label": "整理 AI 建議到活動",
+      "technical_alias": "event fusion",
+      "what": "把 AI 的候選動作加入同一筆活動，和影片、時間、身分分開保存。",
+      "why_or_next_step": "若失敗，可保留原本活動和影片，後續再處理。",
+      "important_note": "不會自動覆寫你已經人工確認的標籤。"
+    },
+    "video_record": {
+      "label": "持續記錄事件畫面",
+      "technical_alias": "event recording",
+      "what": "保存事件前後的影像，讓通知附上的影片能包含動作過程。",
+      "why_or_next_step": "若過久，檢查設定的事件後錄長度。",
+      "important_note": "這不是影片轉檔時間。"
+    },
+    "video_encode": {
+      "label": "整理成可播放影片",
+      "technical_alias": "encode / transcode",
+      "what": "把錄到的影像製作成可播放的影片；如果格式不相容，可能還需要轉換格式。",
+      "why_or_next_step": "若很慢，查看電腦負載、影片長度與是否需要轉檔。",
+      "important_note": "原始影片與可播放副本的狀態可能不同。"
+    },
+    "media_ready": {
+      "label": "影片準備完成",
+      "technical_alias": "media sendable",
+      "what": "事件影片已整理好，可以交給 Telegram 上傳了。",
+      "why_or_next_step": "如果到這裡花很多時間，瓶頸在錄影或影片準備，不一定是網路。",
+      "important_note": "不等於 Telegram 已經收到。"
+    },
+    "ai_grace": {
+      "label": "為了更貼心的通知多等一下",
+      "technical_alias": "AI grace wait",
+      "what": "影片其實已能傳送，但系統短暫等待 AI 的動作摘要，讓通知內容更自然。",
+      "why_or_next_step": "可在設定調整額外等待為 0～10 秒；預設 5 秒。",
+      "important_note": "超過期限直接傳影片，不會無限等待。"
+    },
+    "telegram_queue": {
+      "label": "等待傳送通知",
+      "technical_alias": "Telegram queue",
+      "what": "目前可能還有前面的通知等待傳送，這則通知正在排隊。",
+      "why_or_next_step": "若排隊持續增加，檢查佇列量和推送工作者。",
+      "important_note": "排隊不等於 Telegram 網路傳送慢。"
+    },
+    "telegram_caption": {
+      "label": "準備通知文字",
+      "technical_alias": "caption",
+      "what": "系統把貓咪身分和已確認的動作資訊組成自然的中文通知。",
+      "why_or_next_step": "如果沒有 AI 建議，仍會使用本機能確認的文字。",
+      "important_note": "沒有證據時不能說貓咪「正在喝水」。"
+    },
+    "telegram_upload": {
+      "label": "正在上傳影片",
+      "technical_alias": "Telegram sendVideo",
+      "what": "將準備好的影片和通知文字送給 Telegram 伺服器。",
+      "why_or_next_step": "若上傳較久，檢查網路、影片大小與 Telegram API 回應。",
+      "important_note": "此階段不能代表手機已下載完成。"
+    },
+    "telegram_accepted": {
+      "label": "Telegram 已接受通知",
+      "technical_alias": "Telegram API accepted",
+      "what": "Telegram 伺服器回覆這次訊息已接受處理。",
+      "why_or_next_step": "若沒有成功，查看錯誤原因與既有圖片／文字備援是否啟動。",
+      "important_note": "不等於已送達手機、已讀或已觀看。"
+    },
+    "queue_wait": {
+      "label": "排隊等候時間",
+      "technical_alias": "queue wait",
+      "what": "這個步驟尚未開始工作，正在等前面的任務完成或輪到可用的處理資源。",
+      "why_or_next_step": "等待特別長時，查看是不是工作量太多。",
+      "important_note": "排隊等待與真正處理必須分開計算。"
+    },
+    "execution": {
+      "label": "實際處理時間",
+      "technical_alias": "execution time",
+      "what": "輪到這項工作後，系統真正花在執行它的時間。",
+      "why_or_next_step": "如果很長，表示這個步驟本身較慢，不只是排隊。",
+      "important_note": "網路 API 回覆時間包含對方處理及網路往返。"
+    },
+    "parallel": {
+      "label": "同時進行",
+      "technical_alias": "parallel lanes",
+      "what": "例如整理影片和請 AI 看圖片同時執行，避免一個工作做完才開始另一個。",
+      "why_or_next_step": "若整體通知仍慢，查看真正拖住最後完成時間的步驟。",
+      "important_note": "同時執行的時間不能直接加總當成總延遲。"
+    },
+    "waterfall": {
+      "label": "每次事件的工作時間軸",
+      "technical_alias": "waterfall / Gantt",
+      "what": "用一條條時間色塊顯示本次活動各工作何時開始、結束、排隊或同時進行。",
+      "why_or_next_step": "點最長的時間條可以看它是在等待還是在工作。",
+      "important_note": "條與條重疊代表同時進行，不是資料重複。"
+    },
+    "avg_latency": {
+      "label": "平均需要多久",
+      "technical_alias": "average latency",
+      "what": "把符合目前篩選條件的多次耗時加總，再除以次數。",
+      "why_or_next_step": "配合最慢常見耗時與失敗率一起看，別只看平均。",
+      "important_note": "可能排除未成功或人工判定無效的事件；篩選與樣本數需顯示。"
+    },
+    "p50_latency": {
+      "label": "一半事件能在多久內完成",
+      "technical_alias": "P50 / median",
+      "what": "排序後位於中間的耗時；約一半的事件比這個值快，另一半較慢。",
+      "why_or_next_step": "用來了解一般情況的典型速度。",
+      "important_note": "樣本數太少時參考價值有限。"
+    },
+    "p95_latency": {
+      "label": "大多數事件最慢會等多久",
+      "technical_alias": "P95",
+      "what": "約 95% 的事件可在這個時間內完成，剩下約 5% 更慢。",
+      "why_or_next_step": "如果很高，表示有少部分事件常讓通知等很久。",
+      "important_note": "不是保證每次都在此時間內完成。"
+    },
+    "timeout_rate": {
+      "label": "等待太久而放棄的比例",
+      "technical_alias": "timeout rate",
+      "what": "外部服務超過允許等待時間，系統不再等它的比例。",
+      "why_or_next_step": "如果增加，檢查 AI 服務速度、網路或可調整等待上限。",
+      "important_note": "即使放棄等 AI，原本影片通知仍應正常進行。"
+    },
+    "ai_success": {
+      "label": "AI 分析成功比例",
+      "technical_alias": "AI success rate",
+      "what": "實際已送出的分析請求中，有多少得到可使用的結果。",
+      "why_or_next_step": "低時查看超時、限流或答案格式錯誤。",
+      "important_note": "沒呼叫 AI 的略過事件須另外計數。"
+    },
+    "ai_coverage": {
+      "label": "通知有使用 AI 建議的比例",
+      "technical_alias": "AI caption coverage",
+      "what": "已發出的事件影片通知中，有多少在送出前拿到可用的 AI 動作摘要。",
+      "why_or_next_step": "低時比對 AI 速度與影片準備時間，看是否需要調整等待。",
+      "important_note": "AI 沒趕上首則通知仍可更新 Dashboard。"
+    },
+    "extra_wait": {
+      "label": "為 AI 額外等待幾秒",
+      "technical_alias": "Telegram extra AI wait",
+      "what": "影片已準備好後，為了等 AI 建議而增加的等待時間。",
+      "why_or_next_step": "想要更快收到影片可調低等待秒數。",
+      "important_note": "不是整段影片的製作時間，也不是 Telegram 上傳時間。"
+    },
+    "valid_event": {
+      "label": "這次活動是否真的有效",
+      "technical_alias": "review validity",
+      "what": "人工檢查這筆事件是否真的包含可評估的貓咪活動。",
+      "why_or_next_step": "誤偵測可標記無效，讓 AI 品質統計更準確。",
+      "important_note": "無效事件仍不能從 API 故障與成本統計消失。"
+    },
+    "tag_review": {
+      "label": "確認 AI 看得對不對",
+      "technical_alias": "TAG review",
+      "what": "你可以接受、刪除或新增「#理毛」「#進食」等標籤，也可改正發生時間。",
+      "why_or_next_step": "回報動作看錯時修改，系統保留歷史而不覆寫原始建議。",
+      "important_note": "AI 建議不等於人工已確認。"
+    },
+    "unknown": {
+      "label": "還不能確定是哪隻貓",
+      "technical_alias": "Unknown",
+      "what": "系統看到貓，但證據不足以可靠分辨是哪一隻。",
+      "why_or_next_step": "可以查看相似照片、再確認或補充清楚的貓咪照片。",
+      "important_note": "不知道比猜錯更好，不應被自動當成貓 A。"
+    },
+    "ai_skip": {
+      "label": "這次沒有使用外部 AI",
+      "technical_alias": "skipped / fallback",
+      "what": "因沒有開啟、連線不通、太忙或超過額度，系統跳過雲端分析。",
+      "why_or_next_step": "可以在設定檢查原因，也可以保持本機模式。",
+      "important_note": "不表示沒有偵測到貓，也不會取消影片通知。"
+    },
+    "ptz_zone": {
+      "label": "鏡頭轉向後的位置是否還準",
+      "technical_alias": "PTZ scene / ROI",
+      "what": "攝影機如果轉向或變焦，之前標的飲水區、飼料碗和貓砂盆位置可能已經不準。",
+      "why_or_next_step": "請切回已校正的鏡頭視角，或重新標記位置。",
+      "important_note": "舊位置不應再用來肯定判斷喝水或進食。"
+    },
+    "sample_size": {
+      "label": "這份統計看了幾筆",
+      "technical_alias": "sample size / n",
+      "what": "目前選擇的日期與篩選條件，實際納入計算的事件或請求數量。",
+      "why_or_next_step": "樣本太少時不要太相信平均或 P95。",
+      "important_note": "不同圖表的樣本數可能不同，需註明。"
+    },
+    "data_missing": {
+      "label": "這段時間沒有可用記錄",
+      "technical_alias": "missing / stale",
+      "what": "可能因沒有活動、資料尚未收集、裝置離線或記錄已過期而看不到數據。",
+      "why_or_next_step": "查看最後更新時間及設備狀態。",
+      "important_note": "沒有數據不代表耗時是零，也不代表全程正常。"
+    }
+  }
+}

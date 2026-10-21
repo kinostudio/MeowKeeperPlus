@@ -1,0 +1,807 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="content-heading"><div><p class="eyebrow">看見牠的每一刻</p><h2>即時畫面</h2></div><small>顯示最近收到的畫面；預覽更新速度可能低於原始錄影幀率。開啟多個網頁仍共用同一來源。</small></div>
+<section class="panel">
+  <div class="preview-stage">
+    <img id="preview-image" class="preview-image" alt="MeowKeeper+ 即時影格" hidden>
+    <div id="preview-empty" class="preview-empty" role="status" aria-live="polite">
+      <span class="preview-empty-icon" aria-hidden="true">◉</span>
+      <strong>尚未收到即時影格</strong>
+      <span>Mock 僅供流程測試，不會產生真實影像。要查看畫面，請設定 RTSP、YouTube 或本機影片來源並開始監控。</span>
+    </div>
+    <div id="preview-ptz-directions" class="ptz-virtual-pad" role="group" aria-label="鏡頭方向；每次短步移動後讀回位置" hidden>
+      <button type="button" data-ptz-action="move" data-ptz-direction="up" aria-label="向上短步移動" title="向上">↑</button>
+      <button type="button" data-ptz-action="move" data-ptz-direction="down" aria-label="向下短步移動" title="向下">↓</button>
+      <button type="button" data-ptz-action="move" data-ptz-direction="left" aria-label="向左短步移動" title="向左">←</button>
+      <button type="button" data-ptz-action="move" data-ptz-direction="right" aria-label="向右短步移動" title="向右">→</button>
+      <button type="button" data-ptz-action="stop" aria-label="停止移動" title="停止（Esc）">■</button>
+    </div>
+    <output id="ptz-position-hud" class="ptz-position-hud" role="status" aria-live="polite" hidden>
+      <svg id="ptz-position-hud-map" class="ptz-position-hud-map ptz-coordinate-map" viewBox="0 0 132 88" tabindex="-1" role="img" aria-label="鏡頭位置讀回參考圖；定位尚未經此型號實機驗證" aria-disabled="true" hidden>
+        <rect x="10" y="8" width="100" height="64" rx="7" fill="rgba(255,255,255,.12)" stroke="rgba(255,255,255,.55)"/>
+        <path d="M60 8V72 M10 40H110" stroke="rgba(255,255,255,.34)" stroke-dasharray="3 3"/>
+        <circle id="ptz-position-hud-dot" cx="60" cy="40" r="5" fill="#f0b36f" stroke="#fff" stroke-width="1.5" visibility="hidden"/>
+        <path class="ptz-position-trail" fill="none" stroke="#f0b36f" stroke-dasharray="3 3"/>
+        <circle class="ptz-target-dot" r="5" fill="none" stroke="#fff" stroke-width="2" visibility="hidden"/>
+        <text x="60" y="84" text-anchor="middle">水平 0–101</text>
+        <text x="2" y="42" text-anchor="middle" transform="rotate(-90 2 42)">垂直</text>
+        <text x="116" y="13">101</text>
+        <text x="116" y="72">0</text>
+      </svg>
+      <span id="ptz-position-hud-text"></span>
+    </output>
+    <div class="preview-toolbar" aria-label="即時畫面操作">
+      <button class="button secondary" id="preview-fullscreen" type="button" disabled>全螢幕</button>
+      <button class="button secondary" type="button" data-save-capture="photo" aria-describedby="capture-help">截圖</button>
+      <button class="button secondary" type="button" data-save-capture="video" aria-describedby="capture-help">錄影（15秒）</button>
+    </div>
+  </div>
+  <p id="preview-message" class="muted" role="status" aria-live="polite">正在確認來源與影格狀態…</p>
+  <p id="preview-metadata" class="muted" aria-live="polite">解析度：尚未取得｜FPS：尚未取得</p>
+  <p id="capture-help" class="field-help">截圖優先從既有影音快取保存原始解析度；無法取得時改用預覽並顯示實際尺寸。即時預覽仍可維持 1080p，截圖不另開攝影機連線。影片取按下按鈕之前的壓縮影音快取。保存於 Host 資料主目錄的 photo／video 資料夾（可攜版 data；安裝版 ProgramData 的 Data）。啟動初期片段可能不足 15 秒；畫面會回報實際長度。手動保存檔案由你保留，請定期整理磁碟。</p>
+  <p id="capture-result" role="status" aria-live="polite"></p>
+  <div class="actions" aria-label="即時畫面操作">
+    <button class="button secondary" data-action="refresh">重新讀取</button>
+  </div>
+</section>
+<div class="live-control-columns">
+<section class="panel" aria-labelledby="live-quality-title" id="live-quality-panel">
+  <div class="panel-heading">
+    <div>
+      <h3 id="live-quality-title">即時畫面畫質</h3>
+  <p id="live-quality-device" class="muted">只有已接入的單一 Xiaomi 來源可以切換；尚未接入時仍會顯示選項，但按鈕會停用。</p>
+    </div>
+    <span id="live-quality-status" class="status-pill status-unknown">尚未確認</span>
+  </div>
+  <p class="field-help">選項會替換同一個本機 go2rtc stream，不會新增攝影機連線。預設為 subtype=1；切換期間畫面可能短暫等待重新取得影格。</p>
+  <div class="actions">
+    <label for="live-quality-profile">Xiaomi profile</label>
+    <select id="live-quality-profile" aria-describedby="live-quality-help" disabled>
+      <option value="subtype=1">subtype=1（SD）</option>
+      <option value="subtype=2">subtype=2（通常 HD）</option>
+      <option value="subtype=3">subtype=3（部分新機高畫質）</option>
+      <option value="subtype=auto">subtype=auto（自動）</option>
+      <option value="subtype=sd">SD（協定別名）</option>
+      <option value="subtype=hd">HD（依機型映射）</option>
+      <option value="subtype=0">0（自動）</option>
+      <option value="subtype=4">4（進階，需實測）</option>
+      <option value="subtype=5">5（進階，需實測）</option>
+    </select>
+    <button class="button secondary" id="live-quality-apply" type="button" disabled>套用畫質</button>
+  </div>
+  <p id="live-quality-help" class="muted" role="status" aria-live="polite">尚未載入目前畫質。</p>
+  <p class="field-help">代碼不是固定像素：通常 1／SD 是低畫質，2／HD 是高畫質；部分新機用 3，舊機可能不支援 3。C701 社群回報 0～2 為 480p、3 為 2160p，並非所有韌體保證；026c02 也有 subtype=2 為 1920×1080 的實測。請以上方目前攝影機的驗證結果為準，不把另一台的規格當成此台規格。<a href="https://github.com/AlexxIT/go2rtc/issues/1982" target="_blank" rel="noopener noreferrer">go2rtc 機型回報</a>。預覽、錄影及 AI 共用單一來源；AI 分析尺寸可在「設定 → AI 與行為參數」調整，過載時會自動降階。</p>
+</section>
+<section class="panel" aria-labelledby="live-ptz-title">
+  <div class="panel-heading">
+    <div>
+      <h3 id="live-ptz-title">Xiaomi MISS PTZ 方向控制</h3>
+      <p id="live-ptz-device" class="muted">正在讀取目前接入的 Xiaomi 攝影機…</p>
+    </div>
+    <span id="live-ptz-status" class="status-pill status-unknown">尚未確認</span>
+  </div>
+  <p id="live-ptz-message" class="muted" role="status" aria-live="polite">
+    PTZ 代表可轉動鏡頭的方向控制（轉動後{{ term_help('ptz_zone', '視角與標記區域') }}可能改變）。只有已接入且支援 Xiaomi MISS PTZ 的攝影機會顯示按鈕；不支援轉動的機型無法使用。
+  </p>
+  <a id="privacy-diagnostics-link" href="/diagnostics#xiaomi-control-diagnostics" class="button secondary" hidden>查看本次控制診斷</a>
+  <div id="live-ptz-controls" class="actions" hidden>
+    <button class="button secondary" type="button" data-ptz-refresh="true" aria-describedby="ptz-position-help">讀取目前位置</button>
+    <button class="button secondary" type="button" data-privacy-action="capture">保存目前為隱私位置</button>
+    <label for="privacy-mode">隱私方式</label>
+    <select id="privacy-mode">
+      <option value="position">轉到指定位置</option>
+      <option value="standby">隱私待機（MIoT 原生開關，需讀回確認）</option>
+    </select>
+    <small id="privacy-mode-help" class="field-help" data-help-for="privacy-mode">「指定位置」只轉開鏡頭；「隱私待機」先讀回並保存目前角度，再透過小米雲端關閉攝影機開關，畫面會中斷。恢復時會等待串流與 PTZ 重連、移回原角度並讀回確認；最多等待約 25 秒，失敗保留原位置供重試。舊版待機紀錄若沒有原座標，無法補猜位置。不代表切斷電源或實體遮罩。操作需網路與此裝置所屬的小米登入狀態。</small>
+    <button class="button secondary" type="button" data-privacy-action="set_mode">保存隱私方式</button>
+    <button class="button secondary" type="button" data-privacy-action="hide">啟用隱私模式</button>
+    <button class="button secondary" type="button" data-privacy-action="show">恢復監控</button>
+  </div>
+  <p id="ptz-position-result" role="status" aria-live="polite">目前位置：尚未讀取。</p>
+  <p id="ptz-position-help" class="muted">載入時自動讀取一次初始位置；每次短步移動前後查詢裝置，成功讀回後會在畫面疊加半透明座標圖 4 秒，並標示位置變化。讀取失敗或數字未變時會明確標示，不推算位置。水平與垂直數字是裝置座標，不是角度；圖點不代表房間方向或實際視野。僅在有效位置與絕對定位能力確認後，才能使用位置隱私操作。</p>
+  <figure aria-labelledby="ptz-map-caption" style="max-width:480px;margin:1rem 0">
+    <svg id="ptz-coordinate-map" class="ptz-coordinate-map" viewBox="0 0 320 180" tabindex="-1" role="img" aria-label="鏡頭位置讀回參考圖；定位尚未經此型號實機驗證" aria-disabled="true" style="width:100%;height:auto">
+      <rect x="30" y="15" width="260" height="140" rx="10" fill="#eee7dc" stroke="#85765f"/>
+      <path d="M160 15V155 M30 85H290" stroke="#b8aa95" stroke-dasharray="4 4"/>
+      <text x="160" y="12" text-anchor="middle" font-size="10">垂直座標 101</text>
+      <text x="160" y="173" text-anchor="middle" font-size="10">水平座標 0 → 101；垂直底端 0</text>
+      <circle id="ptz-position-dot" cx="160" cy="85" r="7" fill="#786144" visibility="hidden"/>
+      <path class="ptz-position-trail" fill="none" stroke="#99451e" stroke-width="2" stroke-dasharray="4 4"/>
+      <circle class="ptz-target-dot" r="7" fill="none" stroke="#99451e" stroke-width="2" visibility="hidden"/>
+    </svg>
+    <figcaption id="ptz-map-caption" class="field-help">位置讀回參考圖：尚未讀取。圖示線性映射裝置 0～101 座標，不代表角度、房間方向或實際視野。此型號尚未實機驗證絕對定位，圖面僅供查看，不能點擊移動；方向鍵仍可用。</figcaption>
+  </figure>
+  <p class="field-help">畫面旁 ↑ ↓ ← → 每按一次短步移動並自動送出停止。此頁可使用鍵盤方向鍵，Esc 停止；輸入文字、選單操作時不控制鏡頭。若左右馬達異常，請只使用上下；命令送出不代表鏡頭已實際移動。</p>
+</section>
+</div>
+<script>
+(function () {
+  const image = document.getElementById("preview-image");
+  if (!image) return;
+  const empty = document.getElementById("preview-empty");
+  const message = document.getElementById("preview-message");
+  const metadata = document.getElementById("preview-metadata");
+  const previewStage = document.querySelector(".preview-stage");
+  const fullscreenButton = document.getElementById("preview-fullscreen");
+  const ptzDevice = document.getElementById("live-ptz-device");
+  const ptzStatus = document.getElementById("live-ptz-status");
+  const ptzMessage = document.getElementById("live-ptz-message");
+  const ptzControls = document.getElementById("live-ptz-controls");
+  const directionControls = document.getElementById("preview-ptz-directions");
+  const qualityPanel = document.getElementById("live-quality-panel");
+  const qualityDevice = document.getElementById("live-quality-device");
+  const qualityStatus = document.getElementById("live-quality-status");
+  const qualityProfile = document.getElementById("live-quality-profile");
+  const qualityApply = document.getElementById("live-quality-apply");
+  const qualityHelp = document.getElementById("live-quality-help");
+  let sharedPreview = null;
+  let activePtzDeviceId = null;
+  let activeQualityDeviceId = null;
+  let ptzRequestInFlight = false;
+  let ptzMoveStarted = false;
+  let ptzStopVersion = 0;
+  let positionReadbackVerified = false;
+  let absoluteMoveVerified = false;
+  let privacyRestorePending = false;
+  let positionDeviceId = null;
+  let initialPositionDeviceId = null;
+  let positionHudTimer = null;
+  let ptzLoadInFlight = false;
+  let lastPosition = null;
+  let metadataSourceEpoch = null;
+  let selectedTarget = null;
+  let positionLimits = { angle_min: 1, angle_max: 101, elevation_min: 1, elevation_max: 101 };
+  function showPositionHud(text, position = null) {
+    const hud = document.getElementById("ptz-position-hud");
+    const map = document.getElementById("ptz-position-hud-map");
+    const dot = document.getElementById("ptz-position-hud-dot");
+    const valid = Number.isInteger(position?.angle) && Number.isInteger(position?.elevation)
+      && position.angle >= 0 && position.angle <= 101 && position.elevation >= 0 && position.elevation <= 101;
+    map.hidden = !valid;
+    dot.setAttribute("visibility", valid ? "visible" : "hidden");
+    if (valid) {
+      dot.setAttribute("cx", String(10 + position.angle / 101 * 100));
+      dot.setAttribute("cy", String(72 - position.elevation / 101 * 64));
+    }
+    document.getElementById("ptz-position-hud-text").textContent = text;
+    hud.setAttribute("aria-label", valid ? `位置讀回：水平 ${position.angle}，垂直 ${position.elevation}。${text}` : text);
+    window.clearTimeout(positionHudTimer);
+    hud.hidden = false;
+    positionHudTimer = window.setTimeout(() => { hud.hidden = true; }, 4000);
+  }
+  async function readPtzPosition(deviceId, { before = null, overlay = false, operationId = null } = {}) {
+    try {
+      const operationQuery = operationId ? `&operation_id=${encodeURIComponent(operationId)}` : "";
+      const response = await fetch(`/api/v1/cameras/xiaomi/devices/${encodeURIComponent(deviceId)}/ptz?refresh=true${operationQuery}`, {
+        cache: "no-store", signal: AbortSignal.timeout(10000), headers: { Accept: "application/json" },
+      });
+      const data = await response.json();
+      if (deviceId !== activePtzDeviceId) return null;
+      const position = data.state?.position;
+      const valid = response.ok && data.success === true && data.position_readback_verified === true
+        && Number.isInteger(position?.angle) && Number.isInteger(position?.elevation)
+        && position.angle >= 0 && position.angle <= 101 && position.elevation >= 0 && position.elevation <= 101;
+      if (!valid) throw new Error("未取得可驗證的座標");
+      positionDeviceId = deviceId;
+      positionReadbackVerified = true;
+      absoluteMoveVerified = data.state?.capabilities?.absolute_move === true;
+      const limits = data.state?.limits || {};
+      for (const axis of ["angle", "elevation"]) {
+        const low=limits[axis+"_min"],high=limits[axis+"_max"];
+        positionLimits[axis+"_min"] = Number.isInteger(low) ? Math.max(1,low) : 1;
+        positionLimits[axis+"_max"] = Number.isInteger(high) ? Math.min(101,high) : 101;
+        if(positionLimits[axis+"_min"]>positionLimits[axis+"_max"])absoluteMoveVerified=false;
+      }
+      renderPositionReference(position, true);
+      const signed = (value) => value > 0 ? `+${value}` : String(value);
+      const delta = before ? (before.angle === position.angle && before.elevation === position.elevation
+        ? "｜座標未變，未確認實際位移"
+        : `｜變化：水平 ${signed(position.angle - before.angle)}／垂直 ${signed(position.elevation - before.elevation)}`)
+        : "｜未取得移動前座標，不推算變化";
+      const text = `水平 ${position.angle}／垂直 ${position.elevation}${overlay ? delta : "（本次讀回）"}`;
+      document.getElementById("ptz-position-result").textContent = `目前位置：${text}`;
+      setPositionControls(positionReadbackVerified);
+      if (overlay) showPositionHud(text, position);
+      return { angle: position.angle, elevation: position.elevation };
+    } catch (_) {
+      if (deviceId !== activePtzDeviceId) return null;
+      positionReadbackVerified = false;
+      absoluteMoveVerified = false;
+      renderPositionReference(null, false);
+      setPositionControls(false);
+      document.getElementById("ptz-position-result").textContent = "目前位置：讀取失敗；未取得可驗證的座標，可按「讀取目前位置」重試。";
+      if (overlay) showPositionHud("位置讀回失敗；未確認位置變化");
+      return null;
+    }
+  }
+  function renderPositionReference(position, verified) {
+    const dot = document.getElementById("ptz-position-dot");
+    const caption = document.getElementById("ptz-map-caption");
+    const valid = verified && Number.isInteger(position?.angle) && Number.isInteger(position?.elevation)
+      && position.angle >= 0 && position.angle <= 101 && position.elevation >= 0 && position.elevation <= 101;
+    lastPosition = valid ? {angle:position.angle,elevation:position.elevation} : null;
+    dot.setAttribute("visibility", valid ? "visible" : "hidden");
+    dot.removeAttribute("hidden");
+    if (valid) {
+      dot.setAttribute("cx", String(30 + position.angle / 101 * 260));
+      dot.setAttribute("cy", String(155 - position.elevation / 101 * 140));
+    }
+    caption.textContent = valid
+      ? `本次裝置讀回：水平 ${position.angle}／垂直 ${position.elevation}。圖點按裝置座標比例呈現，不是角度或實際視野。${absoluteMoveVerified ? "此型號已驗證絕對定位，可點選目標。" : "目前只有位置讀回證據，沒有此型號絕對移動的實機證據；點選定位已停用，方向鍵仍可用。"}`
+      : "裝置座標參考圖：沒有本次有效讀回，不顯示位置點。不是角度或實際視野。";
+  }
+  let nativeStandbyAvailable = false;
+  function setPositionControls(available) {
+    const canPosition = Boolean(available && positionReadbackVerified && absoluteMoveVerified);
+    document.querySelectorAll('.ptz-coordinate-map').forEach(map=>{
+      const enabled = canPosition && !ptzRequestInFlight;
+      map.setAttribute('aria-disabled',String(!enabled));
+      map.setAttribute('role',enabled?'group':'img');
+      map.setAttribute('tabindex',enabled?'0':'-1');
+      map.setAttribute('aria-label',enabled
+        ? '點選鏡頭裝置座標；方向鍵選點，Enter 定位，Esc 停止'
+        : '鏡頭位置讀回參考圖；此型號絕對定位尚未實機驗證，請使用方向鍵');
+    });
+    const standby = document.getElementById("privacy-mode").value === "standby";
+    ptzControls.querySelectorAll("[data-privacy-action]").forEach((button) => {
+      const action = button.dataset.privacyAction;
+      button.disabled = !activePtzDeviceId || (action === "capture" ? !canPosition
+        : action === "set_mode" ? false
+        : action === "show" ? !(privacyRestorePending || canPosition)
+        : !canPosition || (standby && !nativeStandbyAvailable));
+    });
+  }
+  document.getElementById("privacy-mode").addEventListener("change", () => setPositionControls(positionReadbackVerified));
+  let qualityRequestInFlight = false;
+  let verifiedSourceMetadata = null;
+  let qualitySwitchAvailable = false;
+
+  function updateFullscreenAvailability() {
+    if (!fullscreenButton) return;
+    const displaying = sharedPreview?.isDisplaying() || (!image.hidden && Boolean(image.src));
+    fullscreenButton.disabled = !displaying || !(document.fullscreenEnabled || previewStage?.requestFullscreen);
+    fullscreenButton.textContent = document.fullscreenElement === previewStage ? "退出全螢幕" : "全螢幕";
+  }
+
+  async function toggleFullscreen() {
+    if (!previewStage || !(sharedPreview?.isDisplaying() || (!image.hidden && image.src))) return;
+    try {
+      if (document.fullscreenElement) await document.exitFullscreen();
+      else if (previewStage.requestFullscreen) await previewStage.requestFullscreen();
+    } catch (_) {
+      message.textContent = "瀏覽器拒絕全螢幕；請使用瀏覽器的全螢幕權限。";
+    } finally {
+      updateFullscreenAvailability();
+    }
+  }
+
+  fullscreenButton?.addEventListener("click", toggleFullscreen);
+  document.addEventListener("fullscreenchange", updateFullscreenAvailability);
+
+  function setMetadata(data) {
+    if(data?.source_epoch!==undefined&&data.source_epoch!==null){
+      if(metadataSourceEpoch!==null&&metadataSourceEpoch!==data.source_epoch){
+        ptzStopVersion++;positionReadbackVerified=false;lastPosition=null;selectedTarget=null;
+        activePtzDeviceId=null;activeQualityDeviceId=null;initialPositionDeviceId=null;
+        verifiedSourceMetadata=null;drawTarget(null);renderPositionReference(null,false);setPositionControls(false);
+        document.getElementById('ptz-position-hud').hidden=true;
+      }
+      metadataSourceEpoch=data.source_epoch;
+    }
+    window.MeowKeeperMonitorUI?.preview(data, verifiedSourceMetadata);
+    const resolution = data?.resolution || "尚未取得";
+    const fps = Number.isFinite(Number(data?.fps)) ? `${Number(data.fps).toFixed(2)} FPS` : "尚未取得";
+    const source = verifiedSourceMetadata;
+    const original = source?.width && source?.height
+      ? `${source.width}×${source.height}｜${source.fps ?? "未知"} FPS｜${source.video_codec || "未知編碼"}`
+      : "尚未驗證目前畫質";
+    metadata.textContent = `來源原始規格（最近驗證）：${original}｜預覽解析度：${resolution}｜預覽更新：${fps}（可另有縮放／採樣）｜AI 輸入：${data?.ai_input_size || "尚未取得"} 像素級｜AI 分析：${data?.ai_analysis_fps ?? "尚未取得"} FPS`;
+  }
+
+  async function refreshMetadata() {
+    if (document.hidden) return;
+    try {
+      const response = await fetch(`/api/v1/preview/status?ts=${Date.now()}`, {
+        cache: "no-store",
+        headers: { Accept: "application/json" },
+      });
+      if (!response.ok) {
+        metadata.textContent = response.status === 401 ? "解析度：需重新登入｜FPS：需重新登入" : "解析度：暫不可用｜FPS：暫不可用";
+        return;
+      }
+      setMetadata(await response.json());
+    } catch (_) {
+      metadata.textContent = "解析度：暫不可用｜FPS：暫不可用";
+    }
+  }
+
+  function csrfToken() {
+    return decodeURIComponent(document.cookie.split(";").map((value) => value.trim())
+      .find((value) => value.startsWith("meowkeeper_csrf="))?.split("=").slice(1).join("=") || "");
+  }
+
+  document.querySelectorAll("[data-save-capture]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      const buttons = document.querySelectorAll("[data-save-capture]");
+      const result = document.getElementById("capture-result");
+      buttons.forEach((item) => { item.disabled = true; });
+      result.textContent = "正在保存到這台 Host 電腦，請稍候…";
+      try {
+        const response = await fetch("/api/v1/live/save", {
+          method: "POST", credentials: "same-origin",
+          headers: { "Content-Type": "application/json", "X-MeowKeeper-CSRF": csrfToken() },
+          body: JSON.stringify({ kind: button.dataset.saveCapture })
+        });
+        const payload = await response.json();
+        result.textContent = payload.message_zh_tw || payload.detail || "保存失敗，請確認登入與監控狀態。";
+      } catch (_) {
+        result.textContent = "無法取得保存結果；請檢查 Host 連線及 photo／video 資料夾，避免重複保存。";
+      } finally {
+        buttons.forEach((item) => { item.disabled = false; });
+      }
+    });
+  });
+
+  function setPtzMessage(text, status = "尚未確認") {
+    ptzMessage.textContent = text;
+    ptzStatus.textContent = status;
+    ptzStatus.className = `status-pill ${["可用", "成功"].includes(status) ? "status-ok" : status === "未啟用" ? "status-warn" : status === "失敗" ? "status-error" : "status-unknown"}`;
+  }
+
+  function setPtzControlsEnabled(enabled) {
+    ptzControls.hidden = !enabled;
+    directionControls.hidden = !enabled;
+    directionControls.querySelectorAll("button").forEach((button) => { button.disabled = !enabled; });
+    ptzControls.querySelectorAll("button").forEach((button) => { button.disabled = !enabled; });
+    setPositionControls(enabled && positionReadbackVerified);
+  }
+
+  function setQualityStatus(text, kind = "unknown") {
+    qualityStatus.textContent = text;
+    qualityStatus.className = `status-pill ${kind === "ok" ? "status-ok" : kind === "error" ? "status-error" : "status-unknown"}`;
+  }
+
+  function renderQuality(active, context = {}) {
+    verifiedSourceMetadata = active?.quality && active.quality.name === active.selected_profile ? active.quality : null;
+    if (!qualityPanel) return;
+    const fallbackOptions = ["subtype=1", "subtype=2", "subtype=3", "subtype=auto", "subtype=sd", "subtype=hd", "subtype=0", "subtype=4", "subtype=5"]
+      .map((value) => ({ value, label: `${value}（即時畫面）` }));
+    if (!active) {
+      activeQualityDeviceId = null;
+      qualitySwitchAvailable = false;
+      qualityProfile.replaceChildren();
+      fallbackOptions.forEach((item) => {
+        const option = document.createElement("option");
+        option.value = item.value;
+        option.textContent = item.label;
+        qualityProfile.appendChild(option);
+      });
+      qualityProfile.value = "subtype=1";
+      qualityProfile.disabled = true;
+      qualityApply.disabled = true;
+      const sourceIsXiaomi = context.sourceIsXiaomi === true;
+      const frameAvailable = context.pathAvailable === true;
+      const xiaomiFrameConnected = sourceIsXiaomi && frameAvailable;
+      qualityDevice.textContent = xiaomiFrameConnected
+        ? "目前已收到 Xiaomi RTSP 影格；控制端尚未回報可切換的裝置識別。"
+        : sourceIsXiaomi
+          ? "目前來源設定為 Xiaomi RTSP，但尚未取得本輪影格；請先確認 go2rtc 與監控狀態。"
+          : "目前沒有已接入的 Xiaomi 來源；請先到「來源與攝影機」完成驗證並接入。";
+      qualityHelp.textContent = xiaomiFrameConnected
+        ? "畫質選項已列出，但目前只確認 RTSP 影像；完成 Xiaomi 裝置配對後才會啟用套用。"
+        : sourceIsXiaomi
+          ? "畫質選項已列出，但目前沒有可驗證的即時影格，因此不能套用。"
+        : "畫質選項已列出，但目前來源不是已接入的 Xiaomi stream，因此不能套用。";
+      setQualityStatus(xiaomiFrameConnected ? "RTSP 已接通" : sourceIsXiaomi ? "來源已設定" : "未接入", xiaomiFrameConnected ? "ok" : "unknown");
+      qualityPanel.hidden = false;
+      return;
+    }
+    activeQualityDeviceId = String(active.internal_id || "");
+    const options = Array.isArray(active.quality_profiles) && active.quality_profiles.length
+      ? active.quality_profiles
+      : fallbackOptions;
+    qualityProfile.replaceChildren();
+    options.forEach((item) => {
+      const option = document.createElement("option");
+      option.value = String(item.value || "");
+      option.textContent = String(item.label || option.value);
+      qualityProfile.appendChild(option);
+    });
+    const selected = String(active.selected_profile || "subtype=1");
+    qualityProfile.value = options.some((item) => String(item.value) === selected) ? selected : "subtype=1";
+    qualitySwitchAvailable = active.quality_switch_available === true;
+    qualityProfile.disabled = !qualitySwitchAvailable;
+    qualityApply.disabled = !qualitySwitchAvailable;
+    const remote = active.connection_mode === "remote_relay";
+    qualityDevice.textContent = `目前來源：${String(active.display_name || "Xiaomi 攝影機")}（${remote ? "Tailscale 遠端中繼" : "本機 go2rtc"}）`;
+    qualityHelp.textContent = qualitySwitchAvailable
+      ? `目前選擇：${qualityProfile.value}。套用後會等待新的影格。`
+      : String(active.quality_switch_reason || "此來源目前無法切換畫質。");
+    setQualityStatus(qualitySwitchAvailable ? "可切換" : "尚不可切換", "unknown");
+    qualityPanel.hidden = false;
+  }
+
+  async function applyQuality() {
+    if (!activeQualityDeviceId || !qualitySwitchAvailable || qualityRequestInFlight) return;
+    qualityRequestInFlight = true;
+    qualityApply.disabled = true;
+    qualityApply.textContent = "切換中…";
+    setQualityStatus("切換中", "unknown");
+    try {
+      const response = await fetch(`/api/v1/cameras/xiaomi/devices/${encodeURIComponent(activeQualityDeviceId)}/profile`, {
+        method: "POST", cache: "no-store",
+        headers: { "Content-Type": "application/json", "Accept": "application/json", "X-MeowKeeper-CSRF": csrfToken() },
+        body: JSON.stringify({ profile: qualityProfile.value }),
+      });
+      const data = await response.json();
+      if (!response.ok || data.success !== true) throw new Error(data.message_zh_tw || `畫質切換被拒絕（HTTP ${response.status}）。`);
+      verifiedSourceMetadata = data.video_verified === true ? data.source_metadata || null : null;
+      await refreshMetadata();
+      await loadPtz();
+      setQualityStatus("成功", "ok");
+      qualityHelp.textContent = data.message_zh_tw || `已套用 ${qualityProfile.value}。`;
+    } catch (error) {
+      setQualityStatus("失敗", "error");
+      qualityHelp.textContent = error.message || "畫質切換失敗；目前來源未確認改變。";
+    } finally {
+      qualityRequestInFlight = false;
+      qualityProfile.disabled = !qualitySwitchAvailable;
+      qualityApply.disabled = !qualitySwitchAvailable;
+      qualityApply.textContent = "套用畫質";
+    }
+  }
+
+  async function loadPtz() {
+    if (ptzRequestInFlight || qualityRequestInFlight || ptzLoadInFlight) return;
+    ptzLoadInFlight = true;
+    try {
+      const response = await fetch("/api/v1/cameras/xiaomi/devices", {
+        cache: "no-store",
+        headers: { Accept: "application/json" },
+      });
+      if (!response.ok) {
+        setPtzControlsEnabled(false);
+        activePtzDeviceId = null;
+        renderQuality(null);
+        ptzDevice.textContent = "無法讀取 Xiaomi 裝置清單。";
+        setPtzMessage(response.status === 401 ? "登入已失效，請重新登入後再操作。" : "目前無法讀取方向控制狀態。", "不可用");
+        return;
+      }
+      const data = await response.json();
+      let preview = null;
+      try {
+        const previewResponse = await fetch(`/api/v1/preview/status?ts=${Date.now()}`, {
+          cache: "no-store",
+          headers: { Accept: "application/json" },
+        });
+        if (previewResponse.ok) preview = await previewResponse.json();
+      } catch (_) {
+        preview = null;
+      }
+      const active = Array.isArray(data.items) ? data.items.find((item) => item && item.selected) : null;
+      if (!active) {
+        renderPositionReference(null, false);
+        positionReadbackVerified=false;absoluteMoveVerified=false;privacyRestorePending=false;selectedTarget=null;drawTarget(null);
+        setPtzControlsEnabled(false);
+        activePtzDeviceId = null;
+        renderQuality(null, {
+          sourceIsXiaomi: preview?.source_is_xiaomi === true,
+          pathAvailable: preview?.path_available === true,
+        });
+        ptzDevice.textContent = "目前沒有已接入的 Xiaomi 攝影機。";
+        setPtzMessage(
+          preview?.source_is_xiaomi === true && preview?.path_available === true
+            ? "目前已收到 Xiaomi RTSP 影格，但尚未取得可供 PTZ 控制的裝置識別；未將畫面判定為未接入。"
+            : preview?.source_is_xiaomi === true
+              ? "目前來源設定為 Xiaomi RTSP，但尚未取得本輪影格；未執行 PTZ。"
+              : "請先在「來源與攝影機」完成畫質驗證並接入單一 Xiaomi 來源。",
+          preview?.source_is_xiaomi === true && preview?.path_available === true ? "RTSP 已接通" : "未接入",
+        );
+        return;
+      }
+      renderQuality(active);
+      activePtzDeviceId = String(active.internal_id || "");
+      if (positionDeviceId !== activePtzDeviceId) {
+        selectedTarget=null;drawTarget(null);
+        positionDeviceId = activePtzDeviceId;
+        initialPositionDeviceId = null;
+        window.clearTimeout(positionHudTimer);
+        document.getElementById("ptz-position-hud").hidden = true;
+        positionReadbackVerified = false;
+        absoluteMoveVerified = false;
+        privacyRestorePending = false;
+        renderPositionReference(null, false);
+        document.getElementById("ptz-position-result").textContent = "目前位置：尚未讀取。";
+      }
+      const name = String(active.display_name || "目前攝影機");
+      ptzDevice.textContent = `目前來源：${name}（僅控制已接入的單一來源）`;
+      const ptz = active.ptz || {};
+      if (!activePtzDeviceId) {
+        setPtzMessage("目前攝影機識別資料不完整；未執行鏡頭操作。", "不可用");
+        return;
+      }
+      setPtzControlsEnabled(ptz.enabled === true);
+      const privacyResponse = await fetch(`/api/v1/cameras/xiaomi/devices/${encodeURIComponent(activePtzDeviceId)}/privacy`, { cache: "no-store" });
+      if (privacyResponse.ok) {
+        const privacy = await privacyResponse.json();
+        document.getElementById("privacy-mode").value = privacy.mode === "standby" ? "standby" : "position";
+        nativeStandbyAvailable = privacy.standby_available === true;
+        privacyRestorePending = privacy.restore_pending === true;
+        ptzControls.hidden = false;
+        setPositionControls(positionReadbackVerified);
+      }
+      setPtzMessage(ptz.enabled ? "實驗介面已啟用；按下方向鍵才會送出一次明確控制。"
+        : "方向控制未啟用；隱私待機使用獨立 MIoT 開關，須裝置讀回確認。", ptz.enabled ? "可用" : "未啟用");
+      if (ptz.enabled === true && initialPositionDeviceId !== activePtzDeviceId) {
+        initialPositionDeviceId = activePtzDeviceId;
+        ptzRequestInFlight = true;
+        document.getElementById("ptz-position-result").textContent = "目前位置：正在讀取初始位置…";
+        try { await readPtzPosition(activePtzDeviceId); }
+        finally { ptzRequestInFlight = false; }
+      }
+    } catch (_) {
+      setPtzControlsEnabled(false);
+      activePtzDeviceId = null;
+      renderQuality(null);
+      ptzDevice.textContent = "目前無法讀取 Xiaomi 裝置清單。";
+      setPtzMessage("方向控制暫時無法連線；未執行鏡頭操作。", "不可用");
+    } finally {
+      ptzLoadInFlight = false;
+    }
+  }
+
+  async function sendPtz(payload, button) {
+    if (!activePtzDeviceId || ptzRequestInFlight || ptzLoadInFlight) return;
+    ptzRequestInFlight = true;
+    const deviceId = activePtzDeviceId;
+    const operationId = window.crypto?.randomUUID ? window.crypto.randomUUID() : null;
+    const stopVersion = ptzStopVersion;
+    let before = null;
+    let commandAccepted = false;
+    let commandMessage = "方向控制尚未確認。";
+    let stopFailed = false;
+    button.setAttribute("aria-busy", "true");
+    button.disabled = true;
+    directionControls.querySelectorAll('[data-ptz-action="move"]').forEach((item) => { item.disabled = true; });
+    ptzControls.querySelectorAll("button").forEach((item) => { item.disabled = true; });
+    try {
+      if (payload.action === "move") {
+        window.clearTimeout(positionHudTimer);
+        document.getElementById("ptz-position-hud").hidden = true;
+        before = await readPtzPosition(deviceId);
+        if (stopVersion !== ptzStopVersion) return;
+        positionReadbackVerified = false;
+        renderPositionReference(null, false);
+        ptzMoveStarted = true;
+      }
+      const response = await fetch(`/api/v1/cameras/xiaomi/devices/${encodeURIComponent(deviceId)}/ptz`, {
+        method: "POST",
+        signal: AbortSignal.timeout(4000),
+        cache: "no-store",
+        headers: { "Content-Type": "application/json", "Accept": "application/json", "X-MeowKeeper-CSRF": csrfToken() },
+        body: JSON.stringify(operationId ? { ...payload, operation_id: operationId } : payload),
+      });
+      let data = {};
+      try { data = await response.json(); } catch (_) { /* Do not render raw server bodies. */ }
+      if (!response.ok) throw new Error(data.detail || `方向控制被拒絕（HTTP ${response.status}）。`);
+      const succeeded = data.success === true || data.status === "ok";
+      commandAccepted = succeeded;
+      commandMessage = data.message_zh_tw || (succeeded ? "控制端已接受方向指令。" : "方向控制失敗。請查看診斷。");
+      setPtzMessage(commandMessage, succeeded ? "已送出" : "失敗");
+    } catch (error) {
+      commandMessage = error.message || "方向控制失敗；未確認攝影機狀態。";
+      setPtzMessage(commandMessage, "失敗");
+    } finally {
+      if (payload.action === "move") {
+        // Bounded pulse; even an uncertain move response must be followed by stop.
+        await new Promise((resolve) => window.setTimeout(resolve, 300));
+        try {
+          const stop = await fetch(`/api/v1/cameras/xiaomi/devices/${encodeURIComponent(deviceId)}/ptz`, {
+            method: "POST", keepalive: true,
+            signal: AbortSignal.timeout(3000),
+            headers: { "Content-Type": "application/json", "X-MeowKeeper-CSRF": csrfToken() },
+            body: JSON.stringify({ action: "stop" }),
+          });
+          const stopped = await stop.json();
+          if (!stop.ok || stopped.success !== true) stopFailed = true;
+        } catch (_) { stopFailed = true; }
+      }
+      ptzMoveStarted = false;
+      let after = null;
+      if (payload.action === "move") after = await readPtzPosition(deviceId, { before, overlay: true, operationId });
+      button.removeAttribute("aria-busy");
+      ptzRequestInFlight = false;
+      await loadPtz();
+      if (payload.action === "move") {
+        if (stopFailed) setPtzMessage("停止指令未確認；請按 ■ 停止並檢查攝影機。", "停止未確認");
+        else if (before && after && (before.angle !== after.angle || before.elevation !== after.elevation)) {
+          setPtzMessage(`已讀回位置變化：水平 ${before.angle}→${after.angle}，垂直 ${before.elevation}→${after.elevation}。`, "已確認位置變化");
+        } else if (commandAccepted && after) {
+          setPtzMessage("控制端已接受方向指令，但讀回座標未變；尚未確認鏡頭移動。", "尚未確認");
+        } else if (commandAccepted) {
+          setPtzMessage("控制端已接受方向指令，但位置讀回失敗；尚未確認鏡頭移動。", "尚未確認");
+        } else {
+          setPtzMessage(commandMessage, "失敗");
+        }
+      } else if (commandMessage) setPtzMessage(commandMessage, commandAccepted ? "已送出" : "失敗");
+    }
+  }
+
+  ptzControls.querySelectorAll("[data-privacy-action]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      if (!activePtzDeviceId || ptzRequestInFlight) return;
+      const action = button.dataset.privacyAction;
+      if (action === "capture" && !window.confirm("目前畫面確實避開私人區域嗎？保存後請用方向鍵回到正常監控位置。")) return;
+      if (["hide", "show"].includes(action)) {
+        positionReadbackVerified = false;
+        absoluteMoveVerified = false;
+        renderPositionReference(null, false);
+      }
+      ptzRequestInFlight = true;
+      ptzControls.querySelectorAll("button").forEach((item) => { item.disabled = true; });
+      try {
+        const response = await fetch(`/api/v1/cameras/xiaomi/devices/${encodeURIComponent(activePtzDeviceId)}/privacy`, {
+          method: "POST", cache: "no-store",
+          headers: { "Content-Type": "application/json", "X-MeowKeeper-CSRF": csrfToken() },
+          body: JSON.stringify({ action, visually_confirmed: action === "capture", mode: document.getElementById("privacy-mode").value }),
+        });
+        const data = await response.json();
+        setPtzMessage(data.message_zh_tw || "隱私操作未確認完成。", response.ok && data.success === true ? "成功" : "失敗");
+        const diagnosticLink = document.getElementById("privacy-diagnostics-link");
+        if (diagnosticLink) {
+          diagnosticLink.href = data.diagnostic_url || "/diagnostics#xiaomi-control-diagnostics";
+          diagnosticLink.hidden = response.ok && data.success === true;
+        }
+        if (action === "hide" || action === "show") privacyRestorePending = data.success === true ? action === "hide" : privacyRestorePending;
+      } catch (_) {
+        setPtzMessage("隱私操作無法連線；未確認攝影機狀態。", "失敗");
+        const diagnosticLink = document.getElementById("privacy-diagnostics-link");
+        if (diagnosticLink) diagnosticLink.hidden = false;
+      } finally {
+        ptzRequestInFlight = false;
+        ptzControls.querySelectorAll("button").forEach((item) => { item.disabled = false; });
+        setPositionControls(positionReadbackVerified);
+      }
+    });
+  });
+
+  directionControls.querySelectorAll("[data-ptz-action]").forEach((button) => {
+    button.addEventListener("click", () => {
+      if (button.dataset.ptzAction === "stop") { emergencyStop(); return; }
+      const payload = { action: button.dataset.ptzAction };
+      if (button.dataset.ptzDirection) payload.direction = button.dataset.ptzDirection;
+      sendPtz(payload, button);
+    });
+  });
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape" && !event.target?.closest?.("input, textarea, select, [contenteditable]")) {
+      emergencyStop();
+      return;
+    }
+    if (event.repeat || event.altKey || event.ctrlKey || event.metaKey || document.hidden) return;
+    if (event.target?.closest?.("input, textarea, select, [contenteditable], [role='dialog']")) return;
+    if (event.key === "Escape" && activePtzDeviceId) { event.preventDefault(); emergencyStop(); return; }
+    if (event.target.closest?.('.ptz-coordinate-map')) return;
+    if (directionControls.hidden || !activePtzDeviceId || ptzRequestInFlight) return;
+    const direction = { ArrowUp: "up", ArrowDown: "down", ArrowLeft: "left", ArrowRight: "right" }[event.key];
+    const button = direction ? directionControls.querySelector(`[data-ptz-direction="${direction}"]`)
+      : event.key === "Escape" ? directionControls.querySelector('[data-ptz-action="stop"]') : null;
+    if (!button || button.disabled) return;
+    event.preventDefault();
+    button.click();
+  });
+  async function emergencyStop() {
+    if (!activePtzDeviceId || directionControls.hidden) return;
+    ptzStopVersion += 1;
+    try {
+      const response = await fetch(`/api/v1/cameras/xiaomi/devices/${encodeURIComponent(activePtzDeviceId)}/ptz`, {
+        method: "POST", keepalive: true, signal: AbortSignal.timeout(3000),
+        headers: { "Content-Type": "application/json", "X-MeowKeeper-CSRF": csrfToken() },
+        body: JSON.stringify({ action: "stop" }),
+      });
+      const data = await response.json();
+      setPtzMessage(data.message_zh_tw || "停止指令未確認。", response.ok && data.success === true ? "成功" : "失敗");
+    } catch (_) { setPtzMessage("停止指令無法連線；請確認畫面與攝影機。", "失敗"); }
+  }
+
+  function drawTarget(target, before = null) {
+    document.querySelectorAll('.ptz-coordinate-map').forEach(map => {
+      const small=map.id==='ptz-position-hud-map',left=small?10:30,top=small?8:15,w=small?100:260,h=small?64:140;
+      const dot=map.querySelector('.ptz-target-dot'),trail=map.querySelector('.ptz-position-trail');
+      dot.setAttribute('visibility',target?'visible':'hidden');
+      if(target){dot.setAttribute('cx',String(left+target.angle/101*w));dot.setAttribute('cy',String(top+(1-target.elevation/101)*h));}
+      trail.setAttribute('d',target&&before?`M${left+before.angle/101*w} ${top+(1-before.elevation/101)*h}L${left+target.angle/101*w} ${top+(1-target.elevation/101)*h}`:'');
+    });
+  }
+  async function moveToPoint(target) {
+    if(!activePtzDeviceId||!positionReadbackVerified||!absoluteMoveVerified||!lastPosition||ptzRequestInFlight||ptzLoadInFlight)return;
+    const device=activePtzDeviceId,before={...lastPosition},version=ptzStopVersion;
+    const operationId=window.crypto?.randomUUID?window.crypto.randomUUID():null;
+    ptzRequestInFlight=true;setPositionControls(false);selectedTarget={...target};drawTarget(target,before);
+    directionControls.querySelectorAll('[data-ptz-action="move"]').forEach(b=>b.disabled=true);
+    try{
+      setPtzMessage('正在移動至選取座標，等待裝置讀回…','定位中');
+      const requestBody={action:'position',...target};if(operationId)requestBody.operation_id=operationId;
+      const response=await fetch(`/api/v1/cameras/xiaomi/devices/${encodeURIComponent(device)}/ptz`,{method:'POST',cache:'no-store',signal:AbortSignal.timeout(12000),headers:{'Content-Type':'application/json','X-MeowKeeper-CSRF':csrfToken()},body:JSON.stringify(requestBody)});
+      const data=await response.json();if(!response.ok||data.success!==true)throw new Error(data.message_zh_tw||'定位指令未確認。');
+      const deadline=performance.now()+12000;let actual=null;
+      while(performance.now()<deadline&&device===activePtzDeviceId&&version===ptzStopVersion){
+        actual=await readPtzPosition(device,{operationId});
+        if(actual&&Math.abs(actual.angle-target.angle)<=2&&Math.abs(actual.elevation-target.elevation)<=2){
+          drawTarget(target,before);showPositionHud('已讀回確認到位',actual);setPtzMessage('已讀回確認鏡頭到達選取位置。','成功');return;
+        }
+        await new Promise(resolve=>setTimeout(resolve,350));
+      }
+      if(device===activePtzDeviceId){drawTarget(target,before);showPositionHud('尚未確認到位；空心點為目標，實心點為讀回位置',actual);setPtzMessage('尚未確認到達目標；請查看畫面或按停止。','失敗');}
+    }catch(error){if(device===activePtzDeviceId){showPositionHud('定位未完成；請查看畫面');setPtzMessage(error.message||'定位未完成。','失敗');}}
+    finally{
+      try{const stopped=await fetch(`/api/v1/cameras/xiaomi/devices/${encodeURIComponent(device)}/ptz`,{method:'POST',signal:AbortSignal.timeout(3000),headers:{'Content-Type':'application/json','X-MeowKeeper-CSRF':csrfToken()},body:JSON.stringify({action:'stop'})});const reply=await stopped.json();if(!stopped.ok||reply.success!==true)throw new Error('stop_not_confirmed');}catch(_){showPositionHud('停止未確認；請檢查攝影機。');setPtzMessage('停止未確認；請檢查攝影機。','失敗');}
+      ptzRequestInFlight=false;setPositionControls(positionReadbackVerified);directionControls.querySelectorAll('[data-ptz-action="move"]').forEach(b=>b.disabled=!activePtzDeviceId);
+    }
+  }
+  document.querySelectorAll('.ptz-coordinate-map').forEach(map=>{
+    const clamp=(n,axis)=>Math.min(positionLimits[axis+'_max'],Math.max(positionLimits[axis+'_min'],Math.round(n)));
+    map.addEventListener('click',event=>{
+      if(map.getAttribute('aria-disabled')==='true'||ptzRequestInFlight)return;
+      const small=map.id==='ptz-position-hud-map',p=map.createSVGPoint();p.x=event.clientX;p.y=event.clientY;
+      const matrix=map.getScreenCTM();if(!matrix)return;const q=p.matrixTransform(matrix.inverse()),left=small?10:30,top=small?8:15,w=small?100:260,h=small?64:140;
+      if(q.x<left||q.x>left+w||q.y<top||q.y>top+h)return;
+      moveToPoint({angle:clamp((q.x-left)/w*101,'angle'),elevation:clamp((1-(q.y-top)/h)*101,'elevation')});
+    });
+    map.addEventListener('keydown',event=>{
+      if(event.key==='Escape'){event.preventDefault();event.stopPropagation();emergencyStop();return;}
+      if(map.getAttribute('aria-disabled')==='true'||!lastPosition)return;
+      const deltas={ArrowLeft:[-1,0],ArrowRight:[1,0],ArrowUp:[0,1],ArrowDown:[0,-1]},delta=deltas[event.key];
+      if(delta){event.preventDefault();event.stopPropagation();const step=event.shiftKey?5:1,p=selectedTarget||lastPosition;selectedTarget={angle:clamp(p.angle+delta[0]*step,'angle'),elevation:clamp(p.elevation+delta[1]*step,'elevation')};drawTarget(selectedTarget);map.setAttribute('aria-label',`目標水平 ${selectedTarget.angle}，垂直 ${selectedTarget.elevation}；Enter 定位，Esc 停止`);}
+      else if(event.key==='Enter'){event.preventDefault();moveToPoint(selectedTarget||lastPosition);}
+    });
+  });
+  document.addEventListener("keyup", (event) => {
+    if (ptzMoveStarted && event.key.startsWith("Arrow") && !event.target?.closest?.("input, textarea, select, [contenteditable]")) emergencyStop();
+  });
+  window.addEventListener("blur", () => { if (ptzRequestInFlight) emergencyStop(); });
+  qualityApply?.addEventListener("click", applyQuality);
+  ptzControls.querySelector("[data-ptz-refresh]")?.addEventListener("click", async (event) => {
+    if (!activePtzDeviceId || ptzRequestInFlight) return;
+    const button = event.currentTarget;
+    ptzRequestInFlight = true;
+    const original = button.textContent;
+    button.disabled = true;
+    button.textContent = "讀取中…";
+    try {
+      const position = await readPtzPosition(activePtzDeviceId, { overlay: true });
+      setPtzMessage(position ? "已讀取裝置目前位置。" : "位置讀取失敗；未確認座標。", position ? "可用" : "失敗");
+    } catch (error) {
+      positionReadbackVerified = false;
+      absoluteMoveVerified = false;
+      renderPositionReference(null, false);
+      setPositionControls(false);
+      document.getElementById("ptz-position-result").textContent = "目前位置：讀取失敗；未取得可驗證的座標。";
+      setPtzMessage(error.message || "方向狀態讀取失敗。", "失敗");
+    } finally {
+      button.textContent = original;
+      ptzRequestInFlight = false;
+      const resultText = ptzMessage.textContent;
+      const resultStatus = ptzStatus.textContent;
+      await loadPtz();
+      if (resultText) setPtzMessage(resultText, resultStatus);
+    }
+  });
+
+  loadPtz();
+  // The relay capability probe runs in the Host background. Refresh once
+  // after it resolves, then retry sparingly while the control channel is down.
+  const previewPaused = () => document.hidden || sharedPreview?.mode() === "sleep";
+  window.setTimeout(() => { if (!previewPaused()) loadPtz(); }, 2000);
+  window.setInterval(() => { if (!previewPaused() && !qualitySwitchAvailable) loadPtz(); }, 15000);
+
+  function schedule() {
+    if(sharedPreview) return;
+    sharedPreview=window.MeowKeeperPreview.mount({image,empty,note:message,scope:"live",defaultMode:"smooth",onMetadata:setMetadata,
+      onFrame:()=>updateFullscreenAvailability(),onUnavailable:()=>updateFullscreenAvailability()});
+  }
+  if(document.readyState==="loading") document.addEventListener("DOMContentLoaded",schedule,{once:true});
+  else schedule();
+})();
+</script>
+{% endblock %}
