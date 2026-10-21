@@ -33,8 +33,8 @@ class PetFeedbackWizardTests(unittest.TestCase):
                                       requested_pre_seconds=5, requested_post_seconds=10,
                                       trigger_origin="detector")
         self.store.record_telegram_receipt(self.event, self.ref, "video", 10)
-        self.pets = [SimpleNamespace(pet_id="first", display_name="嗨啵"),
-                     SimpleNamespace(pet_id="second", display_name="Saki")]
+        self.pets = [SimpleNamespace(pet_id="first", display_name="貓甲"),
+                     SimpleNamespace(pet_id="second", display_name="貓乙")]
         self.sent = []
 
         def send(chat, text, **kwargs):
@@ -57,21 +57,21 @@ class PetFeedbackWizardTests(unittest.TestCase):
 
     def test_first_round_names_and_no_behavior(self):
         buttons = [b for row in first_round(self.event, self.pets)["inline_keyboard"] for b in row]
-        self.assertEqual([b["text"] for b in buttons], ["是嗨啵", "是Saki", "兩隻都在", "不是貓咪"])
+        self.assertEqual([b["text"] for b in buttons], ["是貓甲", "是貓乙", "兩隻都在", "不是貓咪"])
         self.assertTrue(all(len(b["callback_data"].encode()) <= 64 for b in buttons))
 
     def test_both_sequential_and_separate_persistent_labels(self):
         self.handle(self.choice("both"))
-        self.assertIn("嗨啵的行為", self.sent[-1][0])
+        self.assertIn("貓甲的行為", self.sent[-1][0])
         first_callback, first_message = self.callback(), self.sent[-1][2]
         self.handle(first_callback, 2, first_message)
-        self.assertIn("Saki的行為", self.sent[-1][0])
+        self.assertIn("貓乙的行為", self.sent[-1][0])
         second_callback, second_message = self.callback(1), self.sent[-1][2]
         # New worker uses durable session, not an in-memory conversation flag.
         self.wizard = PetFeedbackWizard(self.store, self.notifier, lambda: self.pets)
         self.handle(second_callback, 3, second_message)
-        self.assertIn("嗨啵：進食", self.sent[-1][0])
-        self.assertIn("Saki：喝水", self.sent[-1][0])
+        self.assertIn("貓甲：進食", self.sent[-1][0])
+        self.assertIn("貓乙：喝水", self.sent[-1][0])
         rows = self.store.connection.execute("SELECT pet_id,behavior FROM telegram_pet_review_history ORDER BY update_id").fetchall()
         self.assertEqual([tuple(r) for r in rows], [("first", "eating"), ("second", "drinking")])
         with self.assertRaises(ValueError):
@@ -79,7 +79,7 @@ class PetFeedbackWizardTests(unittest.TestCase):
 
     def test_single_and_negative_no_followup(self):
         self.handle(self.choice(pet_token("second")))
-        self.assertIn("Saki的行為", self.sent[-1][0])
+        self.assertIn("貓乙的行為", self.sent[-1][0])
         options = str(self.sent[-1][1])
         self.assertNotIn("不在畫面", options)
         self.assertNotIn("無法判斷", options)
@@ -97,8 +97,8 @@ class PetFeedbackWizardTests(unittest.TestCase):
         choices = [b for row in self.sent[-1][1]["reply_markup"]["inline_keyboard"] for b in row]
         running = next(b["callback_data"] for b in choices if b["text"] == "奔跑")
         self.handle(running, 3, self.sent[-1][2])
-        self.assertIn("嗨啵：行走", self.sent[-1][0])
-        self.assertIn("Saki：奔跑", self.sent[-1][0])
+        self.assertIn("貓甲：行走", self.sent[-1][0])
+        self.assertIn("貓乙：奔跑", self.sent[-1][0])
         self.store.initialize()
         rows = self.store.connection.execute("SELECT pet_id,behavior,motion FROM telegram_pet_review_history ORDER BY update_id").fetchall()
         self.assertEqual([tuple(r) for r in rows], [("first", "other_active", "walking"), ("second", "other_active", "running")])
@@ -127,7 +127,7 @@ class PetFeedbackWizardTests(unittest.TestCase):
             self.handle(self.choice("both"))
         self.notifier.send_message = send
         self.handle(self.choice("both"))
-        self.assertIn("嗨啵的行為", self.sent[-1][0])
+        self.assertIn("貓甲的行為", self.sent[-1][0])
 
     def test_second_prompt_failure_retries_without_duplicate_label(self):
         self.handle(self.choice("both"))
@@ -138,5 +138,5 @@ class PetFeedbackWizardTests(unittest.TestCase):
             self.handle(callback, 2, message)
         self.notifier.send_message = send
         self.handle(callback, 2, message)
-        self.assertIn("Saki的行為", self.sent[-1][0])
+        self.assertIn("貓乙的行為", self.sent[-1][0])
         self.assertEqual(self.store.connection.execute("SELECT COUNT(*) FROM telegram_pet_review_history").fetchone()[0], 1)

@@ -115,7 +115,7 @@ class PetEnrollmentWebTests(unittest.TestCase):
             edited = self.client.patch(
                 "/api/v1/pets/editable_cat",
                 json={
-                    "display_name": "嗨啵",
+                    "display_name": "貓甲",
                     "coat_description": "棕色",
                     "pattern_description": "貍花",
                     "enabled": True,
@@ -131,7 +131,7 @@ class PetEnrollmentWebTests(unittest.TestCase):
         self.assertEqual(added.status_code, 200, added.text)
         profile = PetRegistry(Path(self.temp.name) / "events" / ".." / "pets").get_pet("editable_cat")
         self.assertIsNotNone(profile)
-        self.assertEqual(profile.display_name, "嗨啵")
+        self.assertEqual(profile.display_name, "貓甲")
         self.assertEqual(profile.pattern_description, "貍花")
         self.assertEqual(len(profile.reference_images), 2)
         self.assertEqual(profile.embedding_count, 2)

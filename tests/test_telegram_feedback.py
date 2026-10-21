@@ -285,11 +285,11 @@ class TelegramFeedbackLoopTests(unittest.TestCase):
 
     def test_detector_video_uses_two_round_pet_wizard_with_opt_in(self):
         registry = PetRegistry(self.root / "pets")
-        registry.register_pet("嗨啵", pet_id="highball")
-        registry.register_pet("Saki", pet_id="saki")
+        registry.register_pet("貓甲", pet_id="cat_alpha")
+        registry.register_pet("貓乙", pet_id="cat_beta")
         event_id, message_id, message = self._send_detector_alert()
         buttons = [b for row in message["reply_markup"]["inline_keyboard"] for b in row]
-        self.assertEqual([b["text"] for b in buttons], ["是嗨啵", "是Saki", "兩隻都在", "不是貓咪"])
+        self.assertEqual([b["text"] for b in buttons], ["是貓甲", "是貓乙", "兩隻都在", "不是貓咪"])
         self.store.record_telegram_receipt(event_id, hashlib.sha256(self.chat_id.encode()).hexdigest(),
                                            "video", message_id)
         poller = TelegramFeedbackPoller(self.telegram, self.store, [self.chat_id],
@@ -297,12 +297,12 @@ class TelegramFeedbackLoopTests(unittest.TestCase):
         update = self._callback(event_id=event_id, message_id=message_id, update_id=901, label="yes")
         update["callback_query"]["data"] = buttons[2]["callback_data"]
         poller._process_update(901, update)
-        self.assertIn("嗨啵的行為", self.telegram.sent_messages[-1]["text"])
+        self.assertIn("貓甲的行為", self.telegram.sent_messages[-1]["text"])
         prompt = self.telegram.sent_messages[-1]
         update = self._callback(event_id=event_id, message_id=prompt["message_id"], update_id=902, label="yes")
         update["callback_query"]["data"] = prompt["reply_markup"]["inline_keyboard"][0][0]["callback_data"]
         poller._process_update(902, update)
-        self.assertIn("Saki的行為", self.telegram.sent_messages[-1]["text"])
+        self.assertIn("貓乙的行為", self.telegram.sent_messages[-1]["text"])
         self.preferences.set_feedback_enabled(self.chat_id, False)
         prompt = self.telegram.sent_messages[-1]
         update = self._callback(event_id=event_id, message_id=prompt["message_id"], update_id=903, label="yes")
@@ -440,8 +440,8 @@ class TelegramFeedbackLoopTests(unittest.TestCase):
 
     def test_two_tracks_open_independent_feedback_and_keep_track_identity_separate(self):
         registry = PetRegistry(self.root / "pets")
-        highball = registry.register_pet("嗨啵", pet_id="highball")
-        saki = registry.register_pet("Saki", pet_id="saki")
+        cat_alpha = registry.register_pet("貓甲", pet_id="cat_alpha")
+        cat_beta = registry.register_pet("貓乙", pet_id="cat_beta")
         now = datetime.now(timezone.utc)
 
         def save_event(track_id, behavior, motion):
@@ -527,7 +527,7 @@ class TelegramFeedbackLoopTests(unittest.TestCase):
         self.assertEqual(self.store.connection.execute(
             "SELECT COUNT(*) FROM behavior_event_annotations"
         ).fetchone()[0], 0)
-        choose(1004, first, first_prompt, "i", TelegramFeedbackPoller._pet_token(highball.pet_id))
+        choose(1004, first, first_prompt, "i", TelegramFeedbackPoller._pet_token(cat_alpha.pet_id))
         action_prompt = self.telegram.sent_messages[-1]
         self.assertIn("第二步", action_prompt["text"])
         self.assertTrue(any(button["callback_data"].startswith("tags:") and button["callback_data"].endswith(":walking")
@@ -547,7 +547,7 @@ class TelegramFeedbackLoopTests(unittest.TestCase):
         choose(1009, first, first_prompt, "b", "other_active")
         choose(1010, first, first_prompt, "m", "walking")
         choose(1011, second, second_prompt, "c", "yes")
-        choose(1012, second, second_prompt, "i", TelegramFeedbackPoller._pet_token(saki.pet_id))
+        choose(1012, second, second_prompt, "i", TelegramFeedbackPoller._pet_token(cat_beta.pet_id))
         choose(1013, second, second_prompt, "b", "eating")
         choose(1014, second, second_prompt, "m", "stationary")
 
@@ -560,11 +560,11 @@ class TelegramFeedbackLoopTests(unittest.TestCase):
         actual = {(row["track_id"], row["dimension"]): row["label"] for row in rows}
         self.assertEqual(actual, {
             ("session-one:track-1", "cat_presence"): "cat",
-            ("session-one:track-1", "identity"): highball.pet_id,
+            ("session-one:track-1", "identity"): cat_alpha.pet_id,
             ("session-one:track-1", "behavior"): "other_active",
             ("session-one:track-1", "motion"): "walking",
             ("session-one:track-2", "cat_presence"): "cat",
-            ("session-one:track-2", "identity"): saki.pet_id,
+            ("session-one:track-2", "identity"): cat_beta.pet_id,
             ("session-one:track-2", "behavior"): "eating",
             ("session-one:track-2", "motion"): "stationary",
         })
@@ -610,12 +610,12 @@ class TelegramFeedbackLoopTests(unittest.TestCase):
 
     def test_two_cat_digest_is_one_message_and_feedback_is_opt_in_per_recipient(self):
         registry = PetRegistry(self.root / "pets")
-        highball = registry.register_pet("嗨啵", pet_id="highball")
-        saki = registry.register_pet("Saki", pet_id="saki")
+        cat_alpha = registry.register_pet("貓甲", pet_id="cat_alpha")
+        cat_beta = registry.register_pet("貓乙", pet_id="cat_beta")
         now = datetime.now(timezone.utc)
         events = [
             BehaviorEvent(
-                pet_id=highball.pet_id, track_id="private-track-one",
+                pet_id=cat_alpha.pet_id, track_id="private-track-one",
                 behavior_state=BehaviorState.OTHER_ACTIVE, motion_state=MotionState.WALKING,
                 event_tags=(), started_at=now, ended_at=now + timedelta(seconds=20),
                 raw_confidence=0.83, smoothed_confidence=0.79, inference_method="rules",
@@ -623,7 +623,7 @@ class TelegramFeedbackLoopTests(unittest.TestCase):
                 source_id="source-redacted", camera_preset=None,
             ),
             BehaviorEvent(
-                pet_id=saki.pet_id, track_id="private-track-two",
+                pet_id=cat_beta.pet_id, track_id="private-track-two",
                 behavior_state=BehaviorState.EATING, motion_state=MotionState.STATIONARY,
                 event_tags=(), started_at=now, ended_at=now + timedelta(seconds=45),
                 raw_confidence=0.88, smoothed_confidence=0.81, inference_method="rules",
@@ -650,7 +650,7 @@ class TelegramFeedbackLoopTests(unittest.TestCase):
         pipeline._learning_policy = FeedbackLearningPolicy()
 
         tracks = []
-        for index, (event, pet) in enumerate(zip(events, (highball, saki), strict=True), start=1):
+        for index, (event, pet) in enumerate(zip(events, (cat_alpha, cat_beta), strict=True), start=1):
             observation = TrackObservation(
                 track_id=f"private-track-{index}", bbox=BoundingBox(10, 10, 80, 80),
                 captured_at=now, confidence=0.9, source_id="source-redacted",
@@ -670,9 +670,9 @@ class TelegramFeedbackLoopTests(unittest.TestCase):
         by_chat = {item["chat_id"]: item for item in self.telegram.sent_messages}
         self.assertNotIn(self.chat_id, by_chat)
         opted_in_message = {**self.telegram.sent_photos[0], "text": self.telegram.sent_photos[0]["caption"]}
-        self.assertIn("嗨啵", opted_in_message["text"])
+        self.assertIn("貓甲", opted_in_message["text"])
         self.assertIn("行走", opted_in_message["text"])
-        self.assertIn("Saki", opted_in_message["text"])
+        self.assertIn("貓乙", opted_in_message["text"])
         self.assertIn("進食", opted_in_message["text"])
         self.assertNotIn("private-track", opted_in_message["text"])
         buttons = opted_in_message["reply_markup"]["inline_keyboard"]
@@ -871,7 +871,7 @@ class TelegramFeedbackLoopTests(unittest.TestCase):
     def test_v43_semantic_candidate_native_video_and_track_feedback_close_loop(self):
         """One isolated path covers candidate caption -> sent video receipt -> per-track SQLite feedback."""
         registry = PetRegistry(self.root / "pets")
-        pet = registry.register_pet("嗨啵", pet_id="highball")
+        pet = registry.register_pet("貓甲", pet_id="cat_alpha")
         now = datetime.now(timezone.utc)
         track_id = "session-v43:track-1"
         behavior_event = BehaviorEvent(

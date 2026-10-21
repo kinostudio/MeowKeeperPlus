@@ -25,18 +25,14 @@ Dashboard 不會直接登入 Mi Home，也不會另開攝影機連線。使用�
 橋接先以單一 `subtype=sd` 影格驗證後端 region，再以 FFprobe 記錄解析度、實際 FPS、編碼、
 音訊、錯誤與穩定性。已驗證 region 的 MVP 路徑不做全 profile sweep；不能因名稱是 HD 就宣稱 2K。
 
-go2rtc binary／localhost start-health-stop 已由自動測試與真實程序驗證。2026-09-20 的
-隔離實測中，`chuangmi.camera.026c02` 在 `sg` 後端 region 以官方 go2rtc v1.9.14 取得
-真實 JPEG；單一 SD profile 的 FFprobe 得到 640×360 HEVC、G.711 A-law。`isa.camera.hlc7`
-仍無影格，標記 `unconfirmed`。這不代表台灣帳號一律使用 SG，也不代表正式 Dashboard 已完成驗收。
-接通與失敗 SOP 見 `docs/XIAOMI_MIOT_REGION_SOP.md`。
+依裝置與帳號實際驗證 region、畫質及持續影格；不能由帳號地區推定後端 region。
+實機紀錄只保存在本機。接通與失敗 SOP 見 `XIAOMI_MIOT_REGION_SOP.md`。
 
 ## MVP Phase 3C.1 登入診斷
 
 70016 登入回應、官方 release 比對、安全遮罩、冷卻與明確重試流程，請以
 `docs/MVP_PHASE3C1_XIAOMI_LOGIN_REPORT.md` 為準。不得將 70016 且 `captchaUrl=null` 直接
-翻譯成密碼錯誤。該報告記錄的是當時狀態；目前隔離 session 已由使用者完成登入並取得兩台裝置，
-不能再把舊的登入阻塞寫成當前結論。
+翻譯成密碼錯誤。以本次安全診斷為準，不能把舊的登入阻塞寫成當前結論。
 
 ## MVP Phase 3C.2 真實裝置同步
 
@@ -50,10 +46,8 @@ go2rtc binary／localhost start-health-stop 已由自動測試與真實程序驗
 4. 只有 FFprobe 實測通過後，才以 `xiaomi_camera_<index>` 建立 go2rtc stream，再切入
    既有單一 `FfmpegMediaIngest`；profile probe 的臨時 stream 會在 finally 清理。
 
-`cn` 的歷史實測曾收到 `HTTP 500: streams: xiaomi: no p2pid allocated, please reboot device`；
-同一 DID 在 `sg` 的單 stream 真機測試已有 JPEG。當前自動探索對 `.55` 選 `sg`，對 `.56`
-維持 `unconfirmed`。舊報告是歷史診斷，不能拿來覆蓋新的成功／失敗邊界；詳見
-`docs/MVP_PHASE3C2_XIAOMI_DEVICE_SYNC_REPORT.md` 與 `docs/XIAOMI_MIOT_REGION_SOP.md`。
+尚未取得影格的 region 維持 `unconfirmed`，不以程序存活或 HTTP 200 代替成功證據。
+裝置探索與驗證規則見 `XIAOMI_MIOT_REGION_SOP.md`。
 
 ## Xiaomi MISS PTZ（實驗、預設關閉）
 
