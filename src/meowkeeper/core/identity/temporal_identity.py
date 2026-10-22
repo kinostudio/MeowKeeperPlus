@@ -16,15 +16,24 @@ class _TrackIdentityState:
 
 
 class TemporalIdentity:
-    def __init__(self, thresholds: IdentityThresholds | None = None, *, minimum_unique_frames=5,
-                 minimum_time_bins=3, minimum_vote_fraction=0.75) -> None:
+    def __init__(self, thresholds: IdentityThresholds | None = None, *, minimum_unique_frames=None,
+                 minimum_time_bins=None, minimum_vote_fraction=None) -> None:
         self.thresholds = thresholds or IdentityThresholds()
         self.thresholds.validate()
-        if minimum_unique_frames < 1 or minimum_time_bins < 1 or not 0 < minimum_vote_fraction <= 1:
+        self.minimum_unique_frames = (
+            minimum_unique_frames if minimum_unique_frames is not None
+            else getattr(self.thresholds, "minimum_unique_frames", 3)
+        )
+        self.minimum_time_bins = (
+            minimum_time_bins if minimum_time_bins is not None
+            else getattr(self.thresholds, "minimum_time_bins", 2)
+        )
+        self.minimum_vote_fraction = (
+            minimum_vote_fraction if minimum_vote_fraction is not None
+            else getattr(self.thresholds, "minimum_vote_fraction", 0.70)
+        )
+        if self.minimum_unique_frames < 1 or self.minimum_time_bins < 1 or not 0 < self.minimum_vote_fraction <= 1:
             raise ValueError("身分共識參數不合法。")
-        self.minimum_unique_frames = minimum_unique_frames
-        self.minimum_time_bins = minimum_time_bins
-        self.minimum_vote_fraction = minimum_vote_fraction
         self._states = {}
 
     def update(self, track_id, prediction, *, captured_at: datetime | None = None,

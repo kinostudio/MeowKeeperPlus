@@ -54,7 +54,8 @@ def safe_http_timings(value):
 
 class VisionFailure(RuntimeError):
     def __init__(self, category: str, http_status: int | None = None, retry_after_seconds: float | None = None,
-                 *, request_dispatched: bool | None = None, api_elapsed_ms: float | None = None, http_timings=None):
+                 *, request_dispatched: bool | None = None, api_elapsed_ms: float | None = None, http_timings=None,
+                 input_tokens: int | None = None, output_tokens: int | None = None, **kwargs):
         if category not in FAILURE_CATEGORIES:
             raise ValueError("視覺服務錯誤分類不正確。")
         if http_status is not None and (type(http_status) is not int or not 100 <= http_status <= 599):
@@ -75,6 +76,8 @@ class VisionFailure(RuntimeError):
             raise ValueError("視覺服務回應耗時不正確。")
         self.api_elapsed_ms = api_elapsed_ms
         self.http_timings = safe_http_timings(http_timings)
+        self.input_tokens = input_tokens
+        self.output_tokens = output_tokens
         super().__init__("進階影像分析未完成；本機監控與影片通知不受影響。")
 
 
@@ -111,6 +114,7 @@ class SemanticRequest:
     input_revision: int = 1
     scene_reference_jpeg: bytes | None = None
     scene_reference_labels: tuple[str, ...] = ()
+    pet_profiles: tuple[dict[str, Any], ...] = ()
 
     def __post_init__(self):
         if (type(self.input_revision) is not int or not 1 <= self.input_revision <= 1000000
@@ -173,6 +177,7 @@ class SemanticResult:
     request_dispatched: bool | None = None
     http_status: int | None = None
     provenance: tuple[tuple[str, str], ...] = ()
+    identity_candidates: tuple[tuple[str, dict[str, Any]], ...] = ()
 
     def __post_init__(self) -> None:
         if (len(dict(self.provenance)) != len(self.provenance)
@@ -220,6 +225,15 @@ class SemanticResult:
             payload["timings"] = dict(self.timings)
         if self.evidence:
             payload["tag_evidence"] = [item.payload() for item in self.evidence]
+        if self.identity_candidates:
+            payload["identity_candidates"] = [
+                {"track_id": track_id, **cand} for track_id, cand in self.identity_candidates
+            ]
+            cand_map = dict(self.identity_candidates)
+            for track_item in payload.get("tracks", []):
+                tid = track_item.get("track_id")
+                if tid in cand_map:
+                    track_item["identity_candidate"] = cand_map[tid]
         if self.provenance:
             payload["analysis_source"] = dict(self.provenance)
         if self.request_dispatched is not None or self.http_status is not None:
@@ -251,6 +265,7 @@ def normalize_result(raw: Mapping[str, Any], request: SemanticRequest) -> Semant
     allowed = set(request.track_ids) if request.track_ids else {"scene"}
     tracks: list[tuple[str, tuple[str, ...]]] = []
     seen: set[str] = set()
+    identity_candidates: list[tuple[str, dict[str, str]]] = []
     for row in rows:
         if not isinstance(row, Mapping):
             raise TypeError("視覺分析軌跡格式不正確。")
@@ -262,9 +277,35 @@ def normalize_result(raw: Mapping[str, Any], request: SemanticRequest) -> Semant
             raise ValueError("視覺分析含未知 TAG。")
         if any(tag in SPATIAL_TAGS for tag in tags) or ("unknown" in tags and len(tags) > 1):
             raise ValueError("缺少有效視角對位，或未知標籤與動作衝突。")
+        raw_cand = row.get("identity_candidate")
+        if isinstance(raw_cand, Mapping):
+            cand_pet_id = str(raw_cand.get("pet_id") or "").strip()
+            cand_cert = str(raw_cand.get("certainty") or "unknown").strip().lower()
+            if cand_cert not in {"low", "medium", "high", "unknown"}:
+                cand_cert = "unknown"
+            cand_reason = str(raw_cand.get("reason") or "").strip()[:200]
+            if cand_pet_id:
+                identity_candidates.append((track, {
+                    "pet_id": cand_pet_id,
+                    "certainty": cand_cert,
+                    "reason": cand_reason,
+                }))
         tracks.append((track, tuple(dict.fromkeys(tags))))
         seen.add(track)
-    return SemanticResult("completed", tuple(tracks))
+    if not identity_candidates and isinstance(raw.get("identity_candidate"), Mapping):
+        top_cand = raw["identity_candidate"]
+        cand_pet_id = str(top_cand.get("pet_id") or "").strip()
+        cand_cert = str(top_cand.get("certainty") or "unknown").strip().lower()
+        if cand_cert not in {"low", "medium", "high", "unknown"}:
+            cand_cert = "unknown"
+        cand_reason = str(top_cand.get("reason") or "").strip()[:200]
+        if cand_pet_id and tracks:
+            identity_candidates.append((tracks[0][0], {
+                "pet_id": cand_pet_id,
+                "certainty": cand_cert,
+                "reason": cand_reason,
+            }))
+    return SemanticResult("completed", tuple(tracks), identity_candidates=tuple(identity_candidates))
 
 
 def normalize_storyboard_result(raw: Mapping[str, Any], request: SemanticRequest) -> SemanticResult:
@@ -272,11 +313,17 @@ def normalize_storyboard_result(raw: Mapping[str, Any], request: SemanticRequest
     if (len(boards) != len(request.storyboards)
             or {board.track_id for board in boards.values()} != set(request.track_ids)):
         raise ValueError("分析輸入軌跡映射不完整。")
-    rows = raw.get("tracks")
+    if isinstance(raw, list):
+        rows = raw
+    elif isinstance(raw, Mapping):
+        rows = raw.get("tracks")
+    else:
+        rows = None
     if not isinstance(rows, list) or len(rows) != len(boards):
         raise ValueError("分析結果缺少本次軌跡。")
     parsed = {}
     evidence = []
+    identity_candidates = []
     for row in rows:
         if not isinstance(row, Mapping) or row.get("track_alias") not in boards:
             raise ValueError("分析結果含未知軌跡。")
@@ -310,9 +357,24 @@ def normalize_storyboard_result(raw: Mapping[str, Any], request: SemanticRequest
                                         tuple(board.offsets_seconds[index] for index in indices), certainty,zone_ref,view_ref))
         if "unknown" in codes and len(codes) > 1:
             raise ValueError("無法判斷不可與其他候選動作並列。")
+        raw_cand = row.get("identity_candidate")
+        if isinstance(raw_cand, Mapping):
+            cand_pet_id = str(raw_cand.get("pet_id") or "").strip()
+            cand_cert = str(raw_cand.get("certainty") or "unknown").strip().lower()
+            if cand_cert not in {"low", "medium", "high", "unknown"}:
+                cand_cert = "unknown"
+            cand_reason = str(raw_cand.get("reason") or "").strip()[:200]
+            if cand_pet_id:
+                identity_candidates.append((board.track_id, {
+                    "pet_id": cand_pet_id,
+                    "certainty": cand_cert,
+                    "reason": cand_reason,
+                }))
         parsed[alias] = tuple(codes)
     return SemanticResult("completed", tuple((board.track_id, parsed[board.alias])
-                                               for board in request.storyboards), evidence=tuple(evidence))
+                                               for board in request.storyboards),
+                          evidence=tuple(evidence),
+                          identity_candidates=tuple(identity_candidates))
 
 
 class EventSemanticService:

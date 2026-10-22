@@ -269,5 +269,39 @@ class EventSemanticTests(unittest.TestCase):
                 store.close()
 
 
+    def test_semantic_request_with_pet_profiles_and_candidate_resolution(self):
+        from meowkeeper.core.event_semantics import normalize_storyboard_result
+
+        request = SemanticRequest(
+            "event-identity-test",
+            b"jpeg-bytes",
+            ("track-1",),
+            pet_profiles=(
+                {"pet_id": "highball", "display_name": "嗨寶", "semantic_traits": ["橘白", "橘貓"]},
+                {"pet_id": "saki", "display_name": "Saki", "semantic_traits": ["棕色", "虎斑"]},
+            ),
+        )
+        self.assertEqual(len(request.pet_profiles), 2)
+        self.assertEqual(request.pet_profiles[0]["pet_id"], "highball")
+
+        raw_result = {
+            "tracks": [{"track_id": "track-1", "tags": ["walking"]}],
+            "identity_candidate": {
+                "pet_id": "highball",
+                "certainty": "high",
+                "reason": "橘白花紋，符合嗨寶特徵",
+            },
+        }
+        normalized = normalize_result(raw_result, request)
+        self.assertEqual(len(normalized.identity_candidates), 1)
+        self.assertEqual(normalized.identity_candidates[0][0], "track-1")
+        self.assertEqual(normalized.identity_candidates[0][1]["pet_id"], "highball")
+        self.assertEqual(normalized.identity_candidates[0][1]["certainty"], "high")
+        payload = normalized.payload()
+        self.assertIn("identity_candidates", payload)
+        self.assertEqual(payload["identity_candidates"][0]["pet_id"], "highball")
+        self.assertEqual(payload["tracks"][0]["identity_candidate"]["pet_id"], "highball")
+
+
 if __name__ == "__main__":
     unittest.main()

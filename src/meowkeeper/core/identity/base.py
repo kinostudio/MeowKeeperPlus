@@ -21,6 +21,9 @@ class IdentityThresholds:
     top_k_embeddings: int = 3
     embedding_weight: float = 0.85
     color_weight: float = 0.15
+    minimum_unique_frames: int = 3
+    minimum_time_bins: int = 2
+    minimum_vote_fraction: float = 0.70
 
     def validate(self) -> None:
         if not 0.0 <= self.unknown_threshold <= self.accepted_threshold <= 1.0:
@@ -37,6 +40,12 @@ class IdentityThresholds:
             raise ValueError("身分特徵權重不可小於零。")
         if self.embedding_weight + self.color_weight <= 0:
             raise ValueError("身分特徵至少需要一個非零權重。")
+        if self.minimum_unique_frames < 1:
+            raise ValueError("身分最少獨立影格數必須至少為 1。")
+        if self.minimum_time_bins < 1:
+            raise ValueError("身分最少時間區間數必須至少為 1。")
+        if not 0.0 < self.minimum_vote_fraction <= 1.0:
+            raise ValueError("身分最低得票率必須介於 0 到 1。")
 
 
 @dataclass(frozen=True)

@@ -136,12 +136,17 @@ class V02AnalysisPipeline:
             logger=logger,
         )
         self._owns_scheduler = inference_scheduler is None
+        self.identity_scheduler = GPUInferenceScheduler(
+            max_pending_tasks=4,
+            worker_name="meowkeeper-identity-inference",
+            logger=logger,
+        )
         self.identity_resolver = identity_resolver or BackgroundIdentityResolver(
             identity_classifier,
-            scheduler=self.inference_scheduler,
+            scheduler=self.identity_scheduler,
             recheck_interval_seconds=identity_interval_seconds,
-            maximum_pending_tasks=MX250_MINIMUM.identity_max_pending_tasks,
-            task_timeout_seconds=MX250_MINIMUM.identity_timeout_seconds,
+            maximum_pending_tasks=4,
+            task_timeout_seconds=10.0,
             minimum_crop_pixels=MX250_MINIMUM.identity_minimum_crop_pixels,
             low_confidence_threshold=identity_low_confidence,
             logger=logger,
@@ -400,6 +405,8 @@ class V02AnalysisPipeline:
             self.flush()
         finally:
             self.identity_resolver.close(wait=wait)
+            if hasattr(self, "identity_scheduler") and self.identity_scheduler:
+                self.identity_scheduler.shutdown(wait=wait)
             if self._owns_scheduler:
                 self.inference_scheduler.shutdown(wait=wait)
             if self._owns_notification_dispatcher and self.notification_dispatcher is not None:
@@ -452,7 +459,9 @@ class V02AnalysisPipeline:
             self._apply_identity_resolution(result)
 
     def _apply_identity_resolution(self, result: IdentityResolution) -> None:
-        if result.generation != self._generation or result.source_id != self._source_id:
+        if result.generation != self._generation:
+            return
+        if self._source_id and result.source_id not in {self._source_id, "isolated-inference"}:
             return
         prediction = result.prediction
         self._identity_cache[result.track_id] = (result.captured_at, prediction)
@@ -483,9 +492,21 @@ class V02AnalysisPipeline:
 
     def _persist_identity_resolution(self, track_id, stable, captured_at, active) -> None:
         self._stable_identity[track_id] = stable
-        if active is not None and self.store is not None:
+        target_event_id = active.event_id if active is not None else None
+        if target_event_id is None and self.store is not None:
             try:
-                self.store.record_identity_evidence(active.event_id, str(track_id), {
+                with self.store._connection_lock:
+                    row = self.store.connection.execute(
+                        "SELECT event_id FROM behavior_events WHERE track_id=? ORDER BY started_at DESC LIMIT 1",
+                        (str(track_id),),
+                    ).fetchone()
+                    if row:
+                        target_event_id = row[0]
+            except Exception:
+                pass
+        if target_event_id is not None and self.store is not None:
+            try:
+                self.store.record_identity_evidence(target_event_id, str(track_id), {
                     **asdict(stable), "captured_at": captured_at.isoformat(),
                     "decision": "recognized_candidate" if stable.stable else "unknown",
                     "experimental": True, "calibration_verified": False,

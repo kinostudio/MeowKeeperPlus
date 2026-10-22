@@ -51,7 +51,9 @@ class SessionTracker:
             # GPU fallback recreates short-term trackers; do not reuse old IDs.
             self.prefix = uuid.uuid4().hex
         self.inference_backend = self.tracker.inference_backend
-        self.latest = [replace(item, track_id=f"{self.prefix}:{item.track_id}")
+        frame_src = getattr(frame, "source_url", None)
+        self.latest = [replace(item, track_id=f"{self.prefix}:{item.track_id}",
+                               source_id=frame_src or item.source_id)
                        for item in observations]
         return self.latest
 
@@ -65,6 +67,7 @@ class V02HostAnalyzer:
     def __init__(
         self, tracker, identity, *, store, zones=None, behavior_config=None, logger=None,
         notifier=None, chat_ids=(), notification_dispatcher=None, feedback_preferences=None,
+        identity_thresholds=None,
     ):
         self.tracker = SessionTracker(tracker)
         self.inference_backend = tracker.inference_backend
@@ -94,6 +97,7 @@ class V02HostAnalyzer:
             notifier=notifier, chat_ids=tuple(chat_ids),
             notification_dispatcher=notification_dispatcher,
             feedback_preferences=feedback_preferences,
+            identity_low_confidence=identity_thresholds.accepted_threshold if identity_thresholds else 0.62,
             logger=logger,
         )
 
@@ -101,15 +105,22 @@ class V02HostAnalyzer:
     def create(
         cls, *, model_path, confidence, store, data_root, logger,
         notifier=None, chat_ids=(), notification_dispatcher=None, feedback_preferences=None,
-        tracker=None,
+        tracker=None, identity_thresholds=None,
     ):
         registry = PetRegistry(Path(data_root) / "pets")
-        identity = LazyIdentityClassifier(registry)
+        identity = LazyIdentityClassifier(registry, thresholds=identity_thresholds)
         tracker = tracker or BoTSORTTracker(model_path=model_path, confidence_threshold=confidence)
+        try:
+            import threading
+            threading.Thread(target=lambda: getattr(identity, "_ready", lambda: None)(),
+                             name="meowkeeper-dinov2-prewarm", daemon=True).start()
+        except Exception:
+            pass
         return cls(
             tracker, identity, store=store, logger=logger, notifier=notifier,
             chat_ids=chat_ids, notification_dispatcher=notification_dispatcher,
             feedback_preferences=feedback_preferences,
+            identity_thresholds=identity_thresholds,
         )
 
     def analyze(self, frame):

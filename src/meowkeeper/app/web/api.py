@@ -7,12 +7,14 @@ FastAPI 是可選 runtime 依賴；匯入本檔不會讓既有媒體 CLI 失效�
 import hashlib
 import inspect
 import json
+import logging
 import os
 import secrets
 import shutil
 import sqlite3
 import tempfile
 import threading
+import time
 import zipfile
 from collections.abc import Mapping
 from contextlib import asynccontextmanager
@@ -90,6 +92,10 @@ def create_app(
     sessions = session_manager or SessionManager()
     from meowkeeper.app.updates import UpdateManager
     update_root = Path(__file__).resolve().parents[4]
+    if not (update_root / "build_manifest.json").is_file():
+        installed = Path(r"C:\ProgramData\MeowKeeperPlus\App")
+        if (installed / "build_manifest.json").is_file():
+            update_root = installed
     update_data = core.store.path.parent if core.store is not None else update_root / "data"
     updater = UpdateManager(update_root, update_data)
     from meowkeeper.app.cpu_temperature_setup import CpuTemperatureSetup
@@ -296,19 +302,61 @@ def create_app(
         except (OSError, ValueError, TypeError, RuntimeError, sqlite3.Error):
             raise HTTPException(status_code=422, detail="Gemini Token 數探測未完成；未讀取居家影格。") from None
 
-    def _is_trusted_credential_client(request: Request) -> bool:
-        if request.url.scheme == "https":
-            return True
-        host = request.client.host if request.client else ""
-        if host in {"127.0.0.1", "::1"}:
+    @app.post("/api/v1/vision/key-stats/reset")
+    def vision_key_stats_reset(request: Request, body: Any = Body(default=None)):  # noqa: B008
+        require_mutation(request)
+        if (not isinstance(body, dict) or set(body) - {"confirm_reset", "key_id"}
+                or body.get("confirm_reset") is not True
+                or (body.get("key_id") is not None and not isinstance(body.get("key_id"), str))):
+            raise HTTPException(status_code=428, detail="請明確確認要歸零 API Key 呼叫統計。")
+        try:
+            service = vision_service()
+            service.reset_key_stats(body.get("key_id"))
+            return service.status()
+        except (OSError, ValueError, RuntimeError):
+            raise HTTPException(status_code=503, detail="API Key 呼叫統計暫時無法歸零；本機監控不受影響。") from None
+
+    _local_ip_cache: set[str] = set()
+    _local_ip_cache_at: float = 0.0
+
+    def _get_local_ips() -> set[str]:
+        nonlocal _local_ip_cache, _local_ip_cache_at
+        now = time.monotonic()
+        if _local_ip_cache and (now - _local_ip_cache_at < 30.0):
+            return _local_ip_cache
+        ips = {"127.0.0.1", "::1", "localhost"}
+        try:
+            import socket
+
+            hostname = socket.gethostname()
+            ips.add(socket.gethostbyname(hostname).lower())
+            for ip in socket.gethostbyname_ex(hostname)[2]:
+                ips.add(ip.lower())
+            for info in socket.getaddrinfo(hostname, None):
+                ips.add(info[4][0].lower())
+        except Exception:
+            pass
+        _local_ip_cache = ips
+        _local_ip_cache_at = now
+        return ips
+
+    def is_local_request(request: Request) -> bool:
+        host = (request.client.host if request.client else "").lower()
+        if host in {"127.0.0.1", "::1", "localhost"}:
             return True
         try:
             import ipaddress
 
-            addr = ipaddress.ip_address(host)
-            return bool(addr.is_loopback or addr.is_private)
+            if ipaddress.ip_address(host).is_loopback:
+                return True
         except ValueError:
             return False
+        return host in _get_local_ips()
+
+    def _is_trusted_credential_client(request: Request) -> bool:
+        if request.url.scheme == "https":
+            return True
+        return is_local_request(request)
 
     @app.post("/api/v1/vision/credential")
     def vision_credential_save(request: Request, body: Any = Body(default=None)):  # noqa: B008
@@ -316,16 +364,33 @@ def create_app(
         if not _is_trusted_credential_client(request):
             raise HTTPException(status_code=403, detail="請在主機本機頁面或 HTTPS 安全連線保存金鑰，不透過未加密區網傳送。")
         service = vision_service()
-        if not isinstance(body, dict) or set(body) - {"key", "clear", "reauth"} or body.get("reauth") is not True:
+        allowed_fields = {"key", "alias", "action", "key_id", "order", "clear", "reauth"}
+        if not isinstance(body, dict) or set(body) - allowed_fields or body.get("reauth") is not True:
             raise HTTPException(status_code=428, detail="請明確確認修改目前服務的金鑰。")
         try:
-            if body.get("clear") is True:
+            action = body.get("action")
+            if body.get("clear") is True or action == "clear":
                 service.clear_key()
+            elif action == "delete":
+                key_id = body.get("key_id")
+                if not key_id or not isinstance(key_id, str):
+                    raise ValueError("缺少要刪除的金鑰識別碼。")
+                service.delete_key(key_id)
+            elif action == "reorder":
+                order = body.get("order")
+                if not isinstance(order, list):
+                    raise ValueError("金鑰排序資料格式不正確。")
+                service.reorder_keys(order)
+            elif action == "add":
+                service.add_key(body.get("key"), alias=body.get("alias", ""))
             else:
-                service.save_key(body.get("key"))
+                if body.get("key"):
+                    service.add_key(body.get("key"), alias=body.get("alias", ""))
+                else:
+                    raise ValueError("未提供有效的金鑰操作。")
             return service.status()
-        except (OSError, ValueError, TypeError, RuntimeError):
-            raise HTTPException(status_code=422, detail="金鑰未保存；請確認 Windows 安全儲存可用與服務已設定。") from None
+        except (OSError, ValueError, TypeError, RuntimeError) as error:
+            raise HTTPException(status_code=422, detail=str(error) if isinstance(error, ValueError) else "金鑰未保存；請確認 Windows 安全儲存可用與服務已設定。") from None
 
     def pet_registry() -> Any:
         from meowkeeper.core.identity.pet_registry import PetRegistry
@@ -347,6 +412,7 @@ def create_app(
             **pet_registry().gallery_summary(profile.pet_id),
             "identity_model_version": profile.identity_model_version,
             "enabled": profile.enabled,
+            "semantic_traits": getattr(profile, "semantic_traits", []) or (profile.effective_traits() if hasattr(profile, "effective_traits") else []),
             "embedding_status": current_job.get(
                 "status",
                 "ready" if profile.embedding_count > 0 else "not_started",
@@ -449,9 +515,7 @@ def create_app(
         except (OSError, ValueError) as exc:
             raise HTTPException(status_code=422, detail=f"參考照片讀取失敗：{type(exc).__name__}。") from exc
 
-    def is_local_request(request: Request) -> bool:
-        host = (request.client.host if request.client else "").lower()
-        return host in {"127.0.0.1", "::1", "localhost", "testclient", "testserver"}
+
 
     @app.get("/api/v1/health")
     def health() -> dict[str, Any]:
@@ -1197,10 +1261,15 @@ def create_app(
         def compare():
             from meowkeeper.core.identity.dinov2_embedder import shared_cpu_embedder
             from meowkeeper.core.identity.photo_comparison import compare_photo
+            from meowkeeper.core.identity.base import IdentityThresholds
 
             if app.state.pet_comparison_embedder is None:
                 app.state.pet_comparison_embedder = shared_cpu_embedder()
-            return compare_photo(pet_registry(), app.state.pet_comparison_embedder, content)
+            th = IdentityThresholds(
+                accepted_threshold=float(core.settings().get("identity_accepted_threshold", 0.62)),
+                minimum_margin=float(core.settings().get("identity_minimum_margin", 0.05)),
+            )
+            return compare_photo(pet_registry(), app.state.pet_comparison_embedder, content, thresholds=th)
 
         try:
             from starlette.concurrency import run_in_threadpool
@@ -1243,6 +1312,7 @@ def create_app(
             return {"items": [], "pets": [], "total_eligible": 0, "total_evidence": 0}
         from io import BytesIO
         from urllib.parse import quote
+
         from PIL import Image
 
         bounded_limit = max(1, min(60, int(limit)))
@@ -1301,8 +1371,8 @@ def create_app(
                             for c in cands[:2]
                             if isinstance(c, dict) and c.get("name")
                         ]
-                    except Exception:  # noqa: BLE001
-                        pass
+                    except (ValueError, TypeError, OverflowError):
+                        ai_candidates_by_event.setdefault(inf["event_id"], [])
 
         items: list[dict[str, Any]] = []
         for row in rows:
@@ -1313,7 +1383,8 @@ def create_app(
             try:
                 with Image.open(BytesIO(crop_bytes)) as img:
                     width, height = img.size
-            except Exception:  # noqa: BLE001
+            except (OSError, ValueError):
+                logging.getLogger(__name__).debug("略過無法讀取的軌跡裁切。")
                 continue
             if min(width, height) < 96:
                 continue
@@ -1533,7 +1604,7 @@ def create_app(
 
         require_mutation(request)
         payload = json_body(body)
-        allowed = {"display_name", "coat_description", "pattern_description", "enabled"}
+        allowed = {"display_name", "coat_description", "pattern_description", "enabled", "semantic_traits"}
         unknown = sorted(set(payload) - allowed)
         if unknown:
             raise HTTPException(status_code=422, detail=f"不可更新的欄位：{', '.join(unknown)}。")
@@ -1552,6 +1623,15 @@ def create_app(
             if not isinstance(payload["enabled"], bool):
                 raise HTTPException(status_code=422, detail="enabled 必須是布林值。")
             values["enabled"] = payload["enabled"]
+        if "semantic_traits" in payload:
+            raw_traits = payload["semantic_traits"]
+            if isinstance(raw_traits, str):
+                import re
+                values["semantic_traits"] = [t.strip() for t in re.split(r"[,、/ ]+", raw_traits) if t.strip()]
+            elif isinstance(raw_traits, list):
+                values["semantic_traits"] = [str(t).strip() for t in raw_traits if str(t).strip()]
+            else:
+                raise HTTPException(status_code=422, detail="semantic_traits 必須是文字或字串清單。")
         try:
             profile = pet_registry().update_profile(pet_id, **values)
         except KeyError as exc:
@@ -2082,6 +2162,8 @@ def create_app(
             "inference_device",
             "analyzer_mode",
             "confidence_threshold",
+            "identity_accepted_threshold",
+            "identity_minimum_margin",
             "analysis_fps",
             "analysis_width",
             "activity_fps",
@@ -2111,6 +2193,8 @@ def create_app(
             raise HTTPException(status_code=428, detail="恢復預設值需要再次確認。")
         defaults = {
             "confidence_threshold": 0.45,
+            "identity_accepted_threshold": 0.62,
+            "identity_minimum_margin": 0.05,
             "inference_device": "auto",
             "analysis_fps": 5,
             "analysis_width": 640,

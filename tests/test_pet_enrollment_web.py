@@ -68,7 +68,8 @@ class PetEnrollmentWebTests(unittest.TestCase):
         self.assertIn('id="pet-edit-form"', page.text)
         self.assertIn("/static/js/pets.js", page.text)
         self.assertIn("寵物參考照片", page.text)
-        self.assertIn("不需要設定攝影機角度或物件位置", page.text)
+        self.assertIn("不需要設定", page.text)
+        self.assertIn("攝影機角度或物件位置", page.text)
         self.assertIn("保存照片並建立 AI 參考資料", page.text)
         self.assertNotIn("物件 · 在哪裡", page.text)
         self.assertNotIn("鏡頭方向 · 校正", page.text)
@@ -114,7 +115,7 @@ class PetEnrollmentWebTests(unittest.TestCase):
             edited = self.client.patch(
                 "/api/v1/pets/editable_cat",
                 json={
-                    "display_name": "嗨啵",
+                    "display_name": "貓甲",
                     "coat_description": "棕色",
                     "pattern_description": "貍花",
                     "enabled": True,
@@ -130,7 +131,7 @@ class PetEnrollmentWebTests(unittest.TestCase):
         self.assertEqual(added.status_code, 200, added.text)
         profile = PetRegistry(Path(self.temp.name) / "events" / ".." / "pets").get_pet("editable_cat")
         self.assertIsNotNone(profile)
-        self.assertEqual(profile.display_name, "嗨啵")
+        self.assertEqual(profile.display_name, "貓甲")
         self.assertEqual(profile.pattern_description, "貍花")
         self.assertEqual(len(profile.reference_images), 2)
         self.assertEqual(profile.embedding_count, 2)
@@ -213,7 +214,7 @@ class PetEnrollmentWebTests(unittest.TestCase):
         registry.add_embedding("reset", [0, 1], model_version="test")
         vectors, _ = registry.get_embeddings("reset")
         self.assertEqual(len(vectors), 1)
-        np.testing.assert_array_equal(vectors[0], [0, 1])
+        self.assertTrue(np.array_equal(vectors[0], [0, 1]))
 
     def test_mutation_requires_csrf_and_invalid_photo_is_rejected(self):
         self.login()

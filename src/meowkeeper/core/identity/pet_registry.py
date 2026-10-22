@@ -33,6 +33,7 @@ class PetProfile:
     identity_model_version: str = "not-trained"
     embedding_count: int = 0
     enabled: bool = True
+    semantic_traits: list[str] = field(default_factory=list)
 
     def validate(self) -> None:
         _validate_pet_id(self.pet_id)
@@ -40,6 +41,18 @@ class PetProfile:
             raise ValueError("寵物顯示名稱不可為空白。")
         if self.embedding_count < 0:
             raise ValueError("寵物 embedding 數量不可小於零。")
+
+    def effective_traits(self) -> list[str]:
+        """傳回結構化語意文字特徵（如：橘白、虎斑、米克斯），若無則由毛色與花紋衍生。"""
+        if self.semantic_traits:
+            return [str(t).strip() for t in self.semantic_traits if str(t).strip()]
+        derived: list[str] = []
+        for part in (self.coat_description, self.pattern_description):
+            if part and part.strip():
+                for sub in re.split(r"[,、/ ]+", part.strip()):
+                    if sub and sub not in derived:
+                        derived.append(sub)
+        return derived
 
     def to_dict(self) -> dict[str, Any]:
         self.validate()
@@ -104,6 +117,7 @@ class PetRegistry:
         coat_description: str | None = None,
         pattern_description: str | None = None,
         enabled: bool | None = None,
+        semantic_traits: list[str] | None = None,
     ) -> PetProfile:
         """更新可編輯的寵物資料，保留照片、embedding 與建立時間。"""
 
@@ -118,6 +132,8 @@ class PetRegistry:
             profile.pattern_description = pattern_description.strip()
         if enabled is not None:
             profile.enabled = bool(enabled)
+        if semantic_traits is not None:
+            profile.semantic_traits = [str(t).strip() for t in semantic_traits if str(t).strip()]
         profile.validate()
         self._write_profile(profile)
         return profile

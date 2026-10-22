@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import os
 import re
 import tempfile
@@ -61,6 +62,8 @@ class VisionSettingsStore:
     def __init__(self, data_root: Path, *, protector=None, store=None, credential_store=None):
         self.path = Path(data_root) / "state" / "vision-analysis.json"
         self.health_path = Path(data_root) / "state" / "vision-health.json"
+        self.key_stats_path = Path(data_root) / "state" / "vision-key-stats.json"
+        self._stats_lock = threading.RLock()
         self.secret_directory = Path(data_root) / "secrets" / "vision"
         self._protector = protector
         self._credential_store = credential_store
@@ -314,14 +317,15 @@ class VisionSettingsStore:
                 Path(temporary).unlink(missing_ok=True)
             if (
                 before != after
-                and before_values.get("provider_id") == values.get("provider_id")
                 and bool(values.get("endpoint"))
                 and bool(values.get("model_id"))
                 and (
-                    before_values.get("endpoint") == values.get("endpoint")
+                    (
+                        before_values.get("provider_id") == values.get("provider_id")
+                        and before_values.get("endpoint") == values.get("endpoint")
+                    )
                     or (
-                        values.get("provider_id") == "gemini"
-                        and urlsplit(before_values.get("endpoint") or "").netloc == "generativelanguage.googleapis.com"
+                        urlsplit(before_values.get("endpoint") or "").netloc == "generativelanguage.googleapis.com"
                         and urlsplit(values.get("endpoint") or "").netloc == "generativelanguage.googleapis.com"
                     )
                 )
@@ -331,8 +335,8 @@ class VisionSettingsStore:
                         existing_key = self._read_key_for(before_values)
                         if existing_key:
                             self._save_key_for(values, existing_key)
-                except Exception:
-                    pass
+                except (OSError, ValueError, TypeError, RuntimeError, CredentialStoreError):
+                    logging.getLogger(__name__).warning("模型設定已保存，但金鑰未能沿用；請確認金鑰狀態。")
             return self.status()
 
     def _secret_path(self, values):
@@ -389,17 +393,212 @@ class VisionSettingsStore:
         if self.guard is not None:
             self.guard.key_replaced(self.boundary(values))
 
-    def save_key(self, key):
+    def save_key(self, key, alias: str = ""):
         if not isinstance(key, str) or not key.strip() or not 1 <= len(key) <= 4096 or "\r" in key or "\n" in key:
             raise ValueError("API Key 不可為空白、過長或含換行。")
         with self._lock:
             values = self.read()
-            self._save_key_for(values, key)
+            trimmed_alias = alias.strip() if alias else "主要金鑰"
+            entry = {
+                "id": "key_1",
+                "alias": trimmed_alias[:60],
+                "key": key.strip(),
+                "created_at": datetime.now(timezone.utc).isoformat(),
+            }
+            self._save_keys_for(values, [entry])
 
     def read_key(self):
         with self._lock:
             values = self.read()
-            return self._read_key_for(values)
+            keys = self.read_keys(values)
+            return keys[0]["key"] if keys else None
+    @staticmethod
+    def _parse_keys(raw: str | None) -> list[dict]:
+        if not raw or not isinstance(raw, str) or not raw.strip():
+            return []
+        raw = raw.strip()
+        if raw.startswith("["):
+            try:
+                items = json.loads(raw)
+                if isinstance(items, list):
+                    valid = []
+                    for idx, item in enumerate(items):
+                        if isinstance(item, dict) and item.get("key") and isinstance(item["key"], str) and item["key"].strip():
+                            valid.append({
+                                "id": str(item.get("id") or f"key_{idx + 1}"),
+                                "alias": str(item.get("alias") or ("主要金鑰" if idx == 0 else f"備用金鑰 {idx}")).strip(),
+                                "key": str(item["key"]).strip(),
+                                "created_at": str(item.get("created_at") or datetime.now(timezone.utc).isoformat()),
+                            })
+                    if valid:
+                        return valid
+            except (json.JSONDecodeError, TypeError, ValueError):
+                pass
+        return [{"id": "key_1", "alias": "主要金鑰", "key": raw,
+                 "created_at": datetime.now(timezone.utc).isoformat()}]
+
+    def read_keys(self, values=None):
+        with self._lock:
+            vals = values or self.read()
+            raw = self._read_key_for(vals)
+            return self._parse_keys(raw)
+
+    def _save_keys_for(self, values, keys: list[dict]):
+        if not keys:
+            self.clear_key()
+            return
+        cleaned = []
+        for idx, k in enumerate(keys):
+            kid = str(k.get("id") or uuid4().hex[:12])
+            alias = str(k.get("alias") or ("主要金鑰" if idx == 0 else f"備用金鑰 {idx}")).strip()[:60]
+            cleaned.append({
+                "id": kid,
+                "alias": alias,
+                "key": str(k["key"]).strip(),
+                "created_at": str(k.get("created_at") or datetime.now(timezone.utc).isoformat()),
+            })
+        serialized = json.dumps(cleaned, ensure_ascii=False)
+        self._save_key_for(values, serialized)
+
+    def add_key(self, key: str, alias: str = ""):
+        if not isinstance(key, str) or not key.strip() or not 1 <= len(key) <= 4096 or "\r" in key or "\n" in key:
+            raise ValueError("API Key 不可為空白、過長或含換行。")
+        with self._lock:
+            values = self.read()
+            existing = self.read_keys(values)
+            if len(existing) >= 10:
+                raise ValueError("單一服務最多登記 10 組 API Key。")
+            trimmed_alias = alias.strip() if isinstance(alias, str) else ""
+            if not trimmed_alias:
+                trimmed_alias = "主要金鑰" if not existing else f"備用金鑰 {len(existing)}"
+            new_entry = {
+                "id": uuid4().hex[:12],
+                "alias": trimmed_alias[:60],
+                "key": key.strip(),
+                "created_at": datetime.now(timezone.utc).isoformat(),
+            }
+            existing.append(new_entry)
+            self._save_keys_for(values, existing)
+            return new_entry
+
+    def delete_key(self, key_id: str):
+        if not isinstance(key_id, str) or not key_id.strip():
+            raise ValueError("金鑰識別碼不正確。")
+        with self._lock:
+            values = self.read()
+            existing = self.read_keys(values)
+            filtered = [k for k in existing if k["id"] != key_id]
+            if len(filtered) == len(existing):
+                return False
+            self._save_keys_for(values, filtered)
+            self._prune_key_stats({k["id"] for k in filtered})
+            return True
+
+    def reorder_keys(self, order_ids: list[str]):
+        if not isinstance(order_ids, list):
+            raise ValueError("金鑰排序格式不正確。")
+        with self._lock:
+            values = self.read()
+            existing = self.read_keys(values)
+            by_id = {k["id"]: k for k in existing}
+            reordered = []
+            for kid in order_ids:
+                if kid in by_id:
+                    reordered.append(by_id.pop(kid))
+            reordered.extend(by_id.values())
+            self._save_keys_for(values, reordered)
+            return True
+
+    # ------------------------------------------------------------------
+    # Per-key call statistics (no secrets, no provider bodies).
+    # ------------------------------------------------------------------
+    KEY_STAT_OPERATIONS = ("analysis", "image_test", "token_probe", "health_check")
+    NO_KEY_ID = "__no_key__"
+
+    @classmethod
+    def _key_candidates(cls, keys):
+        """Return configured keys, or one key-less candidate for local endpoints that need no key."""
+        return keys or [{"id": cls.NO_KEY_ID, "alias": "免金鑰（本機服務）", "key": None}]
+
+    def _read_key_stats_unlocked(self):
+        try:
+            value = json.loads(self.key_stats_path.read_text(encoding="utf-8"))
+            return value if isinstance(value, dict) else {}
+        except (OSError, ValueError, TypeError):
+            return {}
+
+    def _write_key_stats_unlocked(self, stats):
+        self.key_stats_path.parent.mkdir(parents=True, exist_ok=True)
+        descriptor, temporary = tempfile.mkstemp(dir=self.key_stats_path.parent, suffix=".tmp")
+        try:
+            with os.fdopen(descriptor, "w", encoding="utf-8") as file:
+                json.dump(stats, file, ensure_ascii=False)
+            os.replace(temporary, self.key_stats_path)
+        finally:
+            Path(temporary).unlink(missing_ok=True)
+
+    def record_key_attempt(self, key_id, operation, *, success, category=None, http_status=None,
+                           request_dispatched=None):
+        """Count one call attempt for one key; persistence failures never affect monitoring."""
+        if not isinstance(key_id, str) or not key_id or operation not in self.KEY_STAT_OPERATIONS:
+            return
+        now = datetime.now(timezone.utc).isoformat()
+        try:
+            with self._stats_lock:
+                stats = self._read_key_stats_unlocked()
+                entry = stats.get(key_id) if isinstance(stats.get(key_id), dict) else {}
+                for field in ("calls", "successes", "failures", "dispatched"):
+                    entry[field] = int(entry.get(field) or 0)
+                entry["calls"] += 1
+                entry["successes" if success else "failures"] += 1
+                if request_dispatched is not False:
+                    entry["dispatched"] += 1
+                ops = entry.get("by_operation") if isinstance(entry.get("by_operation"), dict) else {}
+                op = ops.get(operation) if isinstance(ops.get(operation), dict) else {}
+                op = {name: int(op.get(name) or 0) for name in ("calls", "successes", "failures")}
+                op["calls"] += 1
+                op["successes" if success else "failures"] += 1
+                ops[operation] = op
+                entry["by_operation"] = ops
+                if success:
+                    entry["last_success_at"] = now
+                else:
+                    cats = entry.get("failure_categories") if isinstance(entry.get("failure_categories"), dict) else {}
+                    label = str(category or "unknown")[:40]
+                    cats[label] = int(cats.get(label) or 0) + 1
+                    entry["failure_categories"] = cats
+                    entry["last_failure_at"] = now
+                entry["last_status"] = "completed" if success else str(category or "unknown")[:40]
+                entry["last_http_status"] = http_status if type(http_status) is int else None
+                entry["last_operation"] = operation
+                entry["last_used_at"] = now
+                entry.setdefault("since", now)
+                stats[key_id] = entry
+                self._write_key_stats_unlocked(stats)
+        except (OSError, TypeError, ValueError):
+            logging.getLogger(__name__).warning("vision key statistics could not be persisted")
+
+    def key_stats(self):
+        with self._stats_lock:
+            return self._read_key_stats_unlocked()
+
+    def reset_key_stats(self, key_id=None):
+        with self._stats_lock:
+            stats = {} if key_id is None else self._read_key_stats_unlocked()
+            stats.pop(key_id, None) if key_id is not None else None
+            self._write_key_stats_unlocked(stats)
+        return True
+
+    def _prune_key_stats(self, valid_ids):
+        try:
+            with self._stats_lock:
+                stats = self._read_key_stats_unlocked()
+                kept = {kid: value for kid, value in stats.items() if kid in valid_ids or kid == self.NO_KEY_ID}
+                if kept != stats:
+                    self._write_key_stats_unlocked(kept)
+        except OSError:
+            pass
+
 
     def _read_key_for(self, values):
         target = self._secret_path(values)
@@ -438,7 +637,7 @@ class VisionSettingsStore:
     def _key_configured(self, values):
         if self._protector is not None:
             return self._secret_path(values).is_file()
-        return bool(self._read_key_for(values))
+        return bool(self.read_keys(values))
 
     @staticmethod
     def _demo_cat_jpeg():
@@ -471,7 +670,7 @@ class VisionSettingsStore:
         return output.getvalue()
 
     def test_demo_image(self):
-        """Perform one explicitly requested image-capability call and meter it."""
+        """Perform one explicitly requested image-capability call and meter it with multi-key sequential failover."""
         if self.guard is None:
             return {"status": "unavailable", "message_zh_tw": "此執行環境沒有 SQLite 額度帳本，未送出測試。"}
         with self._lock:
@@ -483,18 +682,31 @@ class VisionSettingsStore:
                                           upload_consent=True,
                                           json_object_supported=values["json_object_supported"],
                                           image_detail=self.provider_image_detail(values))
-                key = self._read_key_for(values)
+                keys = self.read_keys(values)
             except (OSError, ValueError, RuntimeError, CredentialStoreError):
                 return {"status": "auth_error", "message_zh_tw": "服務網址或安全金鑰狀態不正確；未送出測試。"}
-            if urlsplit(values["endpoint"]).scheme == "https" and not key:
+            if urlsplit(values["endpoint"]).scheme == "https" and not keys:
                 return {"status": "auth_error", "message_zh_tw": "此服務需要 API Key；請先安全保存金鑰。未送出測試。"}
             provider_id = values["provider_id"]
             reference = self.boundary(values)
             limits = self.quota_limits(values)
         jpeg = self._demo_cat_jpeg()
         now = datetime.now(timezone.utc)
-        storyboard = TrackStoryboard("demo-cat", "track_01", jpeg, (-0.5, 0.0), "local-demo")
-        request = SemanticRequest(str(uuid4()), jpeg, ("demo-cat",), now, (storyboard,))
+        pets = []
+        try:
+            from meowkeeper.core.identity.pet_registry import PetRegistry
+            reg = PetRegistry(self.path.parent.parent / "pets")
+            for p in reg.list_pets(enabled_only=True):
+                pets.append({
+                    "pet_id": p.pet_id,
+                    "name": p.display_name,
+                    "traits": p.effective_traits(),
+                })
+        except Exception:
+            pass
+        storyboard = TrackStoryboard("demo-cat", "track_01", jpeg, (-0.5, 0.0), "track_01")
+        request = SemanticRequest(str(uuid4()), jpeg, ("demo-cat",), now, (storyboard,),
+                                  pet_profiles=tuple(pets))
         try:
             job = self.guard.reserve(reference, request, daily_limit=limits["daily_limit"],
                                      rpm_limit=limits["rpm_limit"], tpm_limit=limits["tpm_limit"],
@@ -503,33 +715,83 @@ class VisionSettingsStore:
         except VisionFailure as error:
             return {"status": error.category, "message_zh_tw": "本機額度或服務保護暫不允許測試；沒有送出示範圖。"}
         started = time.monotonic()
-        try:
-            result = PROVIDERS[provider_id](settings, lambda: key).analyze(request, timeout_seconds=15)
-            if not isinstance(result, ProviderReply):
-                raise VisionFailure("bad_response", request_dispatched=False)
-            elapsed = (time.monotonic() - started) * 1000
-            self.guard.finish(job, "completed", request_dispatched=result.request_dispatched,
-                              http_status=result.http_status,
-                              api_elapsed_ms=result.api_elapsed_ms if result.api_elapsed_ms is not None else elapsed,
-                              input_tokens=result.input_tokens, output_tokens=result.output_tokens)
-            tracks = result.get("tracks")
-            return {"status": "completed", "http_status": result.http_status,
-                    "request_dispatched": result.request_dispatched, "elapsed_ms": round(elapsed),
-                    "input_tokens": result.input_tokens, "output_tokens": result.output_tokens,
-                    "track_count": len(tracks) if isinstance(tracks, list) else 0,
-                    "image_source": "synthetic_local_demo",
-                    "message_zh_tw": "示範插圖已完成圖片 API 回應解析；這只證明本次示範圖請求成功，不代表居家圖片辨識準確。"}
-        except VisionFailure as error:
-            self.guard.finish(job, error.category, retry_after=error.retry_after_seconds,
-                              request_dispatched=error.request_dispatched, http_status=error.http_status,
-                              api_elapsed_ms=error.api_elapsed_ms)
-            return {"status": error.category, "http_status": error.http_status,
-                    "request_dispatched": error.request_dispatched,
-                    "message_zh_tw": "示範圖片測試未完成；請依狀態檢查金鑰、模型、格式、額度或網路。居家監控與 Telegram 不受影響。"}
-        except (OSError, RuntimeError, TypeError, ValueError):
-            self.guard.finish(job, "unavailable", request_dispatched=False)
-            return {"status": "unavailable", "request_dispatched": False,
-                    "message_zh_tw": "示範圖片測試未完成；未保存服務原始回應，居家監控與 Telegram 不受影響。"}
+        key_attempts = []
+        last_failure = None
+        candidates = self._key_candidates(keys)
+        for index, key_entry in enumerate(candidates):
+            alias = key_entry.get("alias") or f"第 {index + 1} 組金鑰"
+            k = key_entry["key"]
+            try:
+                result = PROVIDERS[provider_id](settings, lambda k=k: k).analyze(request, timeout_seconds=15)
+                if not isinstance(result, ProviderReply):
+                    raise VisionFailure("bad_response", request_dispatched=False)
+                elapsed = (time.monotonic() - started) * 1000
+                self.record_key_attempt(key_entry["id"], "image_test", success=True,
+                                        http_status=result.http_status,
+                                        request_dispatched=result.request_dispatched)
+                self.guard.finish(job, "completed", request_dispatched=result.request_dispatched,
+                                  http_status=result.http_status,
+                                  api_elapsed_ms=result.api_elapsed_ms if result.api_elapsed_ms is not None else elapsed,
+                                  input_tokens=result.input_tokens, output_tokens=result.output_tokens)
+                tracks = result.get("tracks")
+                identity_cand = None
+                if isinstance(tracks, list) and tracks and isinstance(tracks[0], dict):
+                    identity_cand = tracks[0].get("identity_candidate")
+                id_summary = ""
+                if identity_cand and identity_cand.get("pet_id") not in {None, "unknown", ""}:
+                    matched_name = identity_cand.get("pet_id")
+                    for p in pets:
+                        if p.get("pet_id") == identity_cand.get("pet_id"):
+                            matched_name = p.get("name")
+                            break
+                    id_summary = f"；AI 辨識身分候選為「{matched_name}」（{identity_cand.get('reason', '')}）"
+                msg = (f"示範插圖已完成圖片 API 回應解析{id_summary}；這只證明本次示範圖請求成功，不代表居家圖片辨識準確。"
+                       if index == 0 else
+                       f"第 1～{index} 組金鑰測試未通過，已自動循序輪替至第 {index + 1} 組「{alias}」並解析成功{id_summary}！")
+                return {"status": "completed", "http_status": result.http_status,
+                        "request_dispatched": result.request_dispatched, "elapsed_ms": round(elapsed),
+                        "input_tokens": result.input_tokens, "output_tokens": result.output_tokens,
+                        "track_count": len(tracks) if isinstance(tracks, list) else 0,
+                        "identity_candidate": identity_cand,
+                        "active_key_index": index + 1, "active_key_alias": alias,
+                        "image_source": "synthetic_local_demo",
+                        "message_zh_tw": msg}
+            except VisionFailure as error:
+                last_failure = error
+                self.record_key_attempt(key_entry["id"], "image_test", success=False, category=error.category,
+                                        http_status=error.http_status, request_dispatched=error.request_dispatched)
+                if error.http_status == 402:
+                    fail_desc = f"第 {index + 1} 組「{alias}」: 額度已用盡 (HTTP 402)"
+                elif error.http_status == 429:
+                    fail_desc = f"第 {index + 1} 組「{alias}」: 請求限流 (HTTP 429)"
+                elif error.http_status in {401, 403}:
+                    fail_desc = f"第 {index + 1} 組「{alias}」: 授權失效 (HTTP {error.http_status})"
+                else:
+                    fail_desc = f"第 {index + 1} 組「{alias}」: {error.category} (HTTP {error.http_status or '—'})"
+                key_attempts.append(fail_desc)
+                if index + 1 < len(candidates) and error.category in {"auth_error", "rate_limited", "bad_response", "timeout", "unavailable"}:
+                    continue
+                break
+            except (OSError, RuntimeError, TypeError, ValueError):
+                self.record_key_attempt(key_entry["id"], "image_test", success=False, category="unavailable",
+                                        request_dispatched=False)
+                self.guard.finish(job, "unavailable", request_dispatched=False)
+                return {"status": "unavailable", "request_dispatched": False,
+                        "message_zh_tw": "示範圖片測試未完成；未保存服務原始回應，居家監控與 Telegram 不受影響。"}
+        if last_failure is not None:
+            self.guard.finish(job, last_failure.category, retry_after=last_failure.retry_after_seconds,
+                              request_dispatched=last_failure.request_dispatched, http_status=last_failure.http_status,
+                              api_elapsed_ms=last_failure.api_elapsed_ms)
+            if len(keys) > 1:
+                detail_str = "；".join(key_attempts)
+                msg = f"已循序測試全部 {len(keys)} 組金鑰均未成功（{detail_str}）。請檢查各金鑰額度與狀態。"
+            elif last_failure.http_status == 402:
+                msg = "服務商回報預付額度已用盡或需要啟用計費（HTTP 402 Payment Required）；請至 Google AI Studio / 服務商控制台檢查專案計費與額度。"
+            else:
+                msg = "示範圖片測試未完成；請依狀態檢查金鑰、模型、格式、額度或網路。居家監控與 Telegram 不受影響。"
+            return {"status": last_failure.category, "http_status": last_failure.http_status,
+                    "request_dispatched": last_failure.request_dispatched,
+                    "message_zh_tw": msg}
 
     def count_tokens_demo(self):
         """Explicit Gemini countTokens request using one synthetic, local-only demo image."""
@@ -542,15 +804,14 @@ class VisionSettingsStore:
             if not values["endpoint"] or not values["model_id"]:
                 return {"status": "unavailable", "message_zh_tw": "請先保存 Gemini 模型設定；未送出探測。"}
             try:
-                key = self.read_key()
+                keys = self.read_keys(values)
                 settings = VisionEndpoint(values["endpoint"], values["model_id"], enabled=True,
                                           upload_consent=True, json_object_supported=values["json_object_supported"],
                                           image_detail="provider_default")
                 from meowkeeper.integrations.vision.gemini import GeminiVision
-                provider = GeminiVision(settings, lambda: key)
             except (OSError, ValueError, RuntimeError, CredentialStoreError):
                 return {"status": "auth_error", "message_zh_tw": "Gemini 網址或安全金鑰狀態不正確；未送出探測。"}
-            if urlsplit(values["endpoint"]).scheme == "https" and not key:
+            if urlsplit(values["endpoint"]).scheme == "https" and not keys:
                 return {"status": "auth_error", "message_zh_tw": "Gemini 需要 API Key；請先安全保存金鑰。未送出探測。"}
             reference = self.boundary(values)
             model_id = values["model_id"]
@@ -574,33 +835,71 @@ class VisionSettingsStore:
                 image.save(output, format="JPEG", quality=jpeg_quality, optimize=True)
                 jpeg = output.getvalue()
             offsets = tuple(-0.5 * (frame_count - 1 - index) for index in range(frame_count))
-            board = TrackStoryboard("demo-cat", "track_01", jpeg, offsets, "local-demo")
+            board = TrackStoryboard("demo-cat", "track_01", jpeg, offsets, "track_01")
             request = SemanticRequest(str(uuid4()), jpeg, ("demo-cat",), datetime.now(timezone.utc), (board,))
             started = time.monotonic()
-            reply = provider.count_tokens(request, timeout_seconds=15)
-            elapsed = round((time.monotonic() - started) * 1000)
-            total = reply["totalTokens"]
-            self.guard.finish_token_probe(probe_id, "completed",
-                                          request_dispatched=getattr(reply, "request_dispatched", None),
-                                          http_status=getattr(reply, "http_status", None),
-                                          total_tokens=total, elapsed_ms=elapsed)
-            return {"status": "completed", "http_status": reply.http_status,
-                    "request_dispatched": reply.request_dispatched, "total_tokens": total,
-                    "elapsed_ms": elapsed, "scope": "single_track_synthetic_demo",
-                    "message_zh_tw": "這是單軌跡合成圖的 Gemini Token 數，不是實際家庭事件費用預測；實際事件會依貓數、裁切及供應商計量不同。"}
-        except VisionFailure as error:
-            self.guard.finish_token_probe(probe_id, error.category,
-                                          request_dispatched=error.request_dispatched,
-                                          http_status=error.http_status, elapsed_ms=error.api_elapsed_ms)
-            return {"status": error.category, "http_status": error.http_status,
-                    "request_dispatched": error.request_dispatched,
-                    "message_zh_tw": "Gemini Token 數探測未完成；未保存服務原始回應或圖片，本機監控不受影響。"}
+            key_attempts = []
+            last_error = None
+            candidates = self._key_candidates(keys)
+            for index, key_entry in enumerate(candidates):
+                alias = key_entry.get("alias") or f"第 {index + 1} 組金鑰"
+                k = key_entry["key"]
+                provider = GeminiVision(settings, lambda k=k: k)
+                try:
+                    reply = provider.count_tokens(request, timeout_seconds=15)
+                    elapsed = round((time.monotonic() - started) * 1000)
+                    total = reply["totalTokens"]
+                    self.record_key_attempt(key_entry["id"], "token_probe", success=True,
+                                            http_status=getattr(reply, "http_status", None),
+                                            request_dispatched=getattr(reply, "request_dispatched", None))
+                    self.guard.finish_token_probe(probe_id, "completed",
+                                                  request_dispatched=getattr(reply, "request_dispatched", None),
+                                                  http_status=getattr(reply, "http_status", None),
+                                                  total_tokens=total, elapsed_ms=elapsed)
+                    msg = ("這是單軌跡合成圖的 Gemini Token 數，不是實際家庭事件費用預測；實際事件會依貓數、裁切及供應商計量不同。"
+                           if index == 0 else
+                           f"第 1～{index} 組金鑰未通過，已自動輪替至第 {index + 1} 組「{alias}」並完成 Token 探測。")
+                    return {"status": "completed", "http_status": reply.http_status,
+                            "request_dispatched": reply.request_dispatched, "total_tokens": total,
+                            "elapsed_ms": elapsed, "scope": "single_track_synthetic_demo",
+                            "active_key_index": index + 1, "active_key_alias": alias,
+                            "message_zh_tw": msg}
+                except VisionFailure as error:
+                    last_error = error
+                    self.record_key_attempt(key_entry["id"], "token_probe", success=False, category=error.category,
+                                            http_status=error.http_status,
+                                            request_dispatched=error.request_dispatched)
+                    if error.http_status == 402:
+                        fail_desc = f"第 {index + 1} 組「{alias}」: 額度已用盡 (HTTP 402)"
+                    elif error.http_status == 429:
+                        fail_desc = f"第 {index + 1} 組「{alias}」: 限流 (HTTP 429)"
+                    elif error.http_status in {401, 403}:
+                        fail_desc = f"第 {index + 1} 組「{alias}」: 授權失效 (HTTP {error.http_status})"
+                    else:
+                        fail_desc = f"第 {index + 1} 組「{alias}」: {error.category} (HTTP {error.http_status or '—'})"
+                    key_attempts.append(fail_desc)
+                    if index + 1 < len(candidates) and error.category in {"auth_error", "rate_limited", "bad_response", "timeout", "unavailable"}:
+                        continue
+                    break
+            if last_error is not None:
+                self.guard.finish_token_probe(probe_id, last_error.category,
+                                              request_dispatched=last_error.request_dispatched,
+                                              http_status=last_error.http_status, elapsed_ms=last_error.api_elapsed_ms)
+                if len(keys) > 1:
+                    detail_str = "；".join(key_attempts)
+                    msg = f"已循序測試全部 {len(keys)} 組金鑰均未成功（{detail_str}）。"
+                else:
+                    msg = f"Gemini Token 數探測未完成（{key_attempts[-1] if key_attempts else last_error.category}）；未保存服務原始回應或圖片，本機監控不受影響。"
+                return {"status": last_error.category, "http_status": last_error.http_status,
+                        "request_dispatched": last_error.request_dispatched,
+                        "message_zh_tw": msg}
         except (OSError, RuntimeError, TypeError, ValueError):
             self.guard.finish_token_probe(probe_id, "unavailable", request_dispatched=False)
             return {"status": "unavailable", "request_dispatched": False,
                     "message_zh_tw": "Gemini Token 數探測未完成；未保存服務原始回應或圖片。"}
 
     def clear_key(self):
+        self._prune_key_stats(set())
         with self._lock:
             values = self.read()
             if self._protector is not None:
@@ -622,7 +921,21 @@ class VisionSettingsStore:
         except (OSError, RuntimeError, ValueError):
             credential_store_available = False
             key_configured = False
+        keys = self.read_keys(values) if credential_store_available else []
+        key_stats = self.key_stats()
+        sanitized_keys = [
+            {
+                "id": k["id"],
+                "alias": k["alias"],
+                "masked_key": (k["key"][:4] + "••••" + k["key"][-4:]) if len(k["key"]) >= 10 else "••••••••",
+                "order": idx + 1,
+                "stats": key_stats.get(k["id"]),
+            }
+            for idx, k in enumerate(keys)
+        ]
         return {"settings": values, "key_configured": key_configured,
+                "keys": sanitized_keys,
+                "keyless_stats": key_stats.get(self.NO_KEY_ID),
                 "credential_store_available": credential_store_available,
                 "credential_backend": "test_only" if self._protector is not None else self._last_credential_backend,
                 "capabilities":capabilities(values["provider_id"]),
@@ -936,13 +1249,45 @@ class VisionSettingsStore:
             if not values["endpoint"] or not values["model_id"]:
                 return {"status": "unavailable", "message_zh_tw": "目前保存的是未完成設定；請填完整服務網址與模型 ID，再檢查連線。未送出請求。"}
             settings = VisionEndpoint(values["endpoint"],values["model_id"])
-            key = self.read_key()
-            if urlsplit(values["endpoint"]).scheme == "https" and not key:
+            keys = self.read_keys(values)
+            if urlsplit(values["endpoint"]).scheme == "https" and not keys:
                 result = {"status":"auth_error", "message_zh_tw":"請先安全保存目前服務的Key；未送出檢查。"}
                 self._write_health(result)
                 return result
             self._last_health_check = time.monotonic()
-        result = health_check(values["provider_id"],settings,key,timeout_seconds=2)
+        last_result = None
+        key_reports = []
+        candidates = self._key_candidates(keys)
+        for index, key_entry in enumerate(candidates):
+            alias = key_entry.get("alias") or f"第 {index + 1} 組金鑰"
+            k = key_entry["key"]
+            result = health_check(values["provider_id"], settings, k, timeout_seconds=4)
+            last_result = result
+            ok = result.get("status") in {"metadata_available", "model_not_confirmed", "unsupported_check"}
+            self.record_key_attempt(key_entry["id"], "health_check", success=ok,
+                                    category=None if ok else result.get("status"),
+                                    http_status=result.get("http_status"),
+                                    request_dispatched=False if result.get("status") == "unsupported_check" else None)
+            if result.get("status") in {"metadata_available", "model_not_confirmed"}:
+                msg = ("已讀取服務商模型清單；清單不代表每個模型都支援圖片，也不是分析品質或影片通知成功的證明。"
+                       if index == 0 else
+                       f"第 1～{index} 組金鑰連線未通過，已自動循序輪替至第 {index + 1} 組「{alias}」成功讀取模型清單！")
+                result["message_zh_tw"] = msg
+                result["active_key_index"] = index + 1
+                result["active_key_alias"] = alias
+                self._write_health(result)
+                return result
+            key_reports.append(f"第 {index + 1} 組「{alias}」: {result.get('status')}")
+            if result.get("status") == "unsupported_check":
+                break
+            if index + 1 < len(candidates):
+                continue
+        if last_result is not None:
+            if len(keys) > 1 and len(key_reports) > 1:
+                last_result["message_zh_tw"] = f"已循序測試全部 {len(keys)} 組金鑰均未成功（{'；'.join(key_reports)}）。"
+            self._write_health(last_result)
+            return last_result
+        result = {"status": "unavailable", "message_zh_tw": "未設定可用金鑰。"}
         self._write_health(result)
         return result
 
@@ -980,9 +1325,9 @@ class VisionSettingsStore:
                     if owner.boundary(values) != self.config_reference:
                         raise VisionFailure("skipped_disabled")
                     local = urlsplit(values["endpoint"]).scheme == "http"
-                    if not local and not owner._key_configured(values):
+                    keys = owner.read_keys(values)
+                    if not local and not keys:
                         raise VisionFailure("auth_error", request_dispatched=False)
-                    key = owner.read_key()  # 同一設定快照，不能把新服務的 Key 送到舊網址。
                 if not request.storyboards:
                     raise VisionFailure("insufficient_evidence")
                 if owner.guard is None:
@@ -998,20 +1343,39 @@ class VisionSettingsStore:
                 settings = VisionEndpoint(values["endpoint"], values["model_id"], enabled=True,
                                           upload_consent=True, json_object_supported=values["json_object_supported"],
                                           image_detail=owner.provider_image_detail(values))
-                try:
-                    result = PROVIDERS[values["provider_id"]](settings, lambda: key).analyze(request, timeout_seconds=timeout_seconds)
-                except VisionFailure as error:
-                    owner.guard.finish(job, error.category, retry_after=error.retry_after_seconds,
-                                       request_dispatched=error.request_dispatched, http_status=error.http_status,
-                                       api_elapsed_ms=error.api_elapsed_ms)
-                    raise
-                except (OSError, RuntimeError, TypeError, ValueError):
-                    owner.guard.finish(job, "unavailable")
-                    raise VisionFailure("unavailable") from None
-                owner.guard.finish(job, "completed", request_dispatched=getattr(result, "request_dispatched", None),
-                                   http_status=getattr(result, "http_status", None),
-                                   api_elapsed_ms=getattr(result, "api_elapsed_ms", None),
-                                   input_tokens=getattr(result, "input_tokens", None),
-                                   output_tokens=getattr(result, "output_tokens", None))  # 僅記錄服務明確回傳的用量。
-                return result
+                last_error = None
+                candidates = owner._key_candidates(keys)
+                for index, key_entry in enumerate(candidates):
+                    k = key_entry["key"]
+                    try:
+                        result = PROVIDERS[values["provider_id"]](settings, lambda k=k: k).analyze(request, timeout_seconds=timeout_seconds)
+                        owner.record_key_attempt(key_entry["id"], "analysis", success=True,
+                                                 http_status=getattr(result, "http_status", None),
+                                                 request_dispatched=getattr(result, "request_dispatched", None))
+                        owner.guard.finish(job, "completed", request_dispatched=getattr(result, "request_dispatched", None),
+                                           http_status=getattr(result, "http_status", None),
+                                           api_elapsed_ms=getattr(result, "api_elapsed_ms", None),
+                                           input_tokens=getattr(result, "input_tokens", None),
+                                           output_tokens=getattr(result, "output_tokens", None))
+                        return result
+                    except VisionFailure as error:
+                        last_error = error
+                        owner.record_key_attempt(key_entry["id"], "analysis", success=False, category=error.category,
+                                                 http_status=error.http_status,
+                                                 request_dispatched=error.request_dispatched)
+                        if index + 1 < len(candidates) and error.category in {"auth_error", "rate_limited", "bad_response", "timeout", "unavailable"}:
+                            continue
+                        break
+                    except (OSError, RuntimeError, TypeError, ValueError):
+                        owner.record_key_attempt(key_entry["id"], "analysis", success=False, category="unavailable",
+                                                 request_dispatched=False)
+                        owner.guard.finish(job, "unavailable")
+                        raise VisionFailure("unavailable") from None
+                if last_error:
+                    owner.guard.finish(job, last_error.category, retry_after=last_error.retry_after_seconds,
+                                       request_dispatched=last_error.request_dispatched, http_status=last_error.http_status,
+                                       api_elapsed_ms=last_error.api_elapsed_ms)
+                    raise last_error
+                owner.guard.finish(job, "unavailable")
+                raise VisionFailure("unavailable")
         return ManagedProvider()

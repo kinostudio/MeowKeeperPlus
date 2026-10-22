@@ -250,7 +250,7 @@ class GPUInferenceScheduler:
                 try:
                     result = task.function()
                     elapsed = time.perf_counter() - started
-                    if task.timeout_seconds is not None and elapsed > task.timeout_seconds:
+                    if task.timeout_seconds is not None and elapsed > task.timeout_seconds and result is None:
                         self.metrics.timed_out += 1
                         if not task.future.done():
                             task.future.set_exception(TimeoutError("推論工作超過允許時間。"))
