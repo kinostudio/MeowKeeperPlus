@@ -57,3 +57,19 @@ class IdentityConsensusTests(unittest.TestCase):
             captured_at=now+timedelta(seconds=6), frame_id="new")
         self.assertFalse(result.stable)
         self.assertEqual(result.valid_frames, 1)
+
+    def test_two_frames_resolve_consensus_in_three_second_window(self):
+        temporal = TemporalIdentity()
+        now = datetime(2026, 10, 22, tzinfo=timezone.utc)
+        first = temporal.update("track_low_fps", self.prediction("cat_a"),
+                                captured_at=now, frame_id="f1")
+        self.assertTrue(first.is_unknown)
+        self.assertEqual(first.unknown_reason, "insufficient_evidence")
+        self.assertEqual(first.valid_frames, 1)
+
+        second = temporal.update("track_low_fps", self.prediction("cat_a"),
+                                 captured_at=now + timedelta(seconds=1.6), frame_id="f2")
+        self.assertTrue(second.stable)
+        self.assertEqual(second.predicted_pet_id, "cat_a")
+        self.assertEqual(second.valid_frames, 2)
+        self.assertEqual(second.vote_fraction, 1.0)

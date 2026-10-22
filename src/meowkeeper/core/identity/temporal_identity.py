@@ -22,11 +22,11 @@ class TemporalIdentity:
         self.thresholds.validate()
         self.minimum_unique_frames = (
             minimum_unique_frames if minimum_unique_frames is not None
-            else getattr(self.thresholds, "minimum_unique_frames", 3)
+            else getattr(self.thresholds, "minimum_unique_frames", 2)
         )
         self.minimum_time_bins = (
             minimum_time_bins if minimum_time_bins is not None
-            else getattr(self.thresholds, "minimum_time_bins", 2)
+            else getattr(self.thresholds, "minimum_time_bins", 1)
         )
         self.minimum_vote_fraction = (
             minimum_vote_fraction if minimum_vote_fraction is not None

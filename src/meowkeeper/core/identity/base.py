@@ -17,12 +17,12 @@ class IdentityThresholds:
     # experimental until household validation.
     minimum_margin: float = 0.05
     temporal_vote_window: int = 5
-    minimum_valid_samples: int = 3
+    minimum_valid_samples: int = 2
     top_k_embeddings: int = 3
     embedding_weight: float = 0.85
     color_weight: float = 0.15
-    minimum_unique_frames: int = 3
-    minimum_time_bins: int = 2
+    minimum_unique_frames: int = 2
+    minimum_time_bins: int = 1
     minimum_vote_fraction: float = 0.70
 
     def validate(self) -> None:
