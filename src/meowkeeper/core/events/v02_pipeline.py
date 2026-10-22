@@ -157,6 +157,7 @@ class V02AnalysisPipeline:
             quiet_fps=MX250_MINIMUM.quiet_yolo_fps,
             active_seconds=MX250_MINIMUM.active_mode_seconds,
             monitor=self.inference_scheduler.resource_monitor,
+            logger=logger,
         )
         if notifier is not None and self.chat_ids:
             self.notification_dispatcher = notification_dispatcher or NotificationDispatcher(

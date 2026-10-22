@@ -39,7 +39,11 @@
     const fresh=Number.isFinite(age)&&age>=0&&age<15&&s.connections>0;
     const enabled=["running","starting"].includes(payload.status);
     badge("source-status",fresh?"已接收最新影格":"等待有效影格",fresh?"ok":"warn");
-    badge("monitor-status",!enabled?"偵測已停止":fresh&&a.fps>0?"正在分析（實驗性）":"等待分析",!enabled?"unknown":fresh&&a.fps>0?"info":"warn");
+    const mode=a.activity_mode||a.adaptive?.activity_sampling?.mode||(a.fps>=4?"active":a.fps<=1.5?"quiet":"normal");
+    const modeLabel=mode==="active"?"活躍模式":mode==="quiet"?"待機節能":"一般模式";
+    const modeKind=mode==="active"?"ok":mode==="quiet"?"warn":"info";
+    const analyzing=fresh&&a.fps>0;
+    badge("monitor-status",!enabled?"偵測已停止":analyzing?`正在分析 · ${modeLabel}`:"等待分析",!enabled?"unknown":analyzing?modeKind:"warn");
     badge("telegram-status",t.enabled?"通知已啟用":"通知未啟用",t.enabled?"info":"unknown");
     text("overview-source-name",`${s.source_id||"來源尚未確認"} · 連線 ${s.connections??"未確認"}`);
     text("overview-frame-age",Number.isFinite(age)&&age>=0?number(age," 秒前"):"尚未取得");
@@ -52,7 +56,10 @@
     text("overview-queue",Number.isFinite(t.queue_pending)?`${t.queue_pending} 件`:"尚未提供");
     text("overview-recipient-count",Number.isFinite(t.recipient_count)?`${t.recipient_count} 位` : "尚未提供");
     text("overview-ring-tag",`環形快取 ${number(r.seconds," 秒")} · ${r.segment_count??"未確認"} 段`);
-    text("monitor-detail",!enabled?"監控管線未執行；可從右上角啟動監控。":"身分與行為屬實驗性；以實際推論速度確認工作狀態。");
+    const transCount=a.adaptive?.activity_sampling?.active_transitions;
+    const transText=Number.isInteger(transCount)&&transCount>0?` · 累計活躍 ${transCount} 次`:"";
+    const detailMode=mode==="active"?`⚡ 活躍高頻採樣（5 FPS · 偵測到動態）${transText}`:mode==="quiet"?`🌙 待機節能巡檢（1 FPS · 畫面無貓咪動態）${transText}`:`🐾 一般常態採樣（3 FPS · 貓咪在鏡頭前）${transText}`;
+    text("monitor-detail",!enabled?"監控管線未執行；可從右上角啟動監控。":`${detailMode}。身分與行為屬實驗性。`);
     text("overview-runtime-note",m.core?.last_error?"核心出現錯誤，請查看維護中心。":!enabled?"來源、AI 與錄影快取未執行；Dashboard 仍可使用。":fresh?"已收到最新影格；通知送達及事件錄影另依實際回條確認。":"正在等待有效新影格，不以程序啟動宣稱監控成功。");
     text("system-status",Number.isFinite(sys.cpu_percent)?number(sys.cpu_percent,"%") : "尚未採樣");
     const cpuStat=systemSnapshot?.telemetry?.statistics?.system_cpu_percent;

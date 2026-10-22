@@ -112,6 +112,8 @@ class RepositoryCoreController(CoreController):
         identity_frame_width: int = 1280,
         preview_frame_width: int = 1920,
         confidence_threshold: float = 0.45,
+        identity_accepted_threshold: float = 0.62,
+        identity_minimum_margin: float = 0.05,
         event_pre_seconds: float = 5.0,
         event_post_seconds: float = 10.0,
         cooldown_seconds: float = 180.0,
@@ -156,6 +158,8 @@ class RepositoryCoreController(CoreController):
             raise ValueError("預覽共享影格寬度必須介於 640 到 1920。")
         self.preview_frame_width = preview_frame_width
         self.confidence_threshold = float(confidence_threshold)
+        self.identity_accepted_threshold = float(identity_accepted_threshold)
+        self.identity_minimum_margin = float(identity_minimum_margin)
         self.event_pre_seconds = float(event_pre_seconds)
         self.event_post_seconds = float(event_post_seconds)
         self.cooldown_seconds = float(cooldown_seconds)
@@ -700,6 +704,10 @@ class RepositoryCoreController(CoreController):
                 self.preview_frame_width = int(values["preview_frame_width"])
             if "confidence_threshold" in values:
                 self.confidence_threshold = float(values["confidence_threshold"])
+            if "identity_accepted_threshold" in values:
+                self.identity_accepted_threshold = float(values["identity_accepted_threshold"])
+            if "identity_minimum_margin" in values:
+                self.identity_minimum_margin = float(values["identity_minimum_margin"])
             if "event_pre_seconds" in values:
                 self.event_pre_seconds = float(values["event_pre_seconds"])
             if "event_post_seconds" in values:
@@ -889,9 +897,11 @@ class RepositoryCoreController(CoreController):
                             captured_at=frame.captured_at,
                         )
                     adaptive_status = analyzer.snapshot()
+                    activity_mode = (adaptive_status.get("activity_sampling") or {}).get("mode", "normal")
                     self._metrics["ai"].update({
                         "backend": analyzer.inference_backend,
                         "device": analyzer.device,
+                        "activity_mode": activity_mode,
                         "inference_input_size": adaptive_status["effective_input_size"],
                         "adaptive": adaptive_status,
                     })
@@ -1023,6 +1033,11 @@ class RepositoryCoreController(CoreController):
                 self._model_sha256 = None
             if self.analyzer_mode.lower() == "v02":
                 from meowkeeper.core.events.v02_host_analyzer import V02HostAnalyzer
+                from meowkeeper.core.identity.base import IdentityThresholds
+                th = IdentityThresholds(
+                    accepted_threshold=self.identity_accepted_threshold,
+                    minimum_margin=self.identity_minimum_margin,
+                )
                 try:
                     return V02HostAnalyzer.create(
                         model_path=self.model_path, confidence=self.confidence_threshold,
@@ -1033,6 +1048,7 @@ class RepositoryCoreController(CoreController):
                         feedback_preferences=self.cat_notification_preferences,
                         tracker=IsolatedTracker(self.model_path, confidence_threshold=self.confidence_threshold,
                                                 input_size=self.analysis_width, device=self.inference_device),
+                        identity_thresholds=th,
                     )
                 except (OSError, RuntimeError, ValueError, ImportError) as error:
                     self._log(f"⚠️ V0.2 尚未可用，降級單一 YOLO 偵測：{type(error).__name__}。")

@@ -246,6 +246,7 @@ class InferenceLoadController:
         active_seconds: float = 30.0,
         quiet_after_seconds: float = 60.0,
         monitor: GPUResourceMonitor | None = None,
+        logger: Callable[[str], None] | None = None,
     ) -> None:
         if not 1 <= quiet_fps <= normal_fps <= active_fps <= 5:
             raise ValueError("動態分析 FPS 必須滿足 1 <= quiet <= normal <= active <= 5。")
@@ -260,6 +261,10 @@ class InferenceLoadController:
         self.last_activity_monotonic: float | None = None
         self.last_seen_cat_monotonic: float | None = None
         self.mode = InferenceMode.NORMAL
+        self.logger = logger
+        self.active_transitions: int = 0
+        self.last_mode: str = "normal"
+        self.last_active_at: str | None = None
         self._last_analyzed_monotonic: float | None = None
         self._last_analyzed_captured_at: Any | None = None
 
@@ -280,12 +285,35 @@ class InferenceLoadController:
             return self.quiet_fps
         return self.normal_fps
 
+    @property
+    def activity_mode(self) -> str:
+        fps = self.target_fps
+        if fps >= self.active_fps:
+            return "active"
+        if fps <= self.quiet_fps:
+            return "quiet"
+        return "normal"
+
     def observe_activity(self, *, cat_seen: bool = False, active: bool = False) -> None:
         now = time.monotonic()
         if cat_seen:
             self.last_seen_cat_monotonic = now
         if active:
             self.last_activity_monotonic = now
+        mode = self.activity_mode
+        if mode != self.last_mode:
+            if mode == "active":
+                self.active_transitions += 1
+                self.last_active_at = datetime.now(timezone.utc).isoformat()
+                if self.logger:
+                    self.logger("⚡ AI 推論已切換至活躍模式（5 FPS，偵測到動態）")
+            elif mode == "quiet":
+                if self.logger:
+                    self.logger("🌙 AI 推論已進入待機節能模式（1 FPS，畫面無貓咪動態）")
+            elif mode == "normal":
+                if self.logger:
+                    self.logger("🐾 AI 推論已切換至一般常態模式（3 FPS）")
+            self.last_mode = mode
 
     def should_analyze(self, captured_at: Any | None = None) -> bool:
         if captured_at is not None and hasattr(captured_at, "timestamp"):
@@ -319,12 +347,16 @@ class InferenceLoadController:
 
     def as_dict(self) -> dict[str, object]:
         return {
-            "mode": self.mode.value,
+            "mode": self.activity_mode,
+            "activity_mode": self.activity_mode,
+            "resource_mode": self.mode.value,
             "target_fps": self.target_fps,
             "normal_fps": self.normal_fps,
             "active_fps": self.active_fps,
             "quiet_fps": self.quiet_fps,
             "active_seconds": self.active_seconds,
+            "active_transitions": self.active_transitions,
+            "last_active_at": self.last_active_at,
         }
 
 
