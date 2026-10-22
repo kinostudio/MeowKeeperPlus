@@ -109,6 +109,20 @@ async function main() {
   await audioControl.listeners.click();
   assert.equal(audioControl.attrs['aria-pressed'], 'false', 'audio button state updates to not pressed');
   assert.equal(preview.isAudioEnabled(), false, 'audio state returns to disabled');
+
+  const fsControl = hud.children.find(node => node.dataset.previewControl === 'fullscreen');
+  assert.ok(fsControl, 'fullscreen toggle button is rendered on the HUD');
+  assert.equal(fsControl.attrs['aria-pressed'], 'false', 'fullscreen toggle defaults to not pressed');
+  assert.equal(fsControl.children.length, 2, 'fullscreen toggle renders icon and tooltip');
+  assert.equal(fsControl.children[0].className, 'preview-mode-icon');
+  assert.equal(fsControl.children[1].className, 'preview-mode-tooltip');
+  assert.equal(fsControl.attrs['aria-describedby'], fsControl.children[1].id, 'fullscreen tooltip is accessible');
+  assert.equal(preview.isFullscreen(), false, 'preview reports not fullscreen');
+
+  let requestedFs = false;
+  stage.requestFullscreen = async () => { requestedFs = true; document.fullscreenElement = stage; };
+  await fsControl.listeners.click();
+  assert.ok(requestedFs, 'clicking fullscreen calls stage.requestFullscreen');
   await button('sleep').listeners.click();
   assert.equal(preview.mode(), 'sleep');
   assert.equal(timers.size, 0, 'sleep cancels polling');
