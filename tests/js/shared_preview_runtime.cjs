@@ -92,6 +92,23 @@ async function main() {
     assert.equal(control.children[1].className, 'preview-mode-tooltip');
     assert.equal(control.attrs['aria-describedby'], control.children[1].id, `${mode} tooltip is accessible`);
   }
+
+  const audioControl = hud.children.find(node => node.dataset.previewControl === 'audio');
+  assert.ok(audioControl, 'audio toggle button is rendered on the HUD');
+  assert.equal(audioControl.attrs['aria-pressed'], 'false', 'audio toggle defaults to off / muted');
+  assert.equal(audioControl.children.length, 2, 'audio toggle renders icon and tooltip');
+  assert.equal(audioControl.children[0].className, 'preview-mode-icon');
+  assert.equal(audioControl.children[1].className, 'preview-mode-tooltip');
+  assert.equal(audioControl.attrs['aria-describedby'], audioControl.children[1].id, 'audio tooltip is accessible');
+  assert.equal(preview.isAudioEnabled(), false, 'preview service reports audio is initially disabled');
+
+  await audioControl.listeners.click();
+  assert.equal(audioControl.attrs['aria-pressed'], 'true', 'audio button state updates to pressed');
+  assert.equal(preview.isAudioEnabled(), true, 'audio state becomes enabled');
+
+  await audioControl.listeners.click();
+  assert.equal(audioControl.attrs['aria-pressed'], 'false', 'audio button state updates to not pressed');
+  assert.equal(preview.isAudioEnabled(), false, 'audio state returns to disabled');
   await button('sleep').listeners.click();
   assert.equal(preview.mode(), 'sleep');
   assert.equal(timers.size, 0, 'sleep cancels polling');

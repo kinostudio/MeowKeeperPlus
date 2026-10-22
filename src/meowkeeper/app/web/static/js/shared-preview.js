@@ -47,6 +47,61 @@
       hud.append(button);
       buttons.set(key, button);
     }
+
+    let audioEnabled = false;
+    const audioButton = document.createElement("button");
+    audioButton.type = "button";
+    audioButton.className = "preview-mode-button preview-mode-select preview-audio-toggle";
+    audioButton.dataset.previewControl = "audio";
+    audioButton.setAttribute("aria-pressed", "false");
+    const audioTooltipId = `preview-audio-tooltip-${scope}`;
+    audioButton.setAttribute("aria-describedby", audioTooltipId);
+
+    const audioIcon = document.createElement("span");
+    audioIcon.className = "preview-mode-icon";
+    audioIcon.setAttribute("aria-hidden", "true");
+
+    const audioTooltip = document.createElement("span");
+    audioTooltip.id = audioTooltipId;
+    audioTooltip.className = "preview-mode-tooltip";
+    audioTooltip.setAttribute("role", "tooltip");
+
+    const mutedSvg = '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon><line x1="23" y1="9" x2="17" y2="15"></line><line x1="17" y1="9" x2="23" y2="15"></line></svg>';
+    const soundSvg = '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon><path d="M15.54 8.46a5 5 0 0 1 0 7.07"></path><path d="M19.07 4.93a10 10 0 0 1 0 14.14"></path></svg>';
+
+    function updateAudioButton() {
+      audioButton.setAttribute("aria-pressed", String(audioEnabled));
+      if (audioEnabled) {
+        audioButton.setAttribute("aria-label", "現場收音（已開啟）：點擊切換為靜音");
+        audioTooltip.textContent = "現場收音｜已開啟現場聲音；點擊切換為靜音";
+        audioIcon.innerHTML = soundSvg;
+      } else {
+        audioButton.setAttribute("aria-label", "現場收音（已靜音）：點擊開啟拉取現場音訊");
+        audioTooltip.textContent = "現場收音｜目前靜音（預設關閉）；點擊開啟拉取現場音訊";
+        audioIcon.innerHTML = mutedSvg;
+      }
+    }
+    updateAudioButton();
+    audioButton.append(audioIcon, audioTooltip);
+    hud.append(audioButton);
+
+    audioButton.addEventListener("click", () => {
+      audioEnabled = !audioEnabled;
+      video.muted = !audioEnabled;
+      updateAudioButton();
+      if (audioEnabled) {
+        if (mode === "smooth") {
+          video.play?.().catch?.(() => {});
+          say("已開啟即時現場收音。");
+        } else {
+          say("已開啟現場收音；請切換至「流暢」連續播放模式以收聽現場聲音。");
+        }
+      } else {
+        video.muted = true;
+        say("已關閉現場收音（靜音）。");
+      }
+    });
+
     const stats = document.createElement("div");
     stats.className = "preview-mode-stats";
     stats.setAttribute("role", "status");
@@ -250,6 +305,7 @@
       }
       video.hidden = false;
       connectedStream = metadata.stream_name;
+      video.muted = !audioEnabled;
       say(compatibility ? "正在準備共用 H.264 相容影片；只讀取本機 go2rtc，會增加主機負載。" : hevcSource ? "瀏覽器支援 HEVC，直接使用原碼 MSE；不另做 H.264 轉碼。" : "正在連接同一個 go2rtc 串流；不建立第二個攝影機來源。" );
       stats.textContent = "流暢播放｜正在協商媒體格式";
       const useRtc = !useMse && !hevcSource && Boolean(window.MeowKeeperRTC && window.RTCPeerConnection);
@@ -353,7 +409,13 @@
       refresh: async () => { await readMetadata(true); if (mode === "energy") await readJpeg(); },
       close,
       isDisplaying: () => !image.hidden || !video.hidden,
-      mode: () => mode
+      mode: () => mode,
+      isAudioEnabled: () => audioEnabled,
+      setAudioEnabled: value => {
+        audioEnabled = Boolean(value);
+        video.muted = !audioEnabled;
+        updateAudioButton();
+      }
     };
   }
   window.MeowKeeperPreview = { mount };

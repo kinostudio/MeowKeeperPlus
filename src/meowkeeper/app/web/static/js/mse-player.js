@@ -165,7 +165,7 @@
       socket.addEventListener("error", () => {
         if (!closed) fail("連續播放連線失敗；已改回節能預覽。");
       });
-      video.muted = true;
+      if (video.muted !== false) video.muted = true;
       video.playsInline = true;
       video.autoplay = true;
       video.addEventListener("playing", () => onStatus("streaming"), { once: true });
@@ -213,7 +213,11 @@
         if (!firstFrame) fail("限時內沒有解碼到連續影格；改試相容播放或節能預覽。");
       }, compatibility ? 25000 : 10000);
       video.play().catch(() => {
-        // Muted autoplay is normally allowed; the append path also retries play.
+        // Muted autoplay is normally allowed; retry muted if unmuted playback is blocked.
+        if (!video.muted) {
+          video.muted = true;
+          video.play().catch(() => {});
+        }
       });
     }
 
