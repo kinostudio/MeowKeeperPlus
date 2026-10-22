@@ -588,12 +588,57 @@ def create_app(
         response.delete_cookie("meowkeeper_csrf")
         return response
 
+    def get_gallery_status() -> dict[str, Any]:
+        now = time.monotonic()
+        cached = getattr(app.state, "_cached_gallery_status", None)
+        cached_at = getattr(app.state, "_cached_gallery_status_at", 0.0)
+        if cached is not None and now - cached_at < 15.0:
+            return dict(cached)
+        try:
+            reg = pet_registry()
+            pets = reg.list_pets()
+            pet_count = len(pets)
+            feedback_total = 0
+            ref_total = 0
+            pet_summaries = {}
+            for p in pets:
+                summary = reg.gallery_summary(p.pet_id)
+                fb = summary.get("feedback_feature_count", 0)
+                feedback_total += fb
+                ref_total += len(p.reference_images)
+                pet_summaries[p.pet_id] = {
+                    "name": p.display_name,
+                    "feedback_count": fb,
+                    "reference_count": len(p.reference_images),
+                    "calibrated": fb > 0,
+                }
+            res = {
+                "pet_count": pet_count,
+                "feedback_feature_count": feedback_total,
+                "reference_image_count": ref_total,
+                "calibrated": feedback_total > 0,
+                "pets": pet_summaries,
+            }
+        except Exception:
+            res = {
+                "pet_count": 0,
+                "feedback_feature_count": 0,
+                "reference_image_count": 0,
+                "calibrated": False,
+                "pets": {},
+            }
+        app.state._cached_gallery_status = res
+        app.state._cached_gallery_status_at = now
+        return res
+
     @app.get("/api/v1/status")
     def status_view(request: Request) -> dict[str, Any]:
         require_auth(request)
         snapshot = core.snapshot()
+        metrics = snapshot.setdefault("metrics", {})
         if resource_recorder is not None:
-            snapshot.setdefault("metrics", {})["telemetry"] = resource_recorder.live_snapshot()
+            metrics["telemetry"] = resource_recorder.live_snapshot()
+        metrics["identity_gallery"] = get_gallery_status()
         return snapshot
 
     @app.post("/api/v1/monitor/start")
@@ -871,10 +916,12 @@ def create_app(
                 pet_registry(),
                 app.state.pet_comparison_embedder,
             )
-            return learner.refresh(
+            res = learner.refresh(
                 max_new_samples=max_new_samples,
                 upgrade_pending_consent=upgrade_pending_consent,
             )
+            app.state._cached_gallery_status_at = 0.0
+            return res
         except Exception:  # noqa: BLE001 - optional embedder may be absent in unit tests
             return {"new_features": 0, "published_samples": 0}
 
@@ -1165,8 +1212,17 @@ def create_app(
         registry = pet_registry()
         for row in rows:
             row.pop("unknown_probability", None)  # 舊欄位不是校準機率，不提供給介面。
-            row["unknown_reason"] = row.get("unknown_reason") or "calibration_required"
-            row["decision"] = "unknown" if not row.get("calibration_verified") else row.get("decision", "unknown")
+            pred_pet = row.get("predicted_pet_id")
+            if pred_pet and registry:
+                try:
+                    summary = registry.gallery_summary(pred_pet)
+                    if summary.get("feedback_feature_count", 0) > 0:
+                        row["calibration_verified"] = True
+                except Exception:
+                    pass
+            if not row.get("calibration_verified"):
+                row["unknown_reason"] = row.get("unknown_reason") or "calibration_required"
+                row["decision"] = "unknown" 
             for candidate in row.get("candidates", []):
                 for reference in candidate.get("reference_matches", []):
                     try:

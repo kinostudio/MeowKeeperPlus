@@ -507,10 +507,17 @@ class V02AnalysisPipeline:
                 pass
         if target_event_id is not None and self.store is not None:
             try:
+                calibrated = False
+                reg = getattr(self.identity_classifier, "registry", None)
+                if reg is not None and stable.predicted_pet_id:
+                    try:
+                        calibrated = reg.gallery_summary(stable.predicted_pet_id).get("feedback_feature_count", 0) > 0
+                    except Exception:
+                        pass
                 self.store.record_identity_evidence(target_event_id, str(track_id), {
                     **asdict(stable), "captured_at": captured_at.isoformat(),
                     "decision": "recognized_candidate" if stable.stable else "unknown",
-                    "experimental": True, "calibration_verified": False,
+                    "experimental": True, "calibration_verified": calibrated,
                 })
             except (sqlite3.Error, ValueError, TypeError):
                 if self.logger:

@@ -52,14 +52,35 @@
     const rate=document.getElementById("overview-bitrate");
     if(rate)rate.title="以近期完整壓縮影音分段大小／時長估算，包含容器及可能的轉碼；不是整台電腦上下傳，也不等於攝影機網路線上精確速率。";
     text("overview-ai-model",`${a.model||"尚未確認"} · ${a.inference_input_size||"未確認"} px`);
-    text("overview-identity","身分候選 · 尚待家庭驗收");
+    const gallery=m.identity_gallery||{};
+    let identityText="尚未確認";
+    if(Number.isInteger(gallery.pet_count)){
+      if(gallery.pet_count===0){
+        identityText="尚未登錄貓咪檔案";
+      }else if(gallery.feedback_feature_count>0){
+        identityText=`已校準（${gallery.pet_count} 隻貓 · ${gallery.feedback_feature_count} 筆家庭驗收特徵）`;
+      }else{
+        identityText=`已登錄 ${gallery.pet_count} 隻貓 · 待家庭樣本校準`;
+      }
+    }else{
+      identityText="身分候選 · 待確認";
+    }
+    text("overview-identity",identityText);
+    const identityEl=document.getElementById("overview-identity");
+    if(identityEl&&gallery&&gallery.pets){
+      const parts=Object.values(gallery.pets).map(p=>`${p.name}：${p.feedback_count} 筆家庭驗收特徵`);
+      if(parts.length)identityEl.title=parts.join("；");
+    }
     text("overview-queue",Number.isFinite(t.queue_pending)?`${t.queue_pending} 件`:"尚未提供");
     text("overview-recipient-count",Number.isFinite(t.recipient_count)?`${t.recipient_count} 位` : "尚未提供");
     text("overview-ring-tag",`環形快取 ${number(r.seconds," 秒")} · ${r.segment_count??"未確認"} 段`);
     const transCount=a.adaptive?.activity_sampling?.active_transitions;
     const transText=Number.isInteger(transCount)&&transCount>0?` · 累計活躍 ${transCount} 次`:"";
     const detailMode=mode==="active"?`⚡ 活躍高頻採樣（5 FPS · 偵測到動態）${transText}`:mode==="quiet"?`🌙 待機節能巡檢（1 FPS · 畫面無貓咪動態）${transText}`:`🐾 一般常態採樣（3 FPS · 貓咪在鏡頭前）${transText}`;
-    text("monitor-detail",!enabled?"監控管線未執行；可從右上角啟動監控。":`${detailMode}。身分與行為屬實驗性。`);
+    const calNote=(gallery&&gallery.feedback_feature_count>0)
+      ?`特徵庫已收錄 ${gallery.feedback_feature_count} 筆家庭實拍驗收樣本。`
+      :"身分與行為屬實驗性。";
+    text("monitor-detail",!enabled?"監控管線未執行；可從右上角啟動監控。":`${detailMode}。${calNote}`);
     text("overview-runtime-note",m.core?.last_error?"核心出現錯誤，請查看維護中心。":!enabled?"來源、AI 與錄影快取未執行；Dashboard 仍可使用。":fresh?"已收到最新影格；通知送達及事件錄影另依實際回條確認。":"正在等待有效新影格，不以程序啟動宣稱監控成功。");
     text("system-status",Number.isFinite(sys.cpu_percent)?number(sys.cpu_percent,"%") : "尚未採樣");
     const cpuStat=systemSnapshot?.telemetry?.statistics?.system_cpu_percent;

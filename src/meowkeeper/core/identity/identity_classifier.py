@@ -70,10 +70,12 @@ class IdentityClassifier:
                 matches = [{"reference_image_id": Path(pet.reference_images[int(i)]).name,
                             "cosine_score": float(scores[i]), "source": "manual_upload"}
                            for i in indices if int(i) < len(pet.reference_images)]
+                is_calibrated = len(vectors) > len(pet.reference_images)
                 candidates.append({"pet_id": pet.pet_id, "name": pet.display_name,
                                    "pet_score": fused, "visual_score": visual,
                                    "gallery_version": self.registry.feature_version(vectors, colors, self.embedder.model_version),
-                                   "reference_matches": matches})
+                                   "reference_matches": matches,
+                                   "calibrated": is_calibrated})
             except (OSError, ValueError, KeyError, TypeError):
                 incompatible = True
         candidates.sort(key=lambda c: c["pet_score"], reverse=True)
@@ -89,17 +91,20 @@ class IdentityClassifier:
             "small_margin" if score-second < self.thresholds.minimum_margin else None)
         if code:
             return unknown(code, candidates=candidates[:3], score=score, second=second)
+        is_calibrated = bool(best.get("calibrated"))
+        reason = "AI 身分候選（已納入家庭回饋特徵校準）。" if is_calibrated else "實驗性身分候選，尚非家庭校準結果。"
         return IdentityPrediction(best["pet_id"], best["name"], score, second, score-second,
                                   max(0., min(1., 1-score)), self.embedder.model_version,
-                                  track_id, False, "實驗性身分候選，尚非家庭校準結果。",
+                                  track_id, is_calibrated, reason,
                                   tuple(candidates[:3]))
 
 
 class LazyIdentityClassifier:
     """在低優先工作中載入一次 DINO；新增特徵後不必重啟來源。"""
 
-    def __init__(self, registry: PetRegistry):
+    def __init__(self, registry: PetRegistry, thresholds: IdentityThresholds | None = None):
         self.registry = registry
+        self.thresholds = thresholds or IdentityThresholds()
         self._delegate = None
         self._lock = threading.Lock()
         self._retry_at = 0.0
@@ -134,11 +139,17 @@ class LazyIdentityClassifier:
                 raise RuntimeError("身分模型冷卻中。")
             try:
                 from .dinov2_embedder import shared_cpu_embedder
-                self._delegate = IdentityClassifier(self.registry, shared_cpu_embedder(), strict_single_pet=True)
+                self._delegate = IdentityClassifier(self.registry, shared_cpu_embedder(), thresholds=self.thresholds, strict_single_pet=True)
             except (OSError, RuntimeError, ValueError, ImportError):
                 self._retry_at = time.monotonic()+60
                 raise
             return self._delegate
+
+    def update_thresholds(self, thresholds: IdentityThresholds) -> None:
+        with self._lock:
+            self.thresholds = thresholds
+            if self._delegate is not None:
+                self._delegate.thresholds = thresholds
 
     def classify(self, crop, *, track_id=None):
         if not any(p.embedding_count for p in self.registry.list_pets(enabled_only=True)):
