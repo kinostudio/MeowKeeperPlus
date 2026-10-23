@@ -32,6 +32,8 @@ def validate_settings_patch(values: Mapping[str, Any]) -> dict[str, Any]:
     cleaned: dict[str, Any] = {}
     ranges: dict[str, tuple[float, float]] = {
         "confidence_threshold": (0.0, 1.0),
+        "identity_accepted_threshold": (0.0, 1.0),
+        "identity_minimum_margin": (0.0, 1.0),
         "analysis_fps": (1.0, 5.0),
         "analysis_width": (640.0, 1920.0),
         "activity_fps": (1.0, 5.0),
@@ -102,6 +104,8 @@ def validate_settings_with_pydantic(values: Mapping[str, Any]) -> dict[str, Any]
     class SettingsModel(BaseModel):
         model_config = ConfigDict(extra="forbid")
         confidence_threshold: float | None = Field(default=None, ge=0.0, le=1.0)
+        identity_accepted_threshold: float | None = Field(default=None, ge=0.0, le=1.0)
+        identity_minimum_margin: float | None = Field(default=None, ge=0.0, le=1.0)
         analysis_fps: int | None = Field(default=None, ge=1, le=5)
         analysis_width: int | None = Field(default=None, ge=640, le=1920)
         activity_fps: int | None = Field(default=None, ge=1, le=5)

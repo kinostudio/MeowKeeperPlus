@@ -26,21 +26,28 @@ assert.equal(layer.children[0].style.top,'108px');
 hud.children.find(x=>x.textContent==='身分候選').listeners.click();
 assert.match(layer.children[0].children[0].textContent,/<img src=x>/,'text remains literal, not HTML');
 assert.equal(timers.size,1);
+now=10500;
+overlay.update({captured_at:new Date(now).toISOString(),detections:[]},media);
+assert.equal(layer.children.length,1,'recent detection is held across a short empty poll');
+now=10900;[...timers.values()][0]();
+assert.equal(layer.children.length,0,'empty detection hold expires after its bounded interval');
+overlay.update({captured_at:new Date(now).toISOString(),detections:[{bbox:[.1,.2,.4,.5],confidence:.9}]},media);
 now=13000;[...timers.values()][0]();
+now=14000;[...timers.values()][0]();
 assert.equal(layer.children.length,0);assert.equal(timers.size,0,'expired evidence stops drawing');
 overlay.update({captured_at:new Date(now).toISOString(),detections:[]},media);
-assert.equal(layer.children.length,1,'recent detection box is held for 0.5~1s across empty poll');
+assert.equal(layer.children.length,0,'an empty poll cannot revive expired evidence');
 assert.equal(timers.size,1);
 overlay.clear();assert.equal(timers.size,0,'sleep/hidden stops all drawing');
 media.naturalWidth=3840;media.naturalHeight=2160;
 overlay.update({captured_at:new Date(now).toISOString(),detections:[{
-  // Normalized YOLO box measured from the user-provided 3840x2160 event clip.
-  bbox:[1929.4/3840,185.1/2160,2295.3/3840,405.7/2160],confidence:.6855,
+  // Synthetic normalized box verifies 4K geometry without a household image.
+  bbox:[.5,.1,.6,.2],confidence:.7,
 }]},media);
 assert.equal(layer.children.length,1,'event-video cat candidate is rendered');
-assert.ok(Math.abs(parseFloat(layer.children[0].style.left)-482.35)<.1);
-assert.ok(Math.abs(parseFloat(layer.children[0].style.top)-46.275)<.1);
-assert.ok(Math.abs(parseFloat(layer.children[0].style.width)-91.475)<.1);
-assert.ok(Math.abs(parseFloat(layer.children[0].style.height)-55.15)<.1);
+assert.ok(Math.abs(parseFloat(layer.children[0].style.left)-480)<.1);
+assert.ok(Math.abs(parseFloat(layer.children[0].style.top)-54)<.1);
+assert.ok(Math.abs(parseFloat(layer.children[0].style.width)-96)<.1);
+assert.ok(Math.abs(parseFloat(layer.children[0].style.height)-54)<.1);
 overlay.close();assert.equal(stage.afterNode.removed,true);
 console.log('passed: normalized placement, event-video bbox geometry, literal labels, invalid bounds, expiry and idle cleanup');

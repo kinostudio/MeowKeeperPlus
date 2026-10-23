@@ -28,7 +28,7 @@ class RelayControlTest(unittest.TestCase):
     def test_client_rejects_non_tailnet_and_unsupported_actions(self) -> None:
         with self.assertRaises(RelayControlError):
             RelayControlClient("192.168.1.1", "a" * 32)
-        client = RelayControlClient("100.101.105.43", "a" * 32)
+        client = RelayControlClient("100.64.0.43", "a" * 32)
         with self.assertRaises(RelayControlError):
             client.request("profile", profile="subtype=99")
         with self.assertRaises(RelayControlError):
@@ -52,16 +52,18 @@ class RelayControlTest(unittest.TestCase):
         thread = threading.Thread(target=server.serve_forever, daemon=True)
         thread.start()
         url = f"http://127.0.0.1:{server.server_port}/v1/control"
+        opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
         try:
             request = urllib.request.Request(url, data=b'{"action":"status"}', headers={"Content-Type": "application/json"})
             with self.assertRaises(urllib.error.HTTPError) as rejected:
-                urllib.request.urlopen(request, timeout=2)
+                opener.open(request, timeout=2)
             self.assertEqual(rejected.exception.code, 403)
+            rejected.exception.close()
             request.add_header("Authorization", "Bearer " + credential["nonce"])
             with (
                 patch.object(agent, "_stream", return_value={"producers": [{}]}),
                 patch.object(agent, "_ptz_state", return_value=False),
-                urllib.request.urlopen(request, timeout=2) as response,
+                opener.open(request, timeout=2) as response,
             ):
                 status = json.loads(response.read())
             self.assertTrue(status["quality_available"])

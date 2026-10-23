@@ -20,10 +20,10 @@ def main() -> int:
     sys.path.insert(0, str(args.application_root / "src"))
     import cv2
     import numpy as np
+    from ultralytics import YOLO
 
     from meowkeeper.core.identity import DinoV2Embedder, IdentityClassifier, PetRegistry
     from meowkeeper.core.identity.quality_filter import ReferenceQualityFilter
-    from ultralytics import YOLO
 
     registry = PetRegistry(args.data_root / "pets")
     classifier = IdentityClassifier(registry, DinoV2Embedder(device="cpu"))

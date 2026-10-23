@@ -67,6 +67,7 @@ class IdentityPrediction:
     valid_frames: int = 0
     vote_fraction: float = 0.0
     evidence_seconds: float = 0.0
+    posture: Any | None = None
 
     @property
     def is_unknown(self) -> bool:

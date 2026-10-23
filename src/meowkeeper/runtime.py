@@ -30,6 +30,9 @@ DEFAULT_IDENTITY_MODEL_URL = (
 DEFAULT_IDENTITY_MODEL_SHA256 = "B938BF1BC15CD2EC0FEACFE3A1BB553FE8EA9CA46A7E1D8D00217F29AEF60CD9"
 DEFAULT_IDENTITY_MODEL_LICENSE = "Apache-2.0"
 
+DEFAULT_POSTURE_MODEL_NAME = "posture_mlp_v1.pth"
+DEFAULT_POSTURE_MODEL_VERSION = "cat_posture_mlp@v1.0.0"
+
 
 class ModelValidationError(RuntimeError):
     """預設模型或其來源 manifest 不符合核准契約。"""
@@ -68,6 +71,18 @@ def identity_model_manifest_path() -> Path:
     """取得 DINOv2 身分模型 manifest 路徑。"""
 
     return identity_model_file().parent / "model_manifest.json"
+
+
+
+
+def posture_model_file() -> Path:
+    """取得輕量姿態分類器模型權重路徑。"""
+    return project_root() / "models" / "behavior" / DEFAULT_POSTURE_MODEL_NAME
+
+
+def posture_model_manifest_path() -> Path:
+    """取得輕量姿態分類器 manifest 路徑。"""
+    return posture_model_file().parent / "model_manifest.json"
 
 
 def sha256_file(path: Path) -> str:

@@ -29,13 +29,13 @@ class RemotePairingTest(unittest.TestCase):
         self.model = "chuangmi.camera.079ae2"
         nonce = secrets.token_hex(16)
         self.pairing = RelayPairing(
-            self.model, "sg", "100.101.105.43", 28554, "c701_sd", nonce,
+            self.model, "sg", "100.64.0.43", 28554, "c701_sd", nonce,
             device_fingerprint(nonce, self.did, self.model), int(time.time()) + 600,
         )
 
     def test_pairing_expires_and_rejects_non_tailnet(self) -> None:
         code = encode_pairing_code(self.pairing)
-        self.assertEqual(decode_pairing_code(code).rtsp_url, "rtsp://100.101.105.43:28554/c701_sd")
+        self.assertEqual(decode_pairing_code(code).rtsp_url, "rtsp://100.64.0.43:28554/c701_sd")
         with self.assertRaises(ValueError):
             decode_pairing_code(code, now=self.pairing.expires_at + 1)
         with self.assertRaises(ValueError):

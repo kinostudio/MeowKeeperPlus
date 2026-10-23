@@ -86,6 +86,50 @@ class _AssemblyJob:
     accepted_monotonic: float | None = None
 
 
+def _format_natural_cat_headline(subject: str, tags: Any = (), posture: str | None = None) -> str:
+    """將貓咪名稱、行為標籤與姿態轉化為溫馨生動的繁體中文語意描述。"""
+    tag_set = set(tags) if tags else set()
+    if posture:
+        tag_set.add(posture)
+
+    # 1. 飲食與水
+    if "eating" in tag_set:
+        return f"{subject}現在正在吃飯飯，要看看嗎？"
+    if "drinking" in tag_set:
+        return f"{subject}正在大口喝水補充水分～"
+
+    # 2. 睡眠與放鬆休息
+    if "sleeping" in tag_set:
+        return f"{subject}正在安心熟睡中，好舒服～"
+    if "resting" in tag_set and "lying" in tag_set:
+        return f"{subject}現在躺在床上休息，好舒服～"
+    if "resting" in tag_set:
+        return f"{subject}現在正安靜地休息放空喔～"
+    if "lying" in tag_set:
+        return f"{subject}正舒舒服服地趴躺著放鬆～"
+
+    # 3. 姿態與活動
+    if "playing" in tag_set:
+        return f"{subject}正在活力滿滿地玩耍中！"
+    if "grooming" in tag_set:
+        return f"{subject}正在認真理毛，愛乾淨的乖寶寶～"
+    if "litter_box" in tag_set or "in_litter_area" in tag_set:
+        return f"{subject}正在使用貓砂盆呢。"
+    if "sitting" in tag_set:
+        return f"{subject}現在乖乖坐著，神情好愜意～"
+    if "standing" in tag_set:
+        return f"{subject}正站著好奇地張望周圍～"
+    if "walking" in tag_set or "running" in tag_set:
+        return f"{subject}正在畫面中四處巡視走動呢！"
+
+    # 4. 複合標籤後備
+    valid_tags = [t for t in tags if t in TAG_LABELS and t not in {"unknown", "possible"}]
+    if valid_tags:
+        return f"{subject}剛剛在{'、'.join(TAG_LABELS[t] for t in valid_tags[:3])}。"
+
+    return f"{subject}剛剛出現在畫面。"
+
+
 class EventClipService:
     """事件 MP4 與 Telegram 的隔離服務。
 
@@ -205,9 +249,22 @@ class EventClipService:
                         and request.trigger_origin == "detector" and request.event_type == "cat_detected"):
                     tracks = request.track_ids or ((request.track_id,) if request.track_id else ())
                     try:
+                        pet_profiles = []
+                        try:
+                            from meowkeeper.core.identity.pet_registry import PetRegistry
+                            reg = PetRegistry(self.output_directory.parent / "pets")
+                            for p in reg.list_pets(enabled_only=True):
+                                pet_profiles.append({
+                                    "pet_id": p.pet_id,
+                                    "name": p.display_name,
+                                    "traits": p.effective_traits(),
+                                })
+                        except Exception:
+                            pass
                         semantics = self.semantic_service.submit(SemanticRequest(
                             request.event_id, request.screenshot_bytes or b"", tuple(str(t) for t in tracks),
                             trigger_at=request.trigger_at,
+                            pet_profiles=tuple(pet_profiles),
                         ))
                     except Exception:  # noqa: BLE001 - API 排程不可使影片事件失敗
                         self._log("事件 AI 候選排程失敗；繼續本機事件影片。")
@@ -506,7 +563,12 @@ class EventClipService:
                     trace["wait_status"] = "timeout"
             trace["wait_finished_at"] = self._clock().isoformat()
             if clip_result is not None:
-                caption = self._merge_candidate_caption(caption, semantic_result)
+                caption = self._merge_candidate_caption(
+                    caption, semantic_result,
+                    pet_registry_dir=self.output_directory.parent / "pets",
+                    store=self.store,
+                    event_id=request.event_id,
+                )
                 if semantic_result is not None and semantic_result.status == "completed":
                     if any(tag not in {"unknown","possible"} for _,tags in semantic_result.tracks for tag in tags):
                         trace["caption_source"] = "ai_candidate"
@@ -738,44 +800,162 @@ class EventClipService:
                         and saved["pet_id"] not in {None, "unknown"}):
                     pet_id = saved["pet_id"]
             except (sqlite3.Error, OSError, RuntimeError):
-                pass  # Identity enrichment cannot prevent the event notification.
-        pet = "貓咪"
+                pass
+        pet_name = None
         if pet_id and pet_id != "unknown":
             try:
                 profile = PetRegistry(self.output_directory.parent / "pets").get_pet(pet_id)
                 if profile and profile.enabled:
-                    pet = profile.display_name + "（候選）"
+                    pet_name = profile.display_name
             except (OSError, ValueError, TypeError):
                 pass
-        headline = f"🐈 {pet}剛剛出現在畫面。" if request.event_type == "cat_detected" else "事件影片已完成。"
+        pet = pet_name or "貓咪"
+        source_suffix = " DINOv2辨識" if pet_name else ""
+        headline_text = f"{pet}剛剛出現在畫面。" if request.event_type == "cat_detected" else "事件影片已就緒。"
+
+        if self.store is not None and request.event_id is not None:
+            try:
+                with self.store._connection_lock:
+                    row = self.store.connection.execute(
+                        "SELECT event_tags_json, evidence_json FROM behavior_events WHERE event_id=? OR track_id=? ORDER BY started_at DESC LIMIT 1",
+                        (str(request.event_id), str(request.track_id or request.event_id)),
+                    ).fetchone()
+                    if row:
+                        t_json, ev_json = row[0], row[1]
+                        tags_found = []
+                        posture_candidate = None
+                        if t_json:
+                            try:
+                                tags_found = json.loads(t_json)
+                            except Exception:
+                                pass
+                        if ev_json:
+                            try:
+                                ev = json.loads(ev_json)
+                                p_data = ev.get("posture")
+                                if isinstance(p_data, dict) and p_data.get("posture") in {"sitting", "standing", "lying"}:
+                                    posture_candidate = p_data["posture"]
+                            except Exception:
+                                pass
+                        if tags_found or posture_candidate:
+                            headline_text = _format_natural_cat_headline(pet, tags_found, posture_candidate)
+                            source_suffix = " DINOv2辨識"
+            except Exception:
+                pass
+
+        headline = f"🐈 {headline_text}" if not headline_text.startswith("🐈") else headline_text
+
         if semantics is not None and semantics.status == "completed":
-            lines = []
-            for index, (_track, tags) in enumerate(semantics.tracks[:4], 1):
-                tags = tuple(tag for tag in tags if tag not in {"unknown", "possible"})
-                if tags:
-                    subject = pet if len(semantics.tracks) == 1 else f"貓咪 #{index}"
-                    lines.append(f"{subject}剛剛可能在{'、'.join(TAG_LABELS[tag] for tag in tags[:3])}。")
-            if lines:
-                headline = "🐈 " + "\n".join(lines) + "\n動作為 AI 候選，歡迎依影片修正。"
+            cloud_caption = getattr(semantics, "caption", None)
+            if cloud_caption and isinstance(cloud_caption, str) and cloud_caption.strip():
+                c_text = cloud_caption.strip()
+                if not c_text.startswith("🐈"):
+                    c_text = f"🐈 {c_text}"
+                headline = c_text
+                source_suffix = " 雲端辨識"
+            else:
+                lines = []
+                for index, (_track, tags) in enumerate(semantics.tracks[:4], 1):
+                    tags = tuple(tag for tag in tags if tag not in {"unknown", "possible"})
+                    if tags:
+                        subject = pet if len(semantics.tracks) == 1 else f"貓咪 #{index}"
+                        lines.append(_format_natural_cat_headline(subject, tags))
+                if lines:
+                    headline = "\n".join(f"🐈 {l}" if not l.startswith("🐈") else l for l in lines)
+                    source_suffix = " 雲端辨識"
+
         return (f"{headline}\n"
                 f"{request.trigger_at.astimezone().strftime('%m/%d %H:%M')}｜"
                 f"影片 {start.astimezone().strftime('%H:%M:%S')}～{end.astimezone().strftime('%H:%M:%S')}\n"
-                "喵喵守護者+")
+                f"喵喵守護者+{source_suffix}")
 
-    @staticmethod
-    def _merge_candidate_caption(local_caption: str, semantics: SemanticResult | None) -> str:
-        """Pure text merge after grace; no credential, pet-file or SQLite reads."""
+    @classmethod
+    def _merge_candidate_caption(
+        cls,
+        local_caption: str,
+        semantics: SemanticResult | None,
+        *,
+        pet_registry_dir: Path | None = None,
+        store: Any = None,
+        event_id: str | None = None,
+    ) -> str:
+        """Merge cloud semantic result (actions, open narrative, and identity) into final caption."""
         if semantics is None or semantics.status != "completed":
             return local_caption
         first, separator, rest = local_caption.partition("\n")
-        suffix = "剛剛出現在畫面。"
-        pet = first[2:-len(suffix)] if first.startswith("🐈 ") and first.endswith(suffix) else "貓咪"
-        lines = [f"{pet if len(semantics.tracks) == 1 else f'貓咪 #{index}'}剛剛可能在{'、'.join(TAG_LABELS[tag] for tag in tags[:3])}。"
-                 for index, (_track, raw_tags) in enumerate(semantics.tracks[:4], 1)
-                 if (tags := tuple(tag for tag in raw_tags if tag not in {"unknown", "possible"}))]
+
+        local_pet = "貓咪"
+        if first.startswith("🐈 "):
+            for marker in ("現在", "剛剛", "正"):
+                idx = first.find(marker)
+                if idx > 2:
+                    local_pet = first[2:idx].strip()
+                    break
+
+        cloud_pet_name = None
+        cand_map = dict(getattr(semantics, "identity_candidates", ()))
+        if cand_map and pet_registry_dir is not None:
+            try:
+                reg = PetRegistry(pet_registry_dir)
+                for _tid, cand in cand_map.items():
+                    c_pid = cand.get("pet_id")
+                    if c_pid and c_pid != "unknown":
+                        prof = reg.get_pet(c_pid)
+                        if prof and prof.enabled:
+                            cloud_pet_name = prof.display_name
+                            if store is not None and event_id is not None:
+                                try:
+                                    store.connection.execute(
+                                        "UPDATE media_events SET pet_id=? WHERE event_id=? AND pet_id='unknown'",
+                                        (c_pid, event_id),
+                                    )
+                                    store.connection.commit()
+                                except Exception:
+                                    pass
+                            break
+            except Exception:
+                pass
+
+        pet = cloud_pet_name or local_pet
+        time_line, sep2, _tail = rest.partition("\n") if separator else (rest, "", "")
+
+        # 1. 優先使用雲端開放性描述 (如「Saki現在躺在床上休息，好舒服～」)
+        cloud_caption = getattr(semantics, "caption", None)
+        if cloud_caption and isinstance(cloud_caption, str) and cloud_caption.strip():
+            text = cloud_caption.strip()
+            if cloud_pet_name and ("貓咪" in text or (local_pet != "貓咪" and local_pet in text)):
+                text = text.replace("貓咪", cloud_pet_name)
+                if local_pet != "貓咪":
+                    text = text.replace(local_pet, cloud_pet_name)
+            if not text.startswith("🐈"):
+                text = f"🐈 {text}"
+            return f"{text}\n{time_line}\n喵喵守護者+ 雲端辨識"
+
+        # 2. 若無開放文字描述，使用自然語意化格式
+        lines = []
+        for index, (track_id, raw_tags) in enumerate(semantics.tracks[:4], 1):
+            tags = tuple(tag for tag in raw_tags if tag not in {"unknown", "possible"})
+            if tags:
+                cand_info = cand_map.get(track_id)
+                track_pet = pet
+                if cand_info and cand_info.get("pet_id") and cand_info.get("pet_id") != "unknown" and pet_registry_dir:
+                    try:
+                        p_obj = PetRegistry(pet_registry_dir).get_pet(cand_info["pet_id"])
+                        if p_obj and p_obj.enabled:
+                            track_pet = p_obj.display_name
+                    except Exception:
+                        pass
+                subject = track_pet if len(semantics.tracks) == 1 else f"貓咪 #{index}"
+                lines.append(_format_natural_cat_headline(subject, tags))
+
         if not lines:
+            if cloud_pet_name and local_pet == "貓咪":
+                new_first = f"🐈 {cloud_pet_name}剛剛出現在畫面。"
+                return f"{new_first}\n{time_line}\n喵喵守護者+ 雲端辨識"
             return local_caption
-        return "🐈 " + "\n".join(lines) + "\n動作為 AI 候選，歡迎依影片修正。\n" + (rest if separator else local_caption)
+
+        headline = "\n".join(f"🐈 {l}" if not l.startswith("🐈") else l for l in lines)
+        return f"{headline}\n{time_line}\n喵喵守護者+ 雲端辨識"
 
     @staticmethod
     def _cat_feedback_keyboard(event_id: str) -> dict[str, object]:

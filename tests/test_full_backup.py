@@ -47,8 +47,8 @@ class FullBackupTests(unittest.TestCase):
             config = root / "config.json"
             config.write_text('{"analysis_fps":5}', encoding="utf-8")
             store = SQLiteStore(data / "meowkeeper.db")
-            (data / "pets" / "saki").mkdir(parents=True)
-            (data / "pets" / "saki" / "profile.json").write_text("{}", encoding="utf-8")
+            (data / "pets" / "cat_beta").mkdir(parents=True)
+            (data / "pets" / "cat_beta" / "profile.json").write_text("{}", encoding="utf-8")
             credentials = _TelegramStore()
             app = create_app(
                 token="a" * 32,
@@ -144,10 +144,10 @@ class FullBackupTests(unittest.TestCase):
             (data / "state" / "telegram-cat-notifications.json").write_text(
                 '{"version":1,"recipients":{}}', encoding="utf-8"
             )
-            (data / "pets" / "saki" / "reference_images").mkdir(parents=True)
-            (data / "pets" / "saki" / "profile.json").write_text('{"display_name":"Saki"}', encoding="utf-8")
-            (data / "pets" / "saki" / "reference_images" / "one.jpg").write_bytes(b"jpeg")
-            (data / "pets" / "saki" / "embeddings.npz").write_bytes(b"embedding")
+            (data / "pets" / "cat_beta" / "reference_images").mkdir(parents=True)
+            (data / "pets" / "cat_beta" / "profile.json").write_text('{"display_name":"貓乙"}', encoding="utf-8")
+            (data / "pets" / "cat_beta" / "reference_images" / "one.jpg").write_bytes(b"jpeg")
+            (data / "pets" / "cat_beta" / "embeddings.npz").write_bytes(b"embedding")
             (data / "events").mkdir(parents=True)
             (data / "events" / "event.mp4").write_bytes(b"event")
             (data / "cache" / "ring").mkdir(parents=True)
@@ -178,7 +178,7 @@ class FullBackupTests(unittest.TestCase):
                 self.assertNotIn("data/cache/ring/volatile.ts", {item["path"] for item in manifest["files"]})
 
             config.write_text('{"analysis_fps":1}', encoding="utf-8")
-            (data / "pets" / "saki" / "profile.json").write_text('{"display_name":"changed"}', encoding="utf-8")
+            (data / "pets" / "cat_beta" / "profile.json").write_text('{"display_name":"changed"}', encoding="utf-8")
             telegram.values["bot_token"] = "another-token"
             result = restore_full_backup(
                 backup_path=output,
@@ -191,7 +191,7 @@ class FullBackupTests(unittest.TestCase):
                 database_lock=store._connection_lock,
             )
             self.assertEqual(json.loads(config.read_text(encoding="utf-8"))["analysis_fps"], 5)
-            self.assertEqual(json.loads((data / "pets" / "saki" / "profile.json").read_text(encoding="utf-8"))["display_name"], "Saki")
+            self.assertEqual(json.loads((data / "pets" / "cat_beta" / "profile.json").read_text(encoding="utf-8"))["display_name"], "貓乙")
             self.assertEqual(telegram.values["bot_token"], "12345:TOP-SECRET-EXAMPLE")
             self.assertGreaterEqual(result["restored_files"], 4)
             store.close()

@@ -39,7 +39,10 @@ vm.createContext(c);
 vm.runInContext(text.slice(text.indexOf('  let positionReadbackVerified'),text.indexOf('  function renderPositionReference')),c);
 // Keep the real coordinate validator and SVG rendering.
 vm.runInContext(text.slice(text.indexOf('  function renderPositionReference'),text.indexOf('  let nativeStandbyAvailable')),c);
-vm.runInContext(text.slice(text.indexOf('  async function loadPtz()'),text.indexOf('  ptzControls.querySelectorAll("[data-privacy-action]").forEach((button) => {\n    button.addEventListener')),c);
+const ptzStart=text.indexOf('  async function loadPtz()');
+const ptzEnd=text.indexOf('  ptzControls.querySelectorAll("[data-privacy-action]")',ptzStart);
+assert(ptzStart>=0&&ptzEnd>ptzStart,'real PTZ function boundaries must be present');
+vm.runInContext(text.slice(ptzStart,ptzEnd),c);
 (async()=>{
  await c.loadPtz();assert.deepEqual(calls,['read']);
  assert(get('ptz-position-result').textContent.includes('水平 40／垂直 50'));

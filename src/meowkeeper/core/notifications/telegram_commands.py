@@ -468,9 +468,11 @@ class TelegramCommandRouter:
         now_local = datetime.now().astimezone()
         start_local = now_local.replace(hour=0, minute=0, second=0, microsecond=0)
         end_local = start_local + timedelta(days=1)
+        start_iso = start_local.astimezone(timezone.utc).isoformat()
+        end_iso = end_local.astimezone(timezone.utc).isoformat()
         summary = self.store.daily_detector_alert_summary(
-            start_at=start_local.astimezone(timezone.utc).isoformat(),
-            end_at=end_local.astimezone(timezone.utc).isoformat(),
+            start_at=start_iso,
+            end_at=end_iso,
         )
         coverage = self.store.daily_monitoring_summary(day=now_local.date().isoformat())
         monitored = coverage["monitoring_seconds"]
@@ -484,15 +486,114 @@ class TelegramCommandRouter:
         except (TypeError, ValueError, OverflowError):
             current_session = None
         session_text = self._duration(current_session) if current_session is not None else "不可用（未持久保存整日監控時長）"
+
+        # 寵物辨識次數統計
+        try:
+            from meowkeeper.core.identity.pet_registry import PetRegistry
+            reg_dir = getattr(self.store, "path", None)
+            reg_dir = reg_dir.parent / "pets" if reg_dir else Path(r"C:\ProgramData\MeowKeeperPlus\Data\pets")
+            registry = PetRegistry(reg_dir) if reg_dir.is_dir() else None
+            pet_names = {p.pet_id: p.display_name for p in registry.list_pets(enabled_only=True)} if registry else {}
+        except Exception:
+            pet_names = {}
+
+        pet_counts: dict[str, int] = {}
+        try:
+            with self.store._connection_lock:
+                rows = self.store.connection.execute(
+                    """SELECT pet_id, count(*) AS cnt
+                       FROM media_events
+                       WHERE event_type='cat_detected'
+                         AND trigger_origin='detector'
+                         AND julianday(trigger_at) >= julianday(?)
+                         AND julianday(trigger_at) < julianday(?)
+                       GROUP BY pet_id""",
+                    (start_iso, end_iso),
+                ).fetchall()
+                for r in rows:
+                    pid = str(r["pet_id"] or "unknown").strip()
+                    pet_counts[pid] = int(r["cnt"] or 0)
+        except Exception:
+            pass
+
+        pet_lines = []
+        for pid, name in pet_names.items():
+            cnt = pet_counts.pop(pid, 0)
+            pet_lines.append(f"- {name}：{cnt} 次")
+        unknown_cnt = pet_counts.get("unknown", 0) + sum(v for k, v in pet_counts.items() if k != "unknown")
+        if unknown_cnt > 0 or not pet_lines:
+            pet_lines.append(f"- 未知／未標記：{unknown_cnt} 次")
+        pet_summary_text = "\n".join(pet_lines)
+
+        # 動作辨識次數統計
+        action_counts: dict[str, int] = {}
+        try:
+            from meowkeeper.core.event_semantics import TAG_LABELS
+            with self.store._connection_lock:
+                cand_rows = self.store.connection.execute(
+                    """SELECT candidate_json
+                       FROM event_semantic_candidates
+                       WHERE status='completed'
+                         AND julianday(updated_at) >= julianday(?)
+                         AND julianday(updated_at) < julianday(?)""",
+                    (start_iso, end_iso),
+                ).fetchall()
+                for r in cand_rows:
+                    try:
+                        c_data = json.loads(r[0])
+                        for tr in c_data.get("tracks", []):
+                            for tag in tr.get("tags", []):
+                                if tag in TAG_LABELS and tag not in {"unknown", "possible"}:
+                                    zh = TAG_LABELS[tag]
+                                    action_counts[zh] = action_counts.get(zh, 0) + 1
+                    except Exception:
+                        pass
+        except Exception:
+            pass
+
+        try:
+            behavior_zh = {"resting": "休息", "sleeping": "睡眠", "eating": "進食", "drinking": "喝水", "playing": "玩耍"}
+            with self.store._connection_lock:
+                beh_rows = self.store.connection.execute(
+                    """SELECT behavior_state, count(*) AS cnt
+                       FROM behavior_events
+                       WHERE julianday(started_at) >= julianday(?)
+                         AND julianday(started_at) < julianday(?)
+                         AND behavior_state NOT IN ('unknown', 'other_active')
+                       GROUP BY behavior_state""",
+                    (start_iso, end_iso),
+                ).fetchall()
+                for r in beh_rows:
+                    b_state = r["behavior_state"]
+                    if b_state in behavior_zh:
+                        zh = behavior_zh[b_state]
+                        if zh not in action_counts:
+                            action_counts[zh] = int(r["cnt"] or 0)
+        except Exception:
+            pass
+
+        action_lines = []
+        if action_counts:
+            for act_name, act_cnt in sorted(action_counts.items(), key=lambda x: -x[1]):
+                action_lines.append(f"- {act_name}：{act_cnt} 次")
+        else:
+            action_lines.append("- 今日尚無特定動作紀錄")
+        action_summary_text = "\n".join(action_lines)
+
         return "\n".join((
             f"🐱 今日摘要（{now_local:%Y-%m-%d}）",
             f"本次 Host 監控時長：{session_text}",
             "已保存有效影格取樣時間：" + (self._duration(int(monitored)) if monitored is not None else "尚無已保存資料"),
             "貓咪偵測出現取樣時間：" + (self._duration(int(visible)) if visible is not None else "尚未分析／尚無資料"),
             f"真實 detector 貓咪告警：{summary['detector_count']} 次",
-            f"模擬告警（不納入真實偵測）：{summary['simulated_count']} 次",
-            "睡眠／進食／喝水／玩耍時長：尚未完成家庭實拍驗收，不提供推估數字。",
-            "取樣時間只累計相鄰有效影格；斷線、未知與未保存區間不補算，也不等同玩耍活動。",
+            "",
+            "🐾 寵物辨識次數：",
+            pet_summary_text,
+            "",
+            "🎯 動作辨識次數：",
+            action_summary_text,
+            "",
+            "💡 說明：出現時間為鏡頭實際拍到貓咪的累計長度，離線或未在畫面中不計入。",
         ))
 
     def _restart_result_text(self) -> str:

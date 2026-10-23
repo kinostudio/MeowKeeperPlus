@@ -67,7 +67,7 @@ class V02HostAnalyzer:
     def __init__(
         self, tracker, identity, *, store, zones=None, behavior_config=None, logger=None,
         notifier=None, chat_ids=(), notification_dispatcher=None, feedback_preferences=None,
-        identity_thresholds=None,
+        identity_thresholds=None, native_snapshot_provider=None,
     ):
         self.tracker = SessionTracker(tracker)
         self.inference_backend = tracker.inference_backend
@@ -99,13 +99,14 @@ class V02HostAnalyzer:
             feedback_preferences=feedback_preferences,
             identity_low_confidence=identity_thresholds.accepted_threshold if identity_thresholds else 0.62,
             logger=logger,
+            native_snapshot_provider=native_snapshot_provider,
         )
 
     @classmethod
     def create(
         cls, *, model_path, confidence, store, data_root, logger,
         notifier=None, chat_ids=(), notification_dispatcher=None, feedback_preferences=None,
-        tracker=None, identity_thresholds=None,
+        tracker=None, identity_thresholds=None, native_snapshot_provider=None,
     ):
         registry = PetRegistry(Path(data_root) / "pets")
         identity = LazyIdentityClassifier(registry, thresholds=identity_thresholds)
@@ -121,6 +122,7 @@ class V02HostAnalyzer:
             chat_ids=chat_ids, notification_dispatcher=notification_dispatcher,
             feedback_preferences=feedback_preferences,
             identity_thresholds=identity_thresholds,
+            native_snapshot_provider=native_snapshot_provider,
         )
 
     def analyze(self, frame):

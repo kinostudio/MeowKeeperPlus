@@ -35,6 +35,12 @@ def port():
 @unittest.skipUnless(os.getenv("RUN_MEOWKEEPER_RELAY_MEDIA")=="1", "明確啟用隔離媒體中繼驗收才啟動 vendor 程序")
 class RelayMediaTests(unittest.TestCase):
     def test_two_hosts_native_video_profile_and_verified_position(self):
+        # Register only the synthetic fixture model. Real models still require
+        # motor readback evidence and remain gated by the production allowlist.
+        capability = patch("meowkeeper.integrations.xiaomi.setup_service.VERIFIED_ABSOLUTE_MOVE_MODELS",
+                           frozenset({"test.camera.ptz"}))
+        capability.start()
+        self.addCleanup(capability.stop)
         ffmpeg=ROOT/"vendor/ffmpeg/bin/ffmpeg.exe"
         go2rtc=ROOT/"vendor/go2rtc/v1.9.14/go2rtc.exe"
         self.assertTrue(ffmpeg.is_file() and go2rtc.is_file())

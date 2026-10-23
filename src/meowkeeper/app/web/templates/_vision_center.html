@@ -67,12 +67,24 @@
           <button class="button" type="submit">保存設定</button>
           <p id="vision-save-status" class="field-help" role="status" aria-live="polite"></p>
         </form>
-        <form id="vision-key-form" class="vision-key-form">
-          <label>API Key（服務商要求時才填）<input id="vision-key" type="password" maxlength="4096" autocomplete="new-password" placeholder="輸入後安全保存，不會回顯"><button id="vision-key-toggle" type="button" class="button secondary" aria-pressed="false">顯示金鑰</button></label>
-          <small>金鑰優先存於 Windows 安全憑證庫；背景服務無法使用時，改用 Windows 帳號加密（DPAPI）保存在本機。絕不寫入設定檔、SQLite、瀏覽器儲存或日誌；換電腦需重新輸入。</small>
-          <label class="checkbox-line"><input id="vision-key-confirm" type="checkbox" required>確認修改或清除目前服務的金鑰</label>
-          <div class="actions"><button class="button secondary" type="submit">安全保存金鑰</button><button id="vision-key-clear" class="button secondary" type="button">清除金鑰</button></div>
-        </form>
+        <div class="vision-keys-panel">
+          <h5>已登記的 API Key（支援多組備援輪替）</h5>
+          <div id="vision-keys-list" class="vision-keys-list">
+            <p id="vision-keys-empty" class="vision-empty">尚未登記任何 API Key；若服務商需要金鑰，請於下方新增。</p>
+          </div>
+          <form id="vision-key-form" class="vision-key-form">
+            <label>金鑰別名（選填，例如：主專案、備用 Key 1）<input id="vision-key-alias" type="text" maxlength="60" placeholder="例如：主要金鑰"></label>
+            <label>API Key（服務商要求時才填）<input id="vision-key" type="password" maxlength="4096" autocomplete="new-password" placeholder="輸入後安全保存，不會回顯"><button id="vision-key-toggle" type="button" class="button secondary" aria-pressed="false">顯示金鑰</button></label>
+            <small>金鑰優先存於 Windows 安全憑證庫；背景服務無法使用時，改用 Windows 帳號加密（DPAPI）保存在本機。絕不寫入設定檔、SQLite、瀏覽器儲存或日誌；換電腦需重新輸入。</small>
+            <label class="checkbox-line"><input id="vision-key-confirm" type="checkbox" required>確認在此伺服器安全保存此組 API Key</label>
+            <div class="actions">
+              <button class="button secondary" type="submit">➕ 新增金鑰</button>
+              <button id="vision-key-clear" class="button secondary" type="button">全部清除</button>
+              <button id="vision-key-stats-reset" class="button secondary" type="button" title="只歸零每組金鑰的呼叫／成功／失敗次數">歸零呼叫統計</button>
+            </div>
+          </form>
+          <small class="field-help vision-keys-help">可登記多組 API Key。排序第 1 組優先測試與使用；若遭遇限流、配額用盡（HTTP 402/429）或金鑰失效，將自動循序測試下一組。</small>
+        </div>
       </div>
       <aside class="vision-card vision-quota-card"><div class="vision-section-heading"><div><h4>今天的用量</h4><p id="vision-reset-note">依本機記錄估算</p></div></div>
         <div class="vision-quota-metric"><div><span>分析請求</span><strong id="vision-quota-daily">0 / 400</strong></div><progress id="vision-quota-daily-progress" max="100" value="0"></progress><small id="vision-quota-daily-note">尚無使用紀錄。</small></div>

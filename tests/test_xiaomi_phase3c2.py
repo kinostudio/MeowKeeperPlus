@@ -132,7 +132,7 @@ class XiaomiPhase3C2Tests(unittest.TestCase):
 
             # A remote RTSP relay is video-only from this Host's perspective;
             # local profile/PTZ controls must not target the old camera.
-            source_url[0] = "rtsp://100.101.105.43:28554/c701_sd"
+            source_url[0] = "rtsp://100.64.0.43:28554/c701_sd"
             self.assertFalse(any(item["selected"] for item in service.devices()))
             blocked = service.set_live_profile(selected[0]["internal_id"], "subtype=2")
             self.assertFalse(blocked["success"])

@@ -8,7 +8,7 @@ import numpy as np
 from .identity_classifier import IdentityClassifier
 
 
-def compare_photo(registry, embedder, jpeg: bytes) -> dict:
+def compare_photo(registry, embedder, jpeg: bytes, *, thresholds=None) -> dict:
     vector = np.asarray(embedder.embed(jpeg), dtype=np.float32).reshape(-1)
     norm = float(np.linalg.norm(vector))
     if not np.isfinite(vector).all() or norm <= 0:
@@ -22,7 +22,7 @@ def compare_photo(registry, embedder, jpeg: bytes) -> dict:
         def embed(self, _crop):
             return vector
 
-    prediction = IdentityClassifier(registry, CachedEmbedder(), strict_single_pet=True).classify(jpeg)
+    prediction = IdentityClassifier(registry, CachedEmbedder(), thresholds=thresholds, strict_single_pet=True).classify(jpeg)
     candidates = []
     for pet in registry.list_pets(enabled_only=True):
         if pet.identity_model_version != embedder.model_version:

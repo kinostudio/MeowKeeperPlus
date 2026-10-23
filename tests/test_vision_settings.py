@@ -522,6 +522,31 @@ class VisionSettingsTests(unittest.TestCase):
         with TestClient(app, base_url="http://testserver") as client:
             self.assertEqual(client.post("/api/v1/vision/credential", json={"key": "TEST_ONLY_KEY", "reauth": True}, headers=headers).status_code, 403)
 
+    def test_private_lan_http_cannot_save_api_credentials(self):
+        app = create_app(token="isolated-lan-credential", vision_settings=self.store)
+        headers = {"Authorization": "Bearer isolated-lan-credential",
+                   "X-MeowKeeper-CSRF": app.state.authenticator.csrf_token}
+        with TestClient(app, base_url="http://dashboard.test",
+                        client=("192.168.1.20", 50000)) as client:
+            response = client.post("/api/v1/vision/credential",
+                                   json={"key": "TEST_ONLY_NEVER_SAVED", "reauth": True},
+                                   headers=headers)
+            self.assertEqual(response.status_code, 403)
+            self.assertFalse(self.store.status()["key_configured"])
+
+    def test_local_host_ip_allowed_to_save_credentials(self):
+        import socket
+        app = create_app(token="local-host-credential-test", vision_settings=self.store)
+        headers = {"Authorization": "Bearer local-host-credential-test",
+                   "X-MeowKeeper-CSRF": app.state.authenticator.csrf_token}
+        local_ip = socket.gethostbyname(socket.gethostname())
+        with TestClient(app, base_url="http://dashboard.test",
+                        client=(local_ip, 50000)) as client:
+            response = client.post("/api/v1/vision/credential",
+                                   json={"clear": True, "reauth": True},
+                                   headers=headers)
+            self.assertEqual(response.status_code, 200)
+
     @unittest.skipUnless(os.name == "nt", "需要 Windows Credential Manager")
     def test_actual_windows_credential_manager_roundtrip_and_cleanup(self):
         store = VisionSettingsStore(self.root / "credential-manager-test", credential_store=TelegramCredentialStore())
@@ -539,6 +564,129 @@ class VisionSettingsTests(unittest.TestCase):
         store.clear_key()
         self.assertIsNone(store.read_key())
 
+
+    def test_multiple_keys_management_and_sequential_fallback(self):
+        store = self.store
+        store.save(self.settings())
+        # 1. Add first key
+        k1 = store.add_key("KEY_ONE_PRIMARY", alias="主要金鑰")
+        self.assertEqual(k1["alias"], "主要金鑰")
+        self.assertEqual(store.read_key(), "KEY_ONE_PRIMARY")
+        keys = store.read_keys()
+        self.assertEqual(len(keys), 1)
+
+        # 2. Add second key
+        k2 = store.add_key("KEY_TWO_BACKUP", alias="備用金鑰")
+        keys = store.read_keys()
+        self.assertEqual(len(keys), 2)
+        self.assertEqual(keys[0]["key"], "KEY_ONE_PRIMARY")
+        self.assertEqual(keys[1]["key"], "KEY_TWO_BACKUP")
+
+        # 3. Status masks keys
+        status = store.status()
+        self.assertTrue(status["key_configured"])
+        self.assertEqual(len(status["keys"]), 2)
+        self.assertEqual(status["keys"][0]["alias"], "主要金鑰")
+        self.assertEqual(status["keys"][1]["alias"], "備用金鑰")
+        self.assertNotIn("KEY_ONE_PRIMARY", json.dumps(status))
+        self.assertNotIn("KEY_TWO_BACKUP", json.dumps(status))
+
+        # 4. Reorder keys
+        store.reorder_keys([k2["id"], k1["id"]])
+        self.assertEqual(store.read_key(), "KEY_TWO_BACKUP")
+        reordered_keys = store.read_keys()
+        self.assertEqual(reordered_keys[0]["key"], "KEY_TWO_BACKUP")
+        self.assertEqual(reordered_keys[1]["key"], "KEY_ONE_PRIMARY")
+
+        # 5. Delete key
+        store.delete_key(k1["id"])
+        remaining = store.read_keys()
+        self.assertEqual(len(remaining), 1)
+        self.assertEqual(remaining[0]["key"], "KEY_TWO_BACKUP")
+
+        # 6. Fallback in check_connection: first key fails, second succeeds
+        store.reorder_keys([])
+        store.clear_key()
+        k_bad = store.add_key("KEY_EXHAUSTED", alias="已耗盡金鑰")
+        k_good = store.add_key("KEY_VALID", alias="有效備用金鑰")
+
+        call_keys = []
+        def fake_health_check(provider_id, settings, key, timeout_seconds=4):
+            call_keys.append(key)
+            if key == "KEY_EXHAUSTED":
+                return {"status": "rate_limited", "http_status": 402, "message_zh_tw": "額度已用盡"}
+            return {"status": "metadata_available", "http_status": 200, "models": ["test-model"]}
+
+        store._last_health_check = float("-inf")
+        with patch("meowkeeper.app.vision_settings.health_check", side_effect=fake_health_check):
+            result = store.check_connection()
+        self.assertEqual(result["status"], "metadata_available")
+        self.assertEqual(result["active_key_alias"], "有效備用金鑰")
+        self.assertEqual(call_keys, ["KEY_EXHAUSTED", "KEY_VALID"])
+
+        # 7. Per-key call statistics are recorded, exposed without secrets, and resettable
+        status = store.status()
+        by_id = {item["id"]: item for item in status["keys"]}
+        self.assertEqual(by_id[k_bad["id"]]["stats"]["calls"], 1)
+        self.assertEqual(by_id[k_bad["id"]]["stats"]["failures"], 1)
+        self.assertEqual(by_id[k_bad["id"]]["stats"]["last_http_status"], 402)
+        self.assertEqual(by_id[k_bad["id"]]["stats"]["failure_categories"], {"rate_limited": 1})
+        self.assertEqual(by_id[k_good["id"]]["stats"]["successes"], 1)
+        self.assertEqual(by_id[k_good["id"]]["stats"]["by_operation"]["health_check"],
+                         {"calls": 1, "successes": 1, "failures": 0})
+        self.assertNotIn("KEY_VALID", store.key_stats_path.read_text(encoding="utf-8"))
+        store.delete_key(k_bad["id"])
+        self.assertNotIn(k_bad["id"], store.key_stats())
+        store.reset_key_stats()
+        self.assertIsNone(store.status()["keys"][0]["stats"])
+
+    def test_managed_provider_records_per_key_attempts_on_fallback(self):
+        database = SQLiteStore(self.root / "key-stats.db")
+        manager = VisionSettingsStore(self.root / "key-stats-manager", protector=FakeProtector(), store=database)
+        manager.save(self.settings())
+        first = manager.add_key("TEST_ONLY_LIMITED", alias="限流")
+        second = manager.add_key("TEST_ONLY_OK", alias="正常")
+        board = TrackStoryboard("t", "track_01", b"synthetic", (0, .3), "epoch")
+        reply = ProviderReply({"tracks": [{"track_alias": "track_01", "tags": []}]},
+                              request_dispatched=True, http_status=200, api_elapsed_ms=10)
+        calls = []
+
+        def fake_analyze(provider_self, request, *, timeout_seconds):
+            key = provider_self._credential()
+            calls.append(key)
+            if key == "TEST_ONLY_LIMITED":
+                raise VisionFailure("rate_limited", 429, request_dispatched=True)
+            return reply
+
+        try:
+            with patch("meowkeeper.integrations.vision.providers.OpenAICompatibleVision.analyze", fake_analyze):
+                manager.build_provider().analyze(
+                    SemanticRequest("stats-event", b"jpeg", ("t",), storyboards=(board,)), timeout_seconds=1)
+            self.assertEqual(calls, ["TEST_ONLY_LIMITED", "TEST_ONLY_OK"])
+            stats = manager.key_stats()
+            self.assertEqual(stats[first["id"]]["by_operation"]["analysis"], {"calls": 1, "successes": 0, "failures": 1})
+            self.assertEqual(stats[first["id"]]["last_http_status"], 429)
+            self.assertEqual(stats[second["id"]]["by_operation"]["analysis"], {"calls": 1, "successes": 1, "failures": 0})
+        finally:
+            database.close()
+
+    def test_local_http_endpoint_without_key_still_dispatches(self):
+        database = SQLiteStore(self.root / "keyless.db")
+        manager = VisionSettingsStore(self.root / "keyless-manager", protector=FakeProtector(), store=database)
+        manager.save(self.settings(endpoint="http://127.0.0.1:11434/v1/chat/completions"))
+        board = TrackStoryboard("t", "track_01", b"synthetic", (0, .3), "epoch")
+        reply = ProviderReply({"tracks": [{"track_alias": "track_01", "tags": []}]},
+                              request_dispatched=True, http_status=200, api_elapsed_ms=10)
+        try:
+            with patch("meowkeeper.integrations.vision.providers.OpenAICompatibleVision.analyze",
+                       return_value=reply) as send:
+                result = manager.build_provider().analyze(
+                    SemanticRequest("keyless-event", b"jpeg", ("t",), storyboards=(board,)), timeout_seconds=1)
+            self.assertIs(result, reply)
+            self.assertEqual(send.call_count, 1)
+            self.assertEqual(manager.status()["keyless_stats"]["successes"], 1)
+        finally:
+            database.close()
 
 if __name__ == "__main__":
     unittest.main()

@@ -62,6 +62,9 @@ class V02TrackResult:
     identity_status: str = "unknown"
     identity_pending: bool = False
     feedback_event: BehaviorEvent | None = None
+    posture: str = "unknown"
+    posture_confidence: float = 0.0
+    posture_zh: str = "未知" 
 
 
 @dataclass(frozen=True)
@@ -110,6 +113,8 @@ class V02AnalysisPipeline:
         load_controller: InferenceLoadController | None = None,
         logger: Callable[[str], None] | None = None,
         feedback_learning_policy: FeedbackLearningPolicy | None = None,
+        native_snapshot_provider: Callable[[], bytes | None] | None = None,
+        posture_classifier: Any | None = None,
     ) -> None:
         self.tracker = tracker
         self.identity_classifier = identity_classifier
@@ -181,9 +186,71 @@ class V02AnalysisPipeline:
             if store is not None and registry is not None else None
         )
         self._learning_future = None
+        if posture_classifier is None:
+            try:
+                from meowkeeper.core.behavior.posture_classifier import PostureClassifier
+                from meowkeeper.runtime import posture_model_file
+                pm = posture_model_file()
+                if pm.is_file():
+                    posture_classifier = PostureClassifier(pm)
+            except Exception:
+                posture_classifier = None
+        self.posture_classifier = posture_classifier
+        self._track_postures: dict[str | int, tuple[datetime, Any]] = {}
         self._learning_checked_at = 0.0
         self._crop_evidence_saved: set[str] = set()
+        self.native_snapshot_provider = native_snapshot_provider
+        self._native_crop_cache: tuple[float, Any] = (0.0, None)
         self.timings = StageTimings()
+
+    def _get_native_crop(self, observation: TrackObservation) -> bytes | None:
+        """從環形快取中的原生高畫質（4K）影格等比映射裁切，解決縮放過小 (<96px) 或壓縮模糊問題。"""
+        if self.native_snapshot_provider is None:
+            return None
+        now = time.monotonic()
+        cached_time, cached_img = self._native_crop_cache
+        if cached_img is None or (now - cached_time) > 2.0:
+            try:
+                import io
+                from PIL import Image
+                raw_bytes = self.native_snapshot_provider()
+                if not raw_bytes:
+                    return None
+                img = Image.open(io.BytesIO(raw_bytes))
+                img.load()
+                self._native_crop_cache = (now, img)
+                cached_img = img
+            except Exception:
+                return None
+
+        if cached_img is None:
+            return None
+
+        nat_w, nat_h = cached_img.size
+        fw = observation.frame_width or 1920
+        fh = observation.frame_height or 1080
+
+        rx1 = max(0.0, min(1.0, observation.bbox.x1 / fw))
+        ry1 = max(0.0, min(1.0, observation.bbox.y1 / fh))
+        rx2 = max(0.0, min(1.0, observation.bbox.x2 / fw))
+        ry2 = max(0.0, min(1.0, observation.bbox.y2 / fh))
+
+        nx1 = max(0, min(nat_w - 1, int(rx1 * nat_w)))
+        ny1 = max(0, min(nat_h - 1, int(ry1 * nat_h)))
+        nx2 = max(nx1 + 1, min(nat_w, int(rx2 * nat_w)))
+        ny2 = max(ny1 + 1, min(nat_h, int(ry2 * nat_h)))
+
+        if (nx2 - nx1) < 20 or (ny2 - ny1) < 20:
+            return None
+
+        try:
+            import io
+            crop_img = cached_img.crop((nx1, ny1, nx2, ny2))
+            buf = io.BytesIO()
+            crop_img.save(buf, format="JPEG", quality=90)
+            return buf.getvalue()
+        except Exception:
+            return None
 
     def process(self, frame: FramePacket) -> V02FrameResult:
         samples: dict[str, float] = {}
@@ -307,6 +374,13 @@ class V02AnalysisPipeline:
             # Priority 3: queue DINO only after the behavior observation is
             # available.  A full/slow queue merely leaves this track unknown.
             stage = time.perf_counter()
+            active_crop = observation.crop_jpeg
+            if self.native_snapshot_provider is not None:
+                native_crop = self._get_native_crop(observation)
+                if native_crop is not None:
+                    active_crop = native_crop
+                    observation = replace(observation, crop_jpeg=native_crop)
+
             if self.identity_resolver.should_submit(
                 observation.track_id,
                 observation.captured_at,
@@ -314,7 +388,7 @@ class V02AnalysisPipeline:
             ):
                 submitted = self.identity_resolver.submit(
                     track_id=observation.track_id,
-                    crop_jpeg=observation.crop_jpeg,
+                    crop_jpeg=active_crop,
                     captured_at=observation.captured_at,
                     source_id=observation.source_id,
                     generation=self._generation,
@@ -332,6 +406,13 @@ class V02AnalysisPipeline:
             stage = time.perf_counter()
             if feedback_event is not None and self.store is not None:
                 self._save_local_crop(feedback_event, observation, observations, warnings)
+            posture_pred = getattr(identity, "posture", None)
+            if posture_pred is None and observation.track_id in self._track_postures:
+                posture_pred = self._track_postures[observation.track_id][1]
+            p_name = getattr(posture_pred, "posture", "unknown") if posture_pred else "unknown"
+            p_conf = getattr(posture_pred, "confidence", 0.0) if posture_pred else 0.0
+            p_zh = getattr(posture_pred, "label_zh", "未知") if posture_pred else "未知"
+
             tracks.append(
                 V02TrackResult(
                     observation=observation,
@@ -344,6 +425,9 @@ class V02AnalysisPipeline:
                     identity_status="resolved" if identity.predicted_pet_id else "unknown",
                     identity_pending=self.identity_resolver.is_pending(observation.track_id),
                     feedback_event=feedback_event,
+                    posture=p_name,
+                    posture_confidence=p_conf,
+                    posture_zh=p_zh,
                 )
             )
             samples["v02_feedback_crop_and_result_ms"] = samples.get(
@@ -451,6 +535,7 @@ class V02AnalysisPipeline:
         self._stable_identity.clear()
         self._behavior_cache.clear()
         self._crop_evidence_saved.clear()
+        self._track_postures.clear()
         self._generation += 1
         self.identity_resolver.next_generation()
         self._source_id = None
@@ -466,7 +551,15 @@ class V02AnalysisPipeline:
             return
         prediction = result.prediction
         self._identity_cache[result.track_id] = (result.captured_at, prediction)
+        if getattr(prediction, "posture", None) is not None:
+            self._track_postures[result.track_id] = (result.captured_at, prediction.posture)
         active = self.behavior_engine.active_event(result.track_id)
+        if active is not None and getattr(prediction, "posture", None) is not None:
+            p_obj = prediction.posture
+            if getattr(p_obj, "is_known", False):
+                from dataclasses import asdict
+                active.evidence["posture"] = asdict(p_obj)
+                active.evidence["posture_tag"] = p_obj.posture
         if active is not None and result.captured_at < active.started_at:
             return
         scope = (active.event_id, result.track_id) if active is not None else result.track_id

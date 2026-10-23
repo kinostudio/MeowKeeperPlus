@@ -87,7 +87,7 @@ class TemporalIdentity:
                                    similarity=median(p.similarity for p in winning_samples),
                                    confidence_margin=median(p.confidence_margin for p in winning_samples),
                                    reason="多影格一致的實驗性候選，非家庭校準確認。",
-                                   valid_frames=total, vote_fraction=fraction, evidence_seconds=seconds)
+                                   valid_frames=total, vote_fraction=fraction, evidence_seconds=seconds, posture=prediction.posture or winner.posture)
         return state.latest
 
     def reset(self, track_id=None) -> None:

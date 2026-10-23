@@ -16,3 +16,23 @@
 @media(max-width:420px){.vision-record-filters{grid-template-columns:1fr}.vision-record-filters label:first-child{grid-column:auto}}
 .vision-timeline-legend{display:flex;flex-wrap:wrap;gap:5px 12px;margin:4px 0 10px 130px}.vision-timeline-key{display:inline-flex;align-items:center;gap:5px;color:var(--vision-muted);font-size:.68rem}.vision-timeline-key:before{content:"";width:8px;height:8px;border-radius:50%;background:#356c51}.vision-timeline-key.is-failed:before{background:#9b481f}
 @media(max-width:760px){.vision-timeline-legend{margin-left:99px}}
+
+
+.vision-keys-panel{display:grid;gap:12px;padding:14px;border:1px solid var(--vision-line);border-radius:11px;background:var(--vision-wash);margin-top:14px}
+.vision-keys-panel h5{margin:0;font-size:.92rem;color:#3b2c21}
+.vision-keys-list{display:grid;gap:8px}
+.vision-key-item{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:10px 14px;border:1px solid #e5d8cb;border-radius:9px;background:#fffdf9;box-shadow:0 1px 2px rgba(0,0,0,.03)}
+.vision-key-item.is-primary{border-color:#c97f48;background:#fffaf3}
+.vision-key-info{display:flex;align-items:center;gap:10px;flex-wrap:wrap;min-width:0}
+.vision-key-badge{font-size:.72rem;font-weight:700;padding:3px 8px;border-radius:999px;background:#ece3d7;color:#6a5342;white-space:nowrap}
+.vision-key-badge.is-primary{background:#f4ded0;color:#923e12}
+.vision-key-alias{font-size:.88rem;color:#322921}
+.vision-key-masked{font-family:monospace;font-size:.82rem;color:#635243;background:#f4ece2;padding:2px 7px;border-radius:4px}
+.vision-key-actions{display:flex;align-items:center;gap:6px;flex-shrink:0}
+.vision-key-actions .button{min-height:32px;padding:4px 10px;font-size:.8rem}
+.vision-key-actions .danger-button{color:#9c2e17;border-color:#ecd0c7}
+.vision-key-actions .danger-button:hover{background:#fdf1ed;border-color:#c94a2f}
+.vision-keys-help{color:var(--vision-muted);font-size:.78rem;line-height:1.5}
+.vision-key-stats{display:grid;gap:2px;flex-basis:100%;font-size:.76rem;color:#5d4d40;font-variant-numeric:tabular-nums}
+.vision-key-stats-summary{font-weight:650}
+.vision-key-stats-detail{color:var(--vision-muted);line-height:1.5;word-break:break-word}

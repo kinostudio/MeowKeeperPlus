@@ -98,3 +98,36 @@ class IdentityEvidenceAPITests(unittest.TestCase):
                     self.assertEqual(client.get("/api/v1/events/absent/identity", headers=headers).status_code, 404)
             finally:
                 store.close()
+
+    def test_track_candidate_delete_endpoint(self):
+        with tempfile.TemporaryDirectory() as folder:
+            store = SQLiteStore(Path(folder) / "events.db")
+            try:
+                now = datetime.now(timezone.utc)
+                eid = str(uuid4())
+                image = (Path(__file__).parent / "assets/cat.jpg").read_bytes()
+                beh = BehaviorEvent(None, "track-del", BehaviorState.RESTING, MotionState.STATIONARY, (),
+                                    now, now, .8, .8, "fixture", "fixture", "fixture", "fixture", None)
+                store.save_behavior_event(beh)
+                eid = beh.event_id
+                store._write(
+                    "INSERT INTO identity_feedback_evidence(event_id,crop_sha256,crop_jpeg,captured_at) VALUES(?,?,?,?)",
+                    (eid, hashlib.sha256(image).hexdigest(), image, now.isoformat()),
+                )
+                core = CoreStateFacade(store=store, event_directory=Path(folder) / "events")
+                with TestClient(create_app(facade=core, token="isolated-test-token-16-chars")) as client:
+                    headers = {"Authorization": "Bearer isolated-test-token-16-chars", "X-MeowKeeper-CSRF": hashlib.sha256(("isolated-test-token-16-chars:csrf").encode("utf-8")).hexdigest()}
+                    # Delete candidate
+                    del_res = client.delete(f"/api/v1/pets/track-candidates/{eid}", headers=headers)
+                    self.assertEqual(del_res.status_code, 200)
+                    self.assertEqual(del_res.json()["status"], "deleted")
+                    # Check database that it was removed
+                    row = store.connection.execute(
+                        "SELECT 1 FROM identity_feedback_evidence WHERE event_id=?", (eid,)
+                    ).fetchone()
+                    self.assertIsNone(row)
+                    # Second delete should 404
+                    del_res2 = client.delete(f"/api/v1/pets/track-candidates/{eid}", headers=headers)
+                    self.assertEqual(del_res2.status_code, 404)
+            finally:
+                store.close()

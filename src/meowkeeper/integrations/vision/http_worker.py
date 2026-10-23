@@ -46,7 +46,10 @@ class ObservedHTTPHandler(HTTPHandler):
 
 class ObservedHTTPSHandler(HTTPSHandler):
     def https_open(self, req):
-        return self.do_open(ObservedHTTPS, req, context=self._context, check_hostname=self._check_hostname)
+        kwargs = {"context": self._context}
+        if hasattr(self, "_check_hostname"):
+            kwargs["check_hostname"] = self._check_hostname
+        return self.do_open(ObservedHTTPS, req, **kwargs)
 
 
 class NoRedirect(HTTPRedirectHandler):
@@ -95,7 +98,7 @@ def main():
         response_elapsed = (time.monotonic() - started) * 1000
         http_timings["response_received_at"] = datetime.now(timezone.utc).isoformat()
         category = ("auth_error" if error.code in {401, 403} else
-                    "rate_limited" if error.code == 429 else
+                    "rate_limited" if error.code in {402, 429} else
                     "unavailable" if error.code >= 500 else "bad_response")
         result = {"error": category, "http_status": error.code}
         if error.code == 429:

@@ -77,7 +77,8 @@ class DashboardActivityTests(unittest.TestCase):
         self.assertNotIn('stateButton.textContent = "讀取方向狀態"', setup)
         self.assertNotIn('move.textContent = `向${label}`', setup)
         base = (root / "templates/base.html").read_text(encoding="utf-8")
-        self.assertIn('/static/app.js?v={{ release_info.cache_key }}', base)
+        self.assertIn('set ui_cache_key = release_info.cache_key', base)
+        self.assertIn('/static/app.js?v={{ ui_cache_key }}', base)
         live = (root / "templates/live.html").read_text(encoding="utf-8")
         self.assertIn("PTZ", live)
 

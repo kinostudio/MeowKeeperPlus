@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import logging
 import re
 import threading
 from collections.abc import Callable, Iterable, Mapping
@@ -469,7 +470,7 @@ class TelegramFeedbackPoller:
                 shared_cpu_embedder(),
             ).refresh(max_new_samples=16)
         except Exception:  # noqa: BLE001 - optional embedder or test stub must never interrupt Telegram polling
-            pass
+            logging.getLogger(__name__).warning("身分特徵同步尚未完成；通知回報已保存。")
 
     def _commit_update(self, update_id: int) -> None:
         """Advance memory and durable offsets together for ignored/invalid updates."""

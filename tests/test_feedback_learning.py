@@ -110,12 +110,14 @@ class FeedbackLearningTests(unittest.TestCase):
         self.learner.embedder.embed = lambda crop: np.array([1, 0], dtype=np.float32)
         self.assertEqual(self.learner.refresh()["published_samples"], 0)
 
-    def test_expired_evidence_retracted_without_new_events(self):
+    def test_expired_unreviewed_evidence_removed_without_new_events(self):
         save_track_evidence(self.store, self.event, self.obs)
-        self.labels()
-        self.learner.refresh()
+        self.assertEqual(self.store.connection.execute(
+            "SELECT COUNT(*) FROM identity_feedback_evidence").fetchone()[0], 1)
         self.store._write("UPDATE identity_feedback_evidence SET created_at='2000-01-01'", ())
         self.assertEqual(self.learner.refresh()["published_samples"], 0)
+        self.assertEqual(self.store.connection.execute(
+            "SELECT COUNT(*) FROM identity_feedback_evidence").fetchone()[0], 0)
         self.assertEqual(len(self.registry.get_embeddings("a")[0]), 1)
 
     def test_hash_and_corrupt_cached_features_fail_safely(self):
@@ -160,6 +162,45 @@ class FeedbackLearningTests(unittest.TestCase):
         self.assertEqual(self.learner.refresh()["new_features"], 1)
         self.assertEqual(self.learner.refresh()["new_features"], 1)
         self.assertEqual(len(self.registry.get_embeddings("a")[0]), 2)
+
+    def test_protected_evidence_survives_expiry_and_new_unreviewed_crops(self):
+        save_track_evidence(self.store, self.event, self.obs)
+        self.labels()
+        self.learner.refresh()
+        original = self.store.connection.execute(
+            "SELECT feature_json FROM identity_feedback_evidence WHERE event_id=?",
+            (self.event.event_id,),
+        ).fetchone()[0]
+        self.store._write(
+            "UPDATE identity_feedback_evidence SET created_at=datetime('now','-4000 days') "
+            "WHERE event_id=?", (self.event.event_id,),
+        )
+        newer = replace(self.event, event_id="new-unreviewed")
+        self.store.save_behavior_event(newer)
+        save_track_evidence(self.store, newer, self.obs, FeedbackLearningPolicy(max_evidence=1))
+        self.learner.refresh()
+        row = self.store.connection.execute(
+            "SELECT feature_json,learning_status FROM identity_feedback_evidence WHERE event_id=?",
+            (self.event.event_id,),
+        ).fetchone()
+        self.assertIsNotNone(row)
+        self.assertEqual(row[0], original)
+        self.assertEqual(row[1], "eligible")
+        self.assertEqual(self.registry.gallery_summary("a")["feedback_feature_count"], 1)
+
+    def test_pending_manual_label_survives_expiry_without_rewriting_evidence_time(self):
+        save_track_evidence(self.store, self.event, self.obs)
+        self.labels(consent=False)
+        self.store._write(
+            "UPDATE identity_feedback_evidence SET created_at='2000-01-01 00:00:00' WHERE event_id=?",
+            (self.event.event_id,),
+        )
+        self.learner.refresh(upgrade_pending_consent=True)
+        row = self.store.connection.execute(
+            "SELECT created_at,learning_status FROM identity_feedback_evidence WHERE event_id=?",
+            (self.event.event_id,),
+        ).fetchone()
+        self.assertEqual(tuple(row), ("2000-01-01 00:00:00", "eligible"))
 
     def test_readonly_report_cli_has_no_private_identifiers(self):
         script = Path(__file__).resolve().parents[1] / "tools/report_feedback_learning.py"

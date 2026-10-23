@@ -238,7 +238,7 @@ class Phase3SourceMvpTests(unittest.TestCase):
                 self.assertFalse(config["bot_token_configured"])
                 self.assertFalse(config["chat_ids_configured"])
                 page = client.get("/settings/telegram", headers=headers)
-                self.assertIn("安全設定引導", page.text)
+                self.assertIn("Bot Token 與 Chat ID 安全引導", page.text)
                 self.assertIn("telegram-bot-token", page.text)
                 save = client.post(
                     "/api/v1/telegram/credentials",

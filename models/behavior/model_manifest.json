@@ -1,0 +1,13 @@
+{
+  "model_name": "posture_mlp_v1.pth",
+  "model_version": "cat_posture_mlp@v1.0.0",
+  "sha256": "921828AB54EC1BA97D5AEDE0DDFEBE8E8F86D2D0D084417E4723BD6795B20632",
+  "classes": [
+    "sitting",
+    "standing",
+    "lying",
+    "unknown"
+  ],
+  "accuracy": 0.9583,
+  "updated_at": "2026-10-23T14:48:04Z"
+}

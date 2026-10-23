@@ -156,6 +156,7 @@
         return `<button type="button" class="button ${isCurrent ? "" : "secondary"} track-assign-btn" data-event-id="${encodeURIComponent(item.event_id)}" data-track-id="${encodeURIComponent(trackIdVal)}" data-pet-id="${encodeURIComponent(pet.pet_id)}">${isCurrent ? `✓ 已設為 ${escapeHtml(pet.display_name)}` : `➕ 設為 ${escapeHtml(pet.display_name)}`}</button>`;
       }).join("");
       const extraButtons = `<button type="button" class="button secondary track-assign-btn" data-event-id="${encodeURIComponent(item.event_id)}" data-track-id="${encodeURIComponent(trackIdVal)}" data-pet-id="not_cat" title="標記為非貓或略過此截圖">🚫 非貓／略過</button>`
+        + `<button type="button" class="button secondary track-delete-btn" data-event-id="${encodeURIComponent(item.event_id)}" title="刪除此截圖（若雙貓重疊或模糊樣本建議刪除以防特徵污染）">🗑️ 刪除截圖</button>`
         + ((item.assigned_pet_id || notCat)
           ? `<button type="button" class="button secondary track-assign-btn" data-event-id="${encodeURIComponent(item.event_id)}" data-track-id="${encodeURIComponent(trackIdVal)}" data-pet-id="clear" title="清除標註並撤回此筆特徵">清除</button>`
           : "");
@@ -179,6 +180,9 @@
     trackGrid.querySelectorAll(".track-assign-btn").forEach((button) => {
       button.addEventListener("click", () => assignTrackCandidate(button));
     });
+    trackGrid.querySelectorAll(".track-delete-btn").forEach((button) => {
+      button.addEventListener("click", () => deleteTrackCandidate(button));
+    });
   }
 
   async function loadTrackCandidates() {
@@ -198,6 +202,31 @@
     } catch (error) {
       if (trackStatus) trackStatus.textContent = "讀取失敗";
       trackGrid.innerHTML = `<p class="muted">${escapeHtml(error.message || "近期軌跡截圖讀取失敗。")}</p>`;
+    }
+  }
+
+  async function deleteTrackCandidate(button) {
+    const eventId = decodeURIComponent(button.dataset.eventId || "");
+    if (!eventId) return;
+    const card = button.closest(".track-candidate-card");
+    if (!confirm("確定要刪除這張攝影機軌跡截圖嗎？此動作會將其自候選與特徵庫中完全刪除。")) return;
+    if (card) card.querySelectorAll("button").forEach((btn) => { btn.disabled = true; });
+    if (trackMessage) trackMessage.textContent = "正在刪除軌跡截圖並同步特徵庫…";
+    try {
+      const response = await fetch(`/api/v1/pets/track-candidates/${encodeURIComponent(eventId)}`, {
+        method: "DELETE",
+        headers: {
+          "X-MeowKeeper-CSRF": csrfToken(),
+          Accept: "application/json",
+        },
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.detail || "刪除截圖失敗。");
+      if (trackMessage) trackMessage.textContent = data.message_zh_tw || "已刪除此軌跡截圖。";
+      await Promise.all([loadTrackCandidates(), load()]);
+    } catch (error) {
+      if (trackMessage) trackMessage.textContent = error.message;
+      if (card) card.querySelectorAll("button").forEach((btn) => { btn.disabled = false; });
     }
   }
 

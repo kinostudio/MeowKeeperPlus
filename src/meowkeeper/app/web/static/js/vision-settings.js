@@ -119,8 +119,13 @@
 
   const BUILTIN_MODELS = {
     gemini: [
-      { id: "gemini-2.5-flash", label: "gemini-2.5-flash（推薦：平衡速度與準確度）" },
-      { id: "gemini-2.5-flash-lite", label: "gemini-2.5-flash-lite（輕量高速・省額度）" },
+      { id: "gemini-3.5-flash-lite", label: "gemini-3.5-flash-lite（推薦：輕量高速・最新預設）" },
+      { id: "gemini-3.5-flash", label: "gemini-3.5-flash（平衡速度與推理能力）" },
+      { id: "gemini-3.8-flash", label: "gemini-3.8-flash（最新 Flash 系列）" },
+      { id: "gemini-flash-lite-latest", label: "gemini-flash-lite-latest（最新 Flash-Lite 別名）" },
+      { id: "gemini-flash-latest", label: "gemini-flash-latest（最新 Flash 別名）" },
+      { id: "gemini-2.5-flash", label: "gemini-2.5-flash（既有專案相容）" },
+      { id: "gemini-2.5-flash-lite", label: "gemini-2.5-flash-lite（既有專案相容）" },
       { id: "gemini-2.5-pro", label: "gemini-2.5-pro（高精細度推理）" },
       { id: "gemini-2.0-flash", label: "gemini-2.0-flash（穩定通用）" },
       { id: "gemini-flash-latest", label: "gemini-flash-latest（最新 Flash 別名）" },
@@ -235,13 +240,167 @@
     message(`${values.enabled ? "目前已啟用" : "目前未啟用"}｜API Key ${keyStatus}。${data.message_zh_tw}`);
     renderOverview(data);
     renderPolicy(data);
+    renderKeys(data);
   }
 
   function refreshStatus(data) {
     current = data;
     renderOverview(data);
     renderPolicy(data);
+    renderKeys(data);
   }
+  function renderKeys(data) {
+    const list = byId("vision-keys-list");
+    if (!list) return;
+    const keys = Array.isArray(data?.keys) ? data.keys : [];
+    list.replaceChildren();
+    if (!keys.length) {
+      const empty = document.createElement("p");
+      empty.id = "vision-keys-empty";
+      empty.className = "vision-empty";
+      empty.textContent = "尚未登記任何 API Key；若服務商需要金鑰，請於下方新增。";
+      list.appendChild(empty);
+      return;
+    }
+    keys.forEach((k, index) => {
+      const item = document.createElement("div");
+      item.className = `vision-key-item ${index === 0 ? "is-primary" : ""}`;
+      item.dataset.keyId = k.id;
+
+      const info = document.createElement("div");
+      info.className = "vision-key-info";
+
+      const badge = document.createElement("span");
+      badge.className = `vision-key-badge ${index === 0 ? "is-primary" : ""}`;
+      badge.textContent = index === 0 ? "第 1 組（優先）" : `第 ${index + 1} 組（備援）`;
+
+      const alias = document.createElement("strong");
+      alias.className = "vision-key-alias";
+      alias.textContent = k.alias || `金鑰 ${index + 1}`;
+
+      const masked = document.createElement("code");
+      masked.className = "vision-key-masked";
+      masked.textContent = k.masked_key || "••••••••";
+
+      info.append(badge, alias, masked, renderKeyStats(k.stats));
+
+      const actions = document.createElement("div");
+      actions.className = "vision-key-actions";
+
+      const btnUp = document.createElement("button");
+      btnUp.type = "button";
+      btnUp.className = "button secondary icon-button";
+      btnUp.title = "上移優先順序";
+      btnUp.textContent = "▲";
+      btnUp.disabled = index === 0;
+      btnUp.addEventListener("click", () => moveKey(index, -1));
+
+      const btnDown = document.createElement("button");
+      btnDown.type = "button";
+      btnDown.className = "button secondary icon-button";
+      btnDown.title = "下移優先順序";
+      btnDown.textContent = "▼";
+      btnDown.disabled = index === keys.length - 1;
+      btnDown.addEventListener("click", () => moveKey(index, 1));
+
+      const btnDel = document.createElement("button");
+      btnDel.type = "button";
+      btnDel.className = "button secondary danger-button";
+      btnDel.title = "刪除此金鑰";
+      btnDel.textContent = "🗑 刪除";
+      btnDel.addEventListener("click", () => deleteKey(k.id, k.alias));
+
+      actions.append(btnUp, btnDown, btnDel);
+      item.append(info, actions);
+      list.appendChild(item);
+    });
+  }
+
+  const KEY_OP_LABELS = { analysis: "事件分析", image_test: "圖片測試", token_probe: "Token 探測", health_check: "連線檢查" };
+
+  function formatStatTime(value) {
+    if (!value) return "—";
+    const date = new Date(value);
+    return Number.isNaN(date.getTime()) ? "—" : date.toLocaleString("zh-TW", { hour12: false });
+  }
+
+  function renderKeyStats(stats) {
+    const box = document.createElement("div");
+    box.className = "vision-key-stats";
+    const calls = stats?.calls || 0;
+    const ok = stats?.successes || 0;
+    const fail = stats?.failures || 0;
+    const rate = calls ? Math.round((ok / calls) * 100) : null;
+    const summary = document.createElement("span");
+    summary.className = "vision-key-stats-summary";
+    summary.textContent = calls
+      ? `呼叫 ${calls} 次｜成功 ${ok}｜失敗 ${fail}｜成功率 ${rate}%`
+      : "尚無呼叫紀錄";
+    box.appendChild(summary);
+    if (calls) {
+      const ops = Object.entries(stats.by_operation || {})
+        .map(([op, v]) => `${KEY_OP_LABELS[op] || op} ${v.calls}/${v.successes}/${v.failures}`)
+        .join("｜");
+      const cats = Object.entries(stats.failure_categories || {})
+        .map(([cat, n]) => `${cat}×${n}`).join("、");
+      const last = stats.last_status === "completed" ? "成功" : (stats.last_status || "—");
+      const detail = document.createElement("small");
+      detail.className = "vision-key-stats-detail";
+      detail.textContent = `分項（呼叫/成功/失敗）：${ops}`
+        + (cats ? `｜失敗類型：${cats}` : "")
+        + `｜最近：${last}${stats.last_http_status ? ` · HTTP ${stats.last_http_status}` : ""} @ ${formatStatTime(stats.last_used_at)}`;
+      box.appendChild(detail);
+    }
+    return box;
+  }
+
+  async function resetKeyStats() {
+    if (!window.confirm("確定要將所有 API Key 的呼叫／成功／失敗統計歸零嗎？（不影響金鑰與額度帳本）")) return;
+    try {
+      refreshStatus(await request("/api/v1/vision/key-stats/reset", "POST", { confirm_reset: true }));
+      message("API Key 呼叫統計已歸零。");
+    } catch (err) {
+      message(err.message);
+    }
+  }
+
+  async function moveKey(fromIndex, delta) {
+    if (!current?.keys) return;
+    const toIndex = fromIndex + delta;
+    if (toIndex < 0 || toIndex >= current.keys.length) return;
+    const order = current.keys.map(k => k.id);
+    const [moved] = order.splice(fromIndex, 1);
+    order.splice(toIndex, 0, moved);
+    try {
+      await ensureDestinationSaved();
+      const data = await request("/api/v1/vision/credential", "POST", {
+        action: "reorder",
+        order,
+        reauth: true
+      });
+      refreshStatus(data);
+      message("金鑰優先順序已更新；第 1 組將優先測試與使用。");
+    } catch (err) {
+      message(err.message);
+    }
+  }
+
+  async function deleteKey(keyId, alias) {
+    if (!window.confirm(`確定要刪除金鑰「${alias || '此金鑰'}」嗎？`)) return;
+    try {
+      await ensureDestinationSaved();
+      const data = await request("/api/v1/vision/credential", "POST", {
+        action: "delete",
+        key_id: keyId,
+        reauth: true
+      });
+      refreshStatus(data);
+      message(`已刪除金鑰「${alias || '指定金鑰'}」。`);
+    } catch (err) {
+      message(err.message);
+    }
+  }
+
 
   function renderOverview(data) {
     const values = data.settings;
@@ -809,13 +968,25 @@
 
   byId("vision-key-form").addEventListener("submit", async (event) => {
     event.preventDefault();
-    const key = byId("vision-key").value;
+    const key = byId("vision-key").value.trim();
+    const aliasInput = byId("vision-key-alias");
+    const alias = aliasInput ? aliasInput.value.trim() : "";
+    if (!key) {
+      message("請填入 API Key。");
+      return;
+    }
     byId("vision-key").value = "";
+    if (aliasInput) aliasInput.value = "";
     try {
       await ensureDestinationSaved();
-      const data = await request("/api/v1/vision/credential", "POST", { key, reauth: byId("vision-key-confirm").checked });
+      const data = await request("/api/v1/vision/credential", "POST", {
+        action: "add",
+        key,
+        alias,
+        reauth: byId("vision-key-confirm").checked
+      });
       refreshStatus(data);
-      message("API Key 已安全保存；頁面不會回填金鑰。");
+      message(`API Key「${alias || '新金鑰'}」已安全保存並登記；排序第 1 組將優先測試。`);
     }
     catch (error) { message(error.message); }
     byId("vision-key-confirm").checked = false;
@@ -829,12 +1000,14 @@
     byId("vision-key-toggle").textContent = visible ? "隱藏金鑰" : "顯示金鑰";
   });
 
+  byId("vision-key-stats-reset").addEventListener("click", resetKeyStats);
   byId("vision-key-clear").addEventListener("click", async () => {
     if (!byId("vision-key-confirm").checked) { message("請先勾選確認修改或清除金鑰。"); return; }
+    if (!window.confirm("確定要清除目前服務登記的所有 API Key 嗎？")) return;
     try {
       const data = await request("/api/v1/vision/credential", "POST", { clear: true, reauth: true });
       refreshStatus(data);
-      message("已清除目前服務的 API Key；若服務需要金鑰，新的分析將不會送出。");
+      message("已清除目前服務登記的所有 API Key。");
     }
     catch (error) { message(error.message); }
     byId("vision-key-confirm").checked = false;

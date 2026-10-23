@@ -24,8 +24,8 @@ def _prepare_dinov2_rgb(image: Any, cv2: Any, target_size: int = 518) -> Any:
     if height == target_size and width == target_size:
         return rgb
     scale = min(target_size / float(width), target_size / float(height))
-    new_w = max(1, min(target_size, int(round(width * scale))))
-    new_h = max(1, min(target_size, int(round(height * scale))))
+    new_w = max(1, min(target_size, round(width * scale)))
+    new_h = max(1, min(target_size, round(height * scale)))
     interp = cv2.INTER_AREA if scale <= 1.0 else cv2.INTER_CUBIC
     resized = cv2.resize(rgb, (new_w, new_h), interpolation=interp)
     if new_w == target_size and new_h == target_size:

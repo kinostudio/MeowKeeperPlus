@@ -27,6 +27,8 @@ RUNTIME_SETTING_DEFAULTS: dict[str, Any] = {
     "analyzer_mode": "yolo",
     "inference_device": "auto",
     "confidence_threshold": 0.45,
+    "identity_accepted_threshold": 0.62,
+    "identity_minimum_margin": 0.05,
     "analysis_fps": 5,
     "analysis_width": 640,
     "activity_fps": 5,
@@ -43,6 +45,8 @@ RUNTIME_SETTING_DEFAULTS: dict[str, Any] = {
 
 _RUNTIME_SETTING_RANGES: dict[str, tuple[float, float]] = {
     "confidence_threshold": (0.0, 1.0),
+    "identity_accepted_threshold": (0.0, 1.0),
+    "identity_minimum_margin": (0.0, 1.0),
     "analysis_fps": (1.0, 5.0),
     "analysis_width": (640.0, 1920.0),
     "activity_fps": (1.0, 5.0),
@@ -275,6 +279,8 @@ def load_runtime_settings(path: str | Path) -> dict[str, Any]:
     ai = payload.get("ai") if isinstance(payload.get("ai"), Mapping) else {}
     fallbacks = {
         "confidence_threshold": ai.get("confidence_threshold"),
+        "identity_accepted_threshold": ai.get("identity_accepted_threshold"),
+        "identity_minimum_margin": ai.get("identity_minimum_margin"),
         "analysis_fps": inference.get("active_yolo_fps"),
         "activity_fps": behavior.get("behavior_sampling_hz"),
         "cooldown_seconds": behavior.get("cooldown_seconds"),

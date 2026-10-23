@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import subprocess
 import tempfile
 import unittest
@@ -10,6 +11,24 @@ from tools.sync_to_argon import allowed_path, digest, inventory, plan, safe_loca
 
 
 class ArgonSyncTests(unittest.TestCase):
+    @unittest.skipUnless(os.name == "nt", "需要 Windows PowerShell 隔離驗證")
+    def test_legacy_sync_refuses_git_clone_before_any_write(self):
+        helper = Path(__file__).resolve().parents[1] / "tools/argon_sync_remote.ps1"
+        with tempfile.TemporaryDirectory() as directory:
+            desktop = Path(directory)
+            workspace = desktop / "workspace"
+            workspace.mkdir()
+            (workspace / ".git").write_text("gitdir: untouched", encoding="utf-8")
+            command = ("$ErrorActionPreference='Stop'; $request=@{workspace_root='"
+                       + str(workspace) + "';desktop_root='" + str(desktop)
+                       + "'}; & '" + str(helper) + "'")
+            result = subprocess.run(["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", command],
+                                    capture_output=True, timeout=20, check=False, shell=False)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn(b"git_workspace_requires_git_workflow", result.stderr)
+            self.assertEqual((workspace / ".git").read_text(), "gitdir: untouched")
+            self.assertEqual({p.name for p in workspace.iterdir()}, {".git"})
+
     def test_scope_rejects_secrets_large_runtime_paths_and_windows_escape(self):
         for name in ("src/main.py", "tests/new.py", "configs/update-public.pem", "docs/HANDOFF_ARGON_TEST.md"):
             self.assertTrue(allowed_path(name), name)

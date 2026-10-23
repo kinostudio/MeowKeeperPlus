@@ -76,14 +76,14 @@ class XiaomiFirewallDiagnosticTests(unittest.TestCase):
         $fn=$ast.Find({{param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq 'Get-ExactRule'}},$true)
         . ([scriptblock]::Create($fn.Extent.Text))
         function Get-NetFirewallApplicationFilter {{ param($AssociatedNetFirewallRule) [pscustomobject]@{{Program='C:\\safe\\go2rtc.exe'}} }}
-        function Get-NetFirewallAddressFilter {{ param($AssociatedNetFirewallRule) [pscustomobject]@{{LocalAddress='192.168.18.3';RemoteAddress='192.168.18.62'}} }}
+        function Get-NetFirewallAddressFilter {{ param($AssociatedNetFirewallRule) [pscustomobject]@{{LocalAddress='192.0.2.3';RemoteAddress='192.0.2.62'}} }}
         function Get-NetFirewallPortFilter {{ param($AssociatedNetFirewallRule) [pscustomobject]@{{Protocol='UDP';LocalPort='Any';RemotePort='Any'}} }}
         $marker='MeowKeeperPlus.XiaomiUdp.v1';$script:networkProfile='Public';$hash='A'*64
-        $rule=[pscustomobject]@{{Group=$marker;Description="$marker;camera=192.168.18.62;binary_sha256=$hash;local=192.168.18.3;profile=Public";Direction='Inbound';Action='Allow';Enabled='True';Profile='Public'}}
-        if(-not (Get-ExactRule @($rule) 'C:\\safe\\go2rtc.exe' '192.168.18.3' '192.168.18.62' $hash)){{exit 1}}
-        if(Get-ExactRule @($rule,$rule) 'C:\\safe\\go2rtc.exe' '192.168.18.3' '192.168.18.62' $hash){{exit 2}}
+        $rule=[pscustomobject]@{{Group=$marker;Description="$marker;camera=192.0.2.62;binary_sha256=$hash;local=192.0.2.3;profile=Public";Direction='Inbound';Action='Allow';Enabled='True';Profile='Public'}}
+        if(-not (Get-ExactRule @($rule) 'C:\\safe\\go2rtc.exe' '192.0.2.3' '192.0.2.62' $hash)){{exit 1}}
+        if(Get-ExactRule @($rule,$rule) 'C:\\safe\\go2rtc.exe' '192.0.2.3' '192.0.2.62' $hash){{exit 2}}
         $rule.Profile='Any'
-        if(Get-ExactRule @($rule) 'C:\\safe\\go2rtc.exe' '192.168.18.3' '192.168.18.62' $hash){{exit 3}}
+        if(Get-ExactRule @($rule) 'C:\\safe\\go2rtc.exe' '192.0.2.3' '192.0.2.62' $hash){{exit 3}}
         """
         result = subprocess.run(
             ["powershell.exe", "-NoProfile", "-Command", command],
@@ -126,7 +126,7 @@ class XiaomiFirewallDiagnosticTests(unittest.TestCase):
                 root, go2rtc=SimpleNamespace(api_port=21984, rtsp_port=28554)
             )
             service._device_records["camera_a"] = {
-                "source_url": "xiaomi://secret-account:sg@192.168.18.62?did=secret-device",
+                "source_url": "xiaomi://secret-account:sg@192.0.2.62?did=secret-device",
                 "stream_name": "camera_a",
             }
             power_reader = Mock(return_value={"success": True, "on": False})
@@ -139,13 +139,13 @@ class XiaomiFirewallDiagnosticTests(unittest.TestCase):
                 result = service.firewall_diagnostic("camera_a")
             command = run.call_args.args[0]
             self.assertEqual(command[command.index("-Mode") + 1], "Diagnose")
-            self.assertEqual(command[command.index("-CameraIp") + 1], "192.168.18.62")
+            self.assertEqual(command[command.index("-CameraIp") + 1], "192.0.2.62")
             self.assertEqual(command[command.index("-StreamName") + 1], "camera_a")
             self.assertNotIn("secret-account", " ".join(command))
             self.assertNotIn("secret-device", " ".join(command))
             self.assertEqual(result["rule_status"], "absent")
             power_reader.assert_called_once_with(
-                "xiaomi://secret-account:sg@192.168.18.62?did=secret-device", timeout_seconds=20
+                "xiaomi://secret-account:sg@192.0.2.62?did=secret-device", timeout_seconds=20
             )
             self.assertEqual(result["camera_power"], {"status": "verified", "on": False, "state": "standby"})
             self.assertEqual(result["status"], "attention_required")

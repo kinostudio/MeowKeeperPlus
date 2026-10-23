@@ -36,6 +36,21 @@ from meowkeeper.storage.database import SQLiteStore
 
 
 class Phase2EventVideoTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.fixture_directory = tempfile.TemporaryDirectory(prefix="meowkeeper-synthetic-media-")
+        cls.addClassCleanup(cls.fixture_directory.cleanup)
+        cls.fixture_clip = Path(cls.fixture_directory.name) / "event-source.mp4"
+        completed = subprocess.run(
+            [str(ROOT / "vendor/ffmpeg/bin/ffmpeg.exe"), "-hide_banner", "-loglevel", "error",
+             "-f", "lavfi", "-i", "testsrc2=size=320x240:rate=10", "-t", "2",
+             "-c:v", "libx264", "-preset", "ultrafast", "-g", "10",
+             "-pix_fmt", "yuv420p", str(cls.fixture_clip)],
+            capture_output=True, timeout=30, check=False, shell=False,
+        )
+        if completed.returncode:
+            raise AssertionError("隔離合成測試影片建立失敗。")
+
     def setUp(self) -> None:
         self.temporary = tempfile.TemporaryDirectory(prefix="meowkeeper-phase2-")
         self.root = Path(self.temporary.name)
@@ -339,7 +354,7 @@ class Phase2EventVideoTests(unittest.TestCase):
                 "error",
                 "-y",
                 "-i",
-                str(ROOT / "reports" / "cat_test.mp4"),
+                str(self.fixture_clip),
                 "-c",
                 "copy",
                 "-f",
@@ -570,7 +585,7 @@ class Phase2EventVideoTests(unittest.TestCase):
         self.assertTrue(validation.has_audio)
 
     def test_telegram_transcode_sets_apple_playback_metadata_and_faststart(self) -> None:
-        source = ROOT / "reports" / "cat_test.mp4"
+        source = self.fixture_clip
         destination = self.root / "telegram-compatible.mp4"
         assembler = ClipAssembler()
 
@@ -593,7 +608,7 @@ class Phase2EventVideoTests(unittest.TestCase):
         self.assertEqual(decoded.returncode, 0, decoded.stderr)
 
     def test_event_video_sends_dimensions_duration_and_streaming_hint(self) -> None:
-        source = ROOT / "reports" / "cat_test.mp4"
+        source = self.fixture_clip
         compatible = ClipAssembler().transcode_for_telegram(source, self.root / "compatible-event.mp4")
         self.assertEqual(compatible.status, "completed", compatible.error)
         source = compatible.path
@@ -619,7 +634,7 @@ class Phase2EventVideoTests(unittest.TestCase):
         self.assertTrue(kwargs["supports_streaming"])
 
     def test_telegram_compatible_h264_is_sent_without_second_transcode(self) -> None:
-        source = ROOT / "reports" / "cat_test.mp4"
+        source = self.fixture_clip
         assembler = ClipAssembler()
         compatible = assembler.transcode_for_telegram(source, self.root / "already-compatible.mp4")
         self.assertEqual(compatible.status, "completed", compatible.error)
@@ -648,7 +663,7 @@ class Phase2EventVideoTests(unittest.TestCase):
         self.assertEqual(notifier.send_video.call_args.args[1], compatible.path.read_bytes())
 
     def test_event_video_transcodes_incompatible_source_copy_before_send(self) -> None:
-        source = ROOT / "reports" / "cat_test.mp4"
+        source = self.fixture_clip
         original_hash = hashlib.sha256(source.read_bytes()).hexdigest()
         notifier = Mock()
         notifier.send_video.return_value = TelegramSendResult("123", 78)
@@ -677,7 +692,7 @@ class Phase2EventVideoTests(unittest.TestCase):
 
     def test_stream_copy_failure_uses_transcode_fallback(self) -> None:
         ring = self._populate_ring(1)
-        source = ROOT / "reports" / "cat_test.mp4"
+        source = self.fixture_clip
         assembler = ClipAssembler()
         original = assembler._run_mode
         calls: list[bool] = []

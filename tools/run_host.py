@@ -540,6 +540,8 @@ def _build_runtime(
         identity_frame_width=int(runtime_settings["identity_frame_width"]),
         preview_frame_width=int(runtime_settings["preview_frame_width"]),
         confidence_threshold=float(runtime_settings["confidence_threshold"]),
+        identity_accepted_threshold=float(runtime_settings.get("identity_accepted_threshold", 0.62)),
+        identity_minimum_margin=float(runtime_settings.get("identity_minimum_margin", 0.05)),
         event_pre_seconds=float(runtime_settings["event_pre_seconds"]),
         event_post_seconds=float(runtime_settings["event_post_seconds"]),
         cooldown_seconds=float(runtime_settings["cooldown_seconds"]),

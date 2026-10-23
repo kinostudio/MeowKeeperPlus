@@ -754,9 +754,9 @@ class TelegramCommandRouterTests(unittest.TestCase):
         self._drain()
         text = str(self.notifier.messages[-1]["text"])
         self.assertIn("真實 detector 貓咪告警：1 次", text)
-        self.assertIn("模擬告警（不納入真實偵測）：1 次", text)
-        self.assertIn("尚未完成家庭實拍驗收", text)
-        self.assertNotIn("睡眠：0", text)
+        self.assertNotIn("模擬告警", text)
+        self.assertIn("寵物辨識次數", text)
+        self.assertIn("動作辨識次數", text)
 
     def test_today_uses_persisted_sampling_totals_and_preserves_unknown_behaviors(self):
         self.store.record_monitoring_batch(
@@ -768,7 +768,7 @@ class TelegramCommandRouterTests(unittest.TestCase):
         text = str(self.notifier.messages[-1]["text"])
         self.assertIn("已保存有效影格取樣時間：" + self.router._duration(120), text)
         self.assertIn("貓咪偵測出現取樣時間：" + self.router._duration(60), text)
-        self.assertIn("不等同玩耍活動", text)
+        self.assertIn("\u51fa\u73fe\u6642\u9593", text)
         self.assertNotIn("睡眠：0", text)
 
     def test_reset_requires_operator_confirmation_then_health_result_is_persisted(self):

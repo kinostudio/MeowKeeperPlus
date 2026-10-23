@@ -8,6 +8,8 @@
   const device = document.getElementById("ai-inference-device");
   const fields = {
     confidence_threshold: document.getElementById("ai-confidence-threshold"),
+    identity_accepted_threshold: document.getElementById("ai-identity-accepted-threshold"),
+    identity_minimum_margin: document.getElementById("ai-identity-minimum-margin"),
     analysis_fps: document.getElementById("ai-analysis-fps"),
     analysis_width: document.getElementById("ai-analysis-width"),
     activity_fps: document.getElementById("ai-activity-fps"),

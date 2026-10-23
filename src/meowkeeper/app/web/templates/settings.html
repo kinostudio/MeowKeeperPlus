@@ -69,6 +69,14 @@
       <input id="ai-confidence-threshold" type="number" min="0" max="1" step="0.01" required>
       {{ hint('ai-confidence-threshold', '建議先用 0.45。提高可減少部分誤報，但可能漏掉遠處或被遮住的貓；降低會更敏感。這是模型分數門檻，0.45 不代表 45% 準確率。') }}
     </label>
+    <label>身分融合相似度門檻
+      <input id="ai-identity-accepted-threshold" type="number" min="0" max="1" step="0.01" required>
+      {{ hint('ai-identity-accepted-threshold', '建議 0.62。多貓身分融合 DINOv2 視覺向量（85%）與 HSV 顏色特徵（15%）的最低確認門檻；最高分候選貓咪低於此值將判定為身分未確認（unknown）。變更需重新啟動 Host。') }}
+    </label>
+    <label>身分候選差距門檻
+      <input id="ai-identity-minimum-margin" type="number" min="0" max="1" step="0.01" required>
+      {{ hint('ai-identity-minimum-margin', '建議 0.05。第一名與第二名候選貓咪融合相似度的最小差距門檻；若兩隻貓得分差距小於此值，代表特徵過於接近難以區分，將判定為身分未確認（unknown）。變更需重新啟動 Host。') }}
+    </label>
     <label>影像分析 FPS（最高 5）
       <input id="ai-analysis-fps" type="number" min="1" max="5" step="1" required>
       {{ hint('ai-analysis-fps', '每秒交給 AI 分析的畫面張數。5 較容易捕捉動作；電腦負載高可降低。這不會改變攝影機原始錄影幀率。') }}
@@ -254,7 +262,7 @@
   </div>
   <form id="pet-enrollment-form" class="settings-grid" enctype="multipart/form-data">
     <label>顯示名稱
-      <input id="pet-display-name" name="display_name" maxlength="80" required placeholder="例如：嗨啵">
+      <input id="pet-display-name" name="display_name" maxlength="80" required placeholder="例如：貓甲">
       {{ hint('pet-display-name', '這個名稱會顯示在本機 Dashboard 與 Telegram 回饋選項；不會寫死在程式碼。') }}
     </label>
     <label>固定識別碼（可留白）
@@ -307,7 +315,7 @@
   <div class="panel-heading">
     <div>
       <h3>從近期攝影機軌跡截圖一鍵加入特徵</h3>
-      <p class="muted" style="margin:4px 0 0">系統已自動過濾近期單貓不重疊、尺寸足夠（≥96px）且非模糊的監視器實拍裁切圖。直接點選貓咪名稱即可同步提取 DINOv2 向量並寫入受保護特徵庫（<code>feedback_embeddings.npz</code>），大幅提升實機攝影機視角與夜視下的辨識率。</p>
+      <p class="muted" style="margin:4px 0 0">系統已自動過濾近期單貓、尺寸足夠（≥96px）且非模糊的監視器實拍裁切圖。直接點選貓咪名稱即可同步提取 DINOv2 向量並寫入受保護特徵庫（<code>feedback_embeddings.npz</code>）。<br><span style="color:#d97706;font-weight:500">💡 雙貓重疊防呆提醒：若兩隻貓靠近進食或重疊被框在同一張截圖，請直接點擊「🗑️ 刪除截圖」或「略過」，切勿指派給任一隻貓，避免雙貓毛色特徵混淆特徵庫。</span></p>
     </div>
     <span id="pet-track-candidates-status" class="status-pill status-info">載入中…</span>
   </div>

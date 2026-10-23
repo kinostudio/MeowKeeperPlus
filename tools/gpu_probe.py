@@ -149,7 +149,6 @@ def _yolo_test(image_path: Path | None) -> ProbeItem:
     try:
         _prepare_runtime_dirs()
         import torch  # type: ignore[import-not-found]
-
         from ultralytics import YOLO  # type: ignore[import-not-found]
 
         device = "cuda:0" if torch.cuda.is_available() else "cpu"

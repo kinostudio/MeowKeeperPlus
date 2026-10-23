@@ -13,25 +13,44 @@ from .pet_registry import PetRegistry
 
 class IdentityClassifier:
     def __init__(self, registry: PetRegistry, embedder: EmbeddingBackend, *,
-                 thresholds: IdentityThresholds | None = None, strict_single_pet: bool = False) -> None:
+                 thresholds: IdentityThresholds | None = None, strict_single_pet: bool = False,
+                 posture_classifier: Any | None = None) -> None:
         self.registry, self.embedder = registry, embedder
         self.thresholds = thresholds or IdentityThresholds()
         self.thresholds.validate()
         self.strict_single_pet = strict_single_pet
+        if posture_classifier is None:
+            try:
+                from meowkeeper.core.behavior.posture_classifier import PostureClassifier
+                from meowkeeper.runtime import posture_model_file
+                p_file = posture_model_file()
+                if p_file.is_file():
+                    posture_classifier = PostureClassifier(p_file)
+            except Exception:
+                posture_classifier = None
+        self.posture_classifier = posture_classifier
 
     def classify(self, crop: bytes | Any, *, track_id: str | int | None = None) -> IdentityPrediction:
         import numpy as np
 
+        posture = None
+
         def unknown(code, *, candidates=(), score=0., second=0.):
             return IdentityPrediction(None, None, score, second, score-second,
                                       max(0., min(1., 1-score)), self.embedder.model_version,
-                                      track_id, False, "身分尚未確認。", tuple(candidates), code)
+                                      track_id, False, "身分暫未確認", tuple(candidates), code,
+                                      posture=posture)
         try:
             vector = np.asarray(self.embedder.embed(crop), dtype=np.float32).reshape(-1)
             norm = float(np.linalg.norm(vector))
             if not np.isfinite(vector).all() or norm <= 0:
                 return unknown("feature_unavailable")
             vector /= norm
+            if self.posture_classifier is not None:
+                try:
+                    posture = self.posture_classifier.predict_vector(vector)
+                except Exception:
+                    pass
         except (KeyError, OSError, RuntimeError, TypeError, ValueError):
             return unknown("model_unavailable")
         try:
@@ -70,7 +89,7 @@ class IdentityClassifier:
                 matches = [{"reference_image_id": Path(pet.reference_images[int(i)]).name,
                             "cosine_score": float(scores[i]), "source": "manual_upload"}
                            for i in indices if int(i) < len(pet.reference_images)]
-                is_calibrated = len(vectors) > len(pet.reference_images)
+                is_calibrated = bool(pet.reference_images) and len(vectors) > len(pet.reference_images)
                 candidates.append({"pet_id": pet.pet_id, "name": pet.display_name,
                                    "pet_score": fused, "visual_score": visual,
                                    "gallery_version": self.registry.feature_version(vectors, colors, self.embedder.model_version),
@@ -96,7 +115,7 @@ class IdentityClassifier:
         return IdentityPrediction(best["pet_id"], best["name"], score, second, score-second,
                                   max(0., min(1., 1-score)), self.embedder.model_version,
                                   track_id, is_calibrated, reason,
-                                  tuple(candidates[:3]))
+                                  tuple(candidates[:3]), posture=posture)
 
 
 class LazyIdentityClassifier:

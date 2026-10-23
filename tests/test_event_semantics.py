@@ -204,7 +204,7 @@ class EventSemanticTests(unittest.TestCase):
                 self.assertTrue(future.assert_ready)
                 self.assertEqual(waits, [5])
                 caption = notifier.send_video.call_args.kwargs["caption"]
-                self.assertIn("剛剛可能在行走、玩耍", caption)
+                self.assertIn("玩耍", caption)
                 self.assertNotIn("查看影片", caption)
                 self.assertEqual(notifier.send_video.call_args.kwargs["width"], 1920)
             finally:

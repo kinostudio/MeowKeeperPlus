@@ -1039,6 +1039,8 @@ class RepositoryCoreController(CoreController):
                     minimum_margin=self.identity_minimum_margin,
                 )
                 try:
+                    from meowkeeper.core.media.native_snapshot import snapshot_from_ring
+                    snap_prov = (lambda: snapshot_from_ring(self.ring_buffer)) if hasattr(self, "ring_buffer") and self.ring_buffer is not None else None
                     return V02HostAnalyzer.create(
                         model_path=self.model_path, confidence=self.confidence_threshold,
                         store=self.store, data_root=self.event_directory.parent, logger=self._log,
@@ -1049,6 +1051,7 @@ class RepositoryCoreController(CoreController):
                         tracker=IsolatedTracker(self.model_path, confidence_threshold=self.confidence_threshold,
                                                 input_size=self.analysis_width, device=self.inference_device),
                         identity_thresholds=th,
+                        native_snapshot_provider=snap_prov,
                     )
                 except (OSError, RuntimeError, ValueError, ImportError) as error:
                     self._log(f"⚠️ V0.2 尚未可用，降級單一 YOLO 偵測：{type(error).__name__}。")

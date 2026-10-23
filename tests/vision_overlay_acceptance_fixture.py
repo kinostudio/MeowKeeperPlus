@@ -24,7 +24,6 @@ from meowkeeper.core.inference.live_overlay import update_live_overlay
 def replay(app, root, clip, stopped):
     import cv2
     import torch
-
     from ultralytics import YOLO
 
     torch.set_num_threads(2)

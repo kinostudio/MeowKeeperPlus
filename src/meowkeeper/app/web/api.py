@@ -1612,6 +1612,48 @@ def create_app(
             "message_zh_tw": msg,
         }
 
+    @app.delete("/api/v1/pets/track-candidates/{event_id}")
+    def pets_track_candidate_delete(
+        request: Request,
+        event_id: str,
+    ) -> dict[str, Any]:
+        """刪除此筆攝影機軌跡截圖與相關標註，若已入庫則同步自 feedback_embeddings.npz 撤回。"""
+        require_mutation(request)
+        if core.store is None:
+            raise HTTPException(status_code=503, detail="事件資料庫尚未接入。")
+        with core.store._connection_lock:
+            evidence = core.store.connection.execute(
+                "SELECT event_id FROM identity_feedback_evidence WHERE event_id=?",
+                (event_id,),
+            ).fetchone()
+        if evidence is None:
+            raise HTTPException(status_code=404, detail="找不到此軌跡截圖，可能已被刪除。")
+
+        def apply_delete() -> None:
+            core.store.connection.execute(
+                "DELETE FROM identity_feedback_evidence WHERE event_id=?",
+                (event_id,),
+            )
+            core.store.connection.execute(
+                "DELETE FROM behavior_event_annotations WHERE event_id=?",
+                (event_id,),
+            )
+            core.store.connection.execute(
+                "UPDATE behavior_events SET identity_status='unknown', pet_id=NULL WHERE event_id=?",
+                (event_id,),
+            )
+
+        core.store._transaction(apply_delete)
+        learning = sync_feedback_learning(max_new_samples=16, upgrade_pending_consent=True)
+        registry = pet_registry()
+        return {
+            "status": "deleted",
+            "event_id": event_id,
+            "learning": learning,
+            "pets": [pet_payload(p, job=pet_job(p.pet_id)) for p in registry.list_pets()],
+            "message_zh_tw": "已成功刪除此軌跡截圖，並同步更新特徵庫。",
+        }
+
     @app.post("/api/v1/pets")
     async def pets_create(
         request: Request,

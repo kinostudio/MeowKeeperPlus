@@ -49,8 +49,11 @@ def save_track_evidence(store, event, observation, policy=None, *, observations=
         if other.track_id == observation.track_id:
             continue
         b = other.bbox
-        if min(box.x2, b.x2) > max(box.x1, b.x1) and min(box.y2, b.y2) > max(box.y1, b.y1):
-            return False  # Overlapping cats cannot establish a clean single-pet sample.
+        margin_x = max(box.x2 - box.x1, 10.0) * 0.15
+        margin_y = max(box.y2 - box.y1, 10.0) * 0.15
+        if (min(box.x2 + margin_x, b.x2) > max(box.x1 - margin_x, b.x1) and
+                min(box.y2 + margin_y, b.y2) > max(box.y1 - margin_y, b.y1)):
+            return False  # Overlapping or tightly adjacent cats cannot establish a clean single-pet sample.
     with Image.open(io.BytesIO(crop)) as image:
         if min(image.size) < policy.minimum_side:
             return False
@@ -65,8 +68,7 @@ def save_track_evidence(store, event, observation, policy=None, *, observations=
                       AND event_id NOT IN (
                           SELECT DISTINCT event_id FROM behavior_event_annotations
                           WHERE dimension = 'identity' AND label NOT IN ('unknown', '')
-                      ))
-                  OR created_at < datetime('now', '-3650 days')""",
+                      ))""",
             (f"-{policy.retention_days} days",),
         )
         store.connection.execute(
@@ -108,14 +110,6 @@ def upgrade_pending_learning_consent(store) -> int:
                  AND label NOT IN ('unknown', 'not_cat', '')
                  AND learning_consent = 0"""
         )
-        store.connection.execute(
-            """UPDATE identity_feedback_evidence
-               SET created_at = CURRENT_TIMESTAMP
-               WHERE event_id IN (
-                   SELECT DISTINCT event_id FROM behavior_event_annotations
-                   WHERE dimension = 'identity' AND label NOT IN ('unknown', 'not_cat', '') AND learning_consent = 1
-               ) AND created_at < datetime('now', '-1 day')"""
-        )
         store.connection.commit()
         return int(cursor.rowcount or 0)
 
@@ -138,8 +132,7 @@ class FeedbackIdentityLearner:
                       AND event_id NOT IN (
                           SELECT DISTINCT event_id FROM behavior_event_annotations
                           WHERE dimension = 'identity' AND label NOT IN ('unknown', '')
-                      ))
-                  OR created_at < datetime('now', '-3650 days')""",
+                      ))""",
             (f"-{self.policy.retention_days} days",),
         )
         with self.store._connection_lock:

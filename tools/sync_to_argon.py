@@ -19,8 +19,9 @@ from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
 
 ROOT = Path(__file__).resolve().parents[1]
-REMOTE = "user@100.101.105.43"
-DESTINATION = r"C:\Users\user\Desktop\MeowKeeperPlus-Workspace"
+REMOTE = ""
+DESTINATION = ""
+DESKTOP = ""
 MAX_FILE_BYTES = 2 * 1024 * 1024
 BLOCKED_DIRS = {".git", "runtime", "vendor", "models", "data", "dist", "build", ".venv", "venv",
                 "__pycache__", "secrets", "node_modules", "reports", "logs", ".ssh", ".aws", ".codex", "ultralytics"}
@@ -116,6 +117,7 @@ def working_diff(files: dict[str, bytes], paths: list[str], root: Path = ROOT) -
 
 
 def remote_call(mode: str, payload: dict, identity: Path) -> dict:
+    payload = {**payload, "workspace_root": DESTINATION, "desktop_root": DESKTOP}
     helper = (ROOT / "tools/argon_sync_remote.ps1").read_text(encoding="utf-8-sig")
     # Keep the remote command below cmd.exe's command-line limit. Code and
     # changed-file payload travel compressed on stdin, never as CLI arguments.
@@ -222,12 +224,22 @@ def plan(files: dict[str, bytes], remote: dict) -> tuple[list[str], list[str]]:
 
 
 def main() -> int:
+    global REMOTE, DESTINATION, DESKTOP
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--identity", type=Path, default=Path(os.environ.get("LOCALAPPDATA", "")) /
-                        "Codex/MeowKeeperPlus/ssh/shrimp-user-ed25519")
+                        "Codex/MeowKeeperPlus/ssh/argon-ed25519")
+    parser.add_argument("--remote", required=True, help="已授權的 SSH 使用者與主機，格式 user@host。")
+    parser.add_argument("--destination", required=True, help="遠端桌面下的檔案交接目錄；不可為 Git clone。")
+    parser.add_argument("--desktop", required=True, help="遠端使用者桌面的絕對路徑。")
     parser.add_argument("--baseline-package", type=Path, help="比對正式 r111 等已發布 ZIP 的第一方基準；不傳送 ZIP。")
     parser.add_argument("--dry-run", action="store_true", help="唯讀盤點遠端並顯示差量，不寫遠端。")
     args = parser.parse_args()
+    if not re.fullmatch(r"[A-Za-z0-9_.-]+@[A-Za-z0-9_.:-]+", args.remote):
+        parser.error("SSH 目的地格式不正確。")
+    for value in (args.destination, args.desktop):
+        if not re.fullmatch(r"[A-Za-z]:\\[^'\r\n]+", value):
+            parser.error("遠端目錄須為不含引號的 Windows 絕對路徑。")
+    REMOTE, DESTINATION, DESKTOP = args.remote, args.destination.rstrip("\\"), args.desktop.rstrip("\\")
     try:
         files, paths = inventory()
         source_snapshot = {name: digest(content) for name, content in files.items()}

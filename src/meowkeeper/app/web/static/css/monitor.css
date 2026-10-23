@@ -133,9 +133,42 @@
 }
 
 /* Collapsible Left Navigation Sidebar */
-.layout{transition:grid-template-columns .2s ease}
-.sidebar{position:relative;transition:width .2s ease,flex-basis .2s ease,padding .2s ease}
-.sidebar-header{display:flex;align-items:center;justify-content:space-between;gap:6px;margin:.6rem 0 .35rem}
+.layout{transition:grid-template-columns .2s ease;min-height:calc(100dvh - 72px)}
+@media(min-width:761px){
+  .sidebar{
+    position:sticky;
+    top:72px;
+    align-self:flex-start;
+    height:calc(100dvh - 72px);
+    overflow-y:auto;
+    overflow-x:hidden;
+    scrollbar-width:thin;
+    scrollbar-color:#d8cdbf transparent;
+    transition:width .2s ease,flex-basis .2s ease,padding .2s ease;
+  }
+  .sidebar::-webkit-scrollbar{
+    width:5px;
+  }
+  .sidebar::-webkit-scrollbar-track{
+    background:transparent;
+  }
+  .sidebar::-webkit-scrollbar-thumb{
+    background:#d8cdbf;
+    border-radius:4px;
+  }
+  .sidebar::-webkit-scrollbar-thumb:hover{
+    background:#bfb09f;
+  }
+}
+@media(max-width:760px){
+  .sidebar{
+    position:static;
+    width:100%;
+    height:auto;
+    overflow:visible;
+  }
+}
+.sidebar-header{display:flex;align-items:center;justify-content:space-between;gap:6px;margin:.4rem 0 .3rem}
 .sidebar-header .nav-label{margin:0}
 .sidebar-collapse-btn{
   display:inline-flex;

@@ -28,10 +28,10 @@ class RuntimeDataPathTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             install_root = Path(temporary) / "MeowKeeperPlus"
             app = install_root / "App"
-            (app / "data" / "pets" / "highball").mkdir(parents=True)
+            (app / "data" / "pets" / "cat_alpha").mkdir(parents=True)
             (app / "build_manifest.json").write_text("{}", encoding="utf-8")
             (install_root / "Data").mkdir()
-            (app / "data" / "pets" / "highball" / "profile.json").write_text("{}", encoding="utf-8")
+            (app / "data" / "pets" / "cat_alpha" / "profile.json").write_text("{}", encoding="utf-8")
 
             self.assertEqual(default_data_root(app), app / "data")
 
@@ -53,8 +53,8 @@ class RuntimeDataPathTests(unittest.TestCase):
             app = install_root / "App"
             legacy = app / "data"
             canonical = install_root / "Data"
-            (legacy / "pets" / "highball").mkdir(parents=True)
-            (legacy / "pets" / "highball" / "profile.json").write_text("{}", encoding="utf-8")
+            (legacy / "pets" / "cat_alpha").mkdir(parents=True)
+            (legacy / "pets" / "cat_alpha" / "profile.json").write_text("{}", encoding="utf-8")
             (canonical / "install-history").mkdir(parents=True)
             (canonical / "install-history" / "receipt.json").write_text("{}", encoding="utf-8")
             (canonical / "cache").mkdir()
@@ -76,8 +76,8 @@ class RuntimeDataPathTests(unittest.TestCase):
             app = install_root / "App"
             app.mkdir(parents=True)
             (app / "build_manifest.json").write_text("{}", encoding="utf-8")
-            (install_root / "Data" / "pets" / "highball").mkdir(parents=True)
-            (app / "data" / "pets" / "highball").mkdir(parents=True)
+            (install_root / "Data" / "pets" / "cat_alpha").mkdir(parents=True)
+            (app / "data" / "pets" / "cat_alpha").mkdir(parents=True)
 
             status = {"metrics": {"disk": {"path": str(app / "data" / "events")}}}
             self.assertEqual(active_data_root_from_status(app, status), app / "data")

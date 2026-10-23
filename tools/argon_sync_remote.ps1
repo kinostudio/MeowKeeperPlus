@@ -2,8 +2,11 @@
 $ErrorActionPreference='Stop'
 $ProgressPreference='SilentlyContinue'
 [Console]::OutputEncoding=New-Object Text.UTF8Encoding($false)
-$root='C:\Users\user\Desktop\MeowKeeperPlus-Workspace'
-$desktop='C:\Users\user\Desktop'
+$root=[IO.Path]::GetFullPath([string]$request.workspace_root).TrimEnd('\')
+$desktop=[IO.Path]::GetFullPath([string]$request.desktop_root).TrimEnd('\')
+if(!$root.StartsWith($desktop+'\',[StringComparison]::OrdinalIgnoreCase) -or
+   $root.StartsWith($env:ProgramData+'\',[StringComparison]::OrdinalIgnoreCase)) {throw 'invalid_workspace_root'}
+if(Test-Path -LiteralPath (Join-Path $root '.git')) {throw 'git_workspace_requires_git_workflow'}
 $manifestPath=Join-Path $root '.argon-sync-manifest.json'
 function SafePath([string]$name){
     if(!$name -or $name -match '[\\:<>"|?*\x00-\x1f]' -or $name.StartsWith('/')){throw 'unsafe_path'}

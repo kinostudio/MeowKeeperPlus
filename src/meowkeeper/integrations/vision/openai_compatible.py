@@ -104,10 +104,29 @@ class OpenAICompatibleVision:
             if request.storyboards:
                 manifest = [{"track_alias": board.alias, "frame_indices": list(range(len(board.offsets_seconds))),
                              "observed_offsets_seconds": list(board.offsets_seconds),"validated_zone_frames":list(board.zones)} for board in request.storyboards]
+                pet_instructions = ""
+                pet_profiles = getattr(request, "pet_profiles", ())
+                if pet_profiles:
+                    pets_info = [
+                        {"pet_id": p.get("pet_id"), "name": p.get("name"), "traits": p.get("traits", [])}
+                        for p in pet_profiles if isinstance(p, dict) and p.get("pet_id")
+                    ]
+                    if pets_info:
+                        pet_instructions = (
+                            " 已登錄寵物外觀特徵：" + json.dumps(pets_info, ensure_ascii=False) + "。"
+                            "若畫面貓咪外觀符合特徵，每個 track 額外回傳 identity_candidate 物件："
+                            '{"pet_id": "符合的pet_id或unknown", "certainty": "high/medium/low/unknown", "reason": "說明符合的外觀特徵，如橘白、虎斑、棕色、米克斯"}。'
+                            "看不清或無法確定時填 unknown。"
+                        )
                 body["messages"][0]["content"] = (
-                    "只輸出 JSON tracks；每個輸入 track_alias 都要回覆一次，tags 可空。"
+                    "輸出 JSON 物件，包含 tracks 清單與可選的 caption 動態描述。\n"
+                    "1. caption：針對畫面中貓咪的動作、姿態、所在家具／物件（如床上、沙發、飯碗前、水盆、貓砂盆或地板），"
+                    "以溫馨、擬真、有溫度的繁體中文寫一句 15～35 字的日常動態描述，並自然帶入辨識出的貓咪名字。"
+                    "範例參考：「Saki現在躺在床上休息，好舒服～」、「Saki現在正在吃飯飯，要看看嗎？」、「Saki正站在客廳好奇張望呢！」、「Saki在水盆旁大口喝水，好乖呀～」。\n"
+                    "2. tracks：每個輸入 track_alias 都要回覆一次，tags 可空。"
                     "每個 tag 僅含 code、certainty(low/medium/high/unknown)、evidence_frame_indices(至少兩個有序索引)。"
-                    "圖片是編號且依時間排序的貓框裁切；只能判斷觀察窗口，不代表完整影片。"
+                    + pet_instructions +
+                    " 圖片是編號且依時間排序的貓框裁切；只能判斷觀察窗口，不代表完整影片。"
                     "不得編造精準動作起迄、永久身分或健康結論；看不清就空標籤。"
                     "位置標籤只限manifest提供的有效對位，不可發明區域；靠近水碗不等於喝水，靠近砂盆不等於已使用。"
                     "若附有使用者登錄的場景參考拼貼，它只協助辨認碗、砂盆等物件，不是事件當下畫面、不是貓咪身分或行為證據；不得據此補出事件標籤。"

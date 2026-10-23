@@ -107,7 +107,6 @@ class YoloFrameAnalyzer:
             import cv2  # type: ignore[import-not-found]
             import numpy as np  # type: ignore[import-not-found]
             import torch  # type: ignore[import-not-found]
-
             from ultralytics import YOLO  # type: ignore[import-not-found]
         except (ImportError, OSError) as exc:
             raise AnalysisConfigurationError(
