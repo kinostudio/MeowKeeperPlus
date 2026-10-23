@@ -36,10 +36,42 @@ class TemporalIdentity:
             raise ValueError("身分共識參數不合法。")
         self._states = {}
 
+    def inherit_history(self, from_track_id: object, to_track_id: object) -> bool:
+        """跨微小跳號平滑關聯：若同一位置 1 秒內追蹤號碼跳號，將身分特徵樣本自動平滑接續。"""
+        src_samples = []
+        for k, v in list(self._states.items()):
+            if k == from_track_id or (isinstance(k, tuple) and len(k) == 2 and k[1] == from_track_id):
+                if v and v.samples:
+                    for s in v.samples:
+                        if s not in src_samples:
+                            src_samples.append(s)
+        if not src_samples:
+            return False
+
+        target_keys = [k for k in self._states if k == to_track_id or (isinstance(k, tuple) and len(k) == 2 and k[1] == to_track_id)]
+        if not target_keys:
+            target_keys = [to_track_id]
+
+        transferred = 0
+        for tk in target_keys:
+            dst = self._states.setdefault(tk, _TrackIdentityState(
+                deque(maxlen=max(12, self.thresholds.temporal_vote_window))))
+            for sample in src_samples:
+                if sample not in dst.samples:
+                    dst.samples.append(sample)
+                    transferred += 1
+        return transferred > 0
+
     def update(self, track_id, prediction, *, captured_at: datetime | None = None,
                frame_id: str | None = None, conflict: bool = False) -> IdentityPrediction:
         state = self._states.setdefault(track_id, _TrackIdentityState(
             deque(maxlen=max(12, self.thresholds.temporal_vote_window))))
+        if not state.samples and isinstance(track_id, tuple) and len(track_id) == 2:
+            bare_state = self._states.get(track_id[1])
+            if bare_state and bare_state.samples:
+                for s in bare_state.samples:
+                    if s not in state.samples:
+                        state.samples.append(s)
         while len(self._states) > 128:
             self._states.pop(next(iter(self._states)))
         def signature(value):

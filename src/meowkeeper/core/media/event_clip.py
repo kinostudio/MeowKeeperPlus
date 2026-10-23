@@ -92,6 +92,12 @@ def _format_natural_cat_headline(subject: str, tags: Any = (), posture: str | No
     if posture:
         tag_set.add(posture)
 
+    # 0. 多重行為標籤：保留組合描述
+    valid_tags = [t for t in tags if t in TAG_LABELS and t not in {"unknown", "possible"}]
+    if len(valid_tags) > 1:
+        joined = "、".join(TAG_LABELS[t] for t in valid_tags[:3])
+        return f"{subject}剛剛在{joined}。"
+
     # 1. 飲食與水
     if "eating" in tag_set:
         return f"{subject}現在正在吃飯飯，要看看嗎？"
@@ -122,13 +128,11 @@ def _format_natural_cat_headline(subject: str, tags: Any = (), posture: str | No
     if "walking" in tag_set or "running" in tag_set:
         return f"{subject}正在畫面中四處巡視走動呢！"
 
-    # 4. 複合標籤後備
-    valid_tags = [t for t in tags if t in TAG_LABELS and t not in {"unknown", "possible"}]
+    # 4. 單一標籤後備
     if valid_tags:
-        return f"{subject}剛剛在{'、'.join(TAG_LABELS[t] for t in valid_tags[:3])}。"
+        return f"{subject}剛剛在{TAG_LABELS[valid_tags[0]]}。"
 
     return f"{subject}剛剛出現在畫面。"
-
 
 class EventClipService:
     """事件 MP4 與 Telegram 的隔離服務。
@@ -577,6 +581,14 @@ class EventClipService:
             for attempts in range(1, self.telegram_retries + 2):
                 try:
                     payload = candidate.read_bytes()
+                    if self.store is not None:
+                        caption = self._preflight_refresh_caption(
+                            request=request,
+                            current_caption=caption,
+                            clip_result=clip_result,
+                            references=references,
+                            semantics=semantic_result,
+                        )
                     for chat_id in self.chat_ids:
                         if chat_id in delivered or not self._claim_notify(chat_id, request, reserved):
                             continue
@@ -868,6 +880,255 @@ class EventClipService:
                 f"{request.trigger_at.astimezone().strftime('%m/%d %H:%M')}｜"
                 f"影片 {start.astimezone().strftime('%H:%M:%S')}～{end.astimezone().strftime('%H:%M:%S')}\n"
                 f"喵喵守護者+{source_suffix}")
+
+    def _preflight_refresh_caption(
+        self,
+        request: EventClipRequest,
+        current_caption: str,
+        clip_result: Any = None,
+        references: Iterable[SegmentRecord] = (),
+        semantics: SemanticResult | None = None,
+    ) -> str:
+        """Pre-flight check: Re-query database right before dispatch to catch any identity resolved during transcoding/waiting."""
+        if self.store is None:
+            return current_caption
+
+        try:
+            latest_pet_id = None
+            tags_found = []
+            posture_candidate = None
+
+            with self.store._connection_lock:
+                row = self.store.connection.execute(
+                    "SELECT pet_id, track_id FROM media_events WHERE event_id=?",
+                    (request.event_id,),
+                ).fetchone()
+                if row and row[0] not in {None, "unknown"}:
+                    latest_pet_id = row[0]
+
+                track_ident = request.track_id or (row[1] if row else None) or request.event_id
+                b_row = self.store.connection.execute(
+                    "SELECT pet_id, event_tags_json, evidence_json FROM behavior_events WHERE event_id=? OR track_id=? ORDER BY started_at DESC LIMIT 1",
+                    (str(request.event_id), str(track_ident)),
+                ).fetchone()
+                if b_row:
+                    if not latest_pet_id and b_row[0] not in {None, "unknown"}:
+                        latest_pet_id = b_row[0]
+                    if b_row[1]:
+                        try:
+                            tags_found = json.loads(b_row[1])
+                        except Exception:
+                            pass
+                    if b_row[2]:
+                        try:
+                            ev = json.loads(b_row[2])
+                            p_data = ev.get("posture")
+                            if isinstance(p_data, dict) and p_data.get("posture") in {"sitting", "standing", "lying"}:
+                                posture_candidate = p_data["posture"]
+                        except Exception:
+                            pass
+
+            if not latest_pet_id:
+                return current_caption
+
+            pet_name = None
+            try:
+                reg = PetRegistry(self.output_directory.parent / "pets")
+                prof = reg.get_pet(latest_pet_id)
+                if prof and prof.enabled:
+                    pet_name = prof.display_name
+            except Exception:
+                pass
+
+            if not pet_name:
+                return current_caption
+
+            first_line, sep, rest = current_caption.partition("\n")
+            if pet_name in first_line and "出現在畫面" not in first_line:
+                return current_caption
+
+            new_headline = _format_natural_cat_headline(pet_name, tags_found, posture_candidate)
+            if not new_headline.startswith("🐈"):
+                new_headline = f"🐈 {new_headline}"
+
+            time_line, sep2, suffix_line = rest.partition("\n") if sep else (rest, "", "")
+            if "喵喵守護者+" in suffix_line:
+                if "辨識" not in suffix_line:
+                    suffix_line = f"{suffix_line} DINOv2辨識"
+            else:
+                suffix_line = "喵喵守護者+ DINOv2辨識"
+
+            refreshed = f"{new_headline}\n{time_line}\n{suffix_line}" if time_line else f"{new_headline}\n{suffix_line}"
+            return refreshed
+        except Exception:
+            return current_caption
+
+    def elevate_event_caption(
+        self,
+        event_id: str,
+        pet_id: str,
+        *,
+        track_id: str | int | None = None,
+        posture: str | None = None,
+        tags: tuple[str, ...] = (),
+    ) -> bool:
+        """Post-delivery caption elevation: edit sent Telegram message caption silently when identity is resolved."""
+        if not self.telegram_enabled or self.notifier is None or not self.store:
+            return False
+        if not pet_id or pet_id == "unknown":
+            return False
+
+        try:
+            pet_name = pet_id
+            try:
+                reg = PetRegistry(self.output_directory.parent / "pets")
+                p = reg.get_pet(pet_id)
+                if p and p.enabled and p.display_name:
+                    pet_name = p.display_name
+            except Exception:
+                pass
+
+            with self.store._connection_lock:
+                receipts = self.store.connection.execute(
+                    "SELECT recipient_ref, message_id FROM telegram_receipts WHERE event_id=? AND media_kind='video'",
+                    (event_id,),
+                ).fetchall()
+
+            if not receipts and track_id is not None:
+                with self.store._connection_lock:
+                    receipts = self.store.connection.execute(
+                        """SELECT r.recipient_ref, r.message_id 
+                           FROM telegram_receipts r 
+                           JOIN media_events m ON r.event_id = m.event_id 
+                           WHERE m.track_id=? AND r.media_kind='video'""",
+                        (str(track_id),),
+                    ).fetchall()
+
+            if not receipts:
+                return False
+
+            chat_map = {hashlib.sha256(cid.encode("utf-8")).hexdigest(): cid for cid in self.chat_ids}
+
+            if not posture and self.store:
+                try:
+                    with self.store._connection_lock:
+                        row = self.store.connection.execute(
+                            "SELECT event_tags_json, evidence_json FROM behavior_events WHERE event_id=? OR track_id=? ORDER BY started_at DESC LIMIT 1",
+                            (str(event_id), str(track_id or event_id)),
+                        ).fetchone()
+                        if row:
+                            if row[0] and not tags:
+                                try:
+                                    tags = tuple(json.loads(row[0]))
+                                except Exception:
+                                    pass
+                            if row[1]:
+                                try:
+                                    ev = json.loads(row[1])
+                                    p_data = ev.get("posture")
+                                    if isinstance(p_data, dict) and p_data.get("posture") in {"sitting", "standing", "lying"}:
+                                        posture = p_data["posture"]
+                                except Exception:
+                                    pass
+                except Exception:
+                    pass
+
+            headline = _format_natural_cat_headline(pet_name, tags, posture)
+            if not headline.startswith("🐈"):
+                headline = f"🐈 {headline}"
+
+            media_row = self.store.get_media_event(event_id)
+            if media_row and media_row["trigger_at"]:
+                trig = datetime.fromisoformat(media_row["trigger_at"]) if isinstance(media_row["trigger_at"], str) else media_row["trigger_at"]
+                if trig.tzinfo is None:
+                    trig = trig.replace(tzinfo=timezone.utc)
+                time_str = trig.astimezone().strftime("%m/%d %H:%M")
+                caption_text = f"{headline}\n{time_str}｜喵喵守護者+ DINOv2辨識"
+            else:
+                caption_text = f"{headline}\n喵喵守護者+ DINOv2辨識"
+
+            fake_req = EventClipRequest(event_id=event_id, trigger_at=datetime.now(timezone.utc),
+                                        event_type="cat_detected", source_id=(media_row["source_id"] if media_row and media_row["source_id"] else "camera"), trigger_origin="detector")
+
+            for ref, msg_id in receipts:
+                chat_id = chat_map.get(ref)
+                if not chat_id:
+                    continue
+                try:
+                    markup = self._feedback_markup(chat_id, fake_req)
+                    self.notifier.edit_message_caption(
+                        chat_id=chat_id,
+                        message_id=msg_id,
+                        text=caption_text[:1024],
+                        reply_markup=markup,
+                    )
+                    self._log(f"✨ Telegram 訊息 #{msg_id} 標題已自動平滑升級為：{pet_name}")
+                except Exception as exc:
+                    self._log(f"⚠️ Telegram 標題升級失敗 (msg {msg_id})：{type(exc).__name__}")
+
+            return True
+        except Exception as exc:
+            self._log(f"⚠️ 延遲身分自動平滑升級異常：{type(exc).__name__}")
+            return False
+
+    def update_event_semantics(self, event_id: str, semantics: SemanticResult) -> bool:
+        """Post-delivery caption elevation from cloud AI Multimodal semantics."""
+        if not self.telegram_enabled or self.notifier is None or not self.store:
+            return False
+        if semantics is None or semantics.status != "completed":
+            return False
+
+        try:
+            with self.store._connection_lock:
+                receipts = self.store.connection.execute(
+                    "SELECT recipient_ref, message_id FROM telegram_receipts WHERE event_id=? AND media_kind='video'",
+                    (event_id,),
+                ).fetchall()
+
+            if not receipts:
+                return False
+
+            chat_map = {hashlib.sha256(cid.encode("utf-8")).hexdigest(): cid for cid in self.chat_ids}
+
+            media_row = self.store.get_media_event(event_id)
+            time_str = ""
+            if media_row and media_row["trigger_at"]:
+                trig = datetime.fromisoformat(media_row["trigger_at"]) if isinstance(media_row["trigger_at"], str) else media_row["trigger_at"]
+                if trig.tzinfo is None:
+                    trig = trig.replace(tzinfo=timezone.utc)
+                time_str = trig.astimezone().strftime("%m/%d %H:%M")
+
+            base_caption = f"🐈 貓咪剛剛出現在畫面。\n{time_str}\n喵喵守護者+"
+            elevated = self._merge_candidate_caption(
+                base_caption, semantics,
+                pet_registry_dir=self.output_directory.parent / "pets",
+                store=self.store,
+                event_id=event_id,
+            )
+
+            fake_req = EventClipRequest(event_id=event_id, trigger_at=datetime.now(timezone.utc),
+                                        event_type="cat_detected", source_id=(media_row["source_id"] if media_row and media_row["source_id"] else "camera"), trigger_origin="detector")
+
+            for ref, msg_id in receipts:
+                chat_id = chat_map.get(ref)
+                if not chat_id:
+                    continue
+                try:
+                    markup = self._feedback_markup(chat_id, fake_req)
+                    self.notifier.edit_message_caption(
+                        chat_id=chat_id,
+                        message_id=msg_id,
+                        text=elevated[:1024],
+                        reply_markup=markup,
+                    )
+                    self._log(f"✨ Telegram 訊息 #{msg_id} 雲端語意已自動更新")
+                except Exception as exc:
+                    self._log(f"⚠️ Telegram 雲端語意更新失敗 (msg {msg_id})：{type(exc).__name__}")
+
+            return True
+        except Exception as exc:
+            self._log(f"⚠️ 雲端語意平滑升級異常：{type(exc).__name__}")
+            return False
 
     @classmethod
     def _merge_candidate_caption(

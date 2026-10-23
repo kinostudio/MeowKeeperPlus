@@ -115,6 +115,7 @@ class V02AnalysisPipeline:
         feedback_learning_policy: FeedbackLearningPolicy | None = None,
         native_snapshot_provider: Callable[[], bytes | None] | None = None,
         posture_classifier: Any | None = None,
+        clip_service: Any | None = None,
     ) -> None:
         self.tracker = tracker
         self.identity_classifier = identity_classifier
@@ -202,6 +203,10 @@ class V02AnalysisPipeline:
         self.native_snapshot_provider = native_snapshot_provider
         self._native_crop_cache: tuple[float, Any] = (0.0, None)
         self.timings = StageTimings()
+        self.clip_service: Any = clip_service
+        from collections import deque
+        self._recent_tracks: deque = deque(maxlen=32)
+        self._track_stitches: dict[str | int, str | int] = {}
 
     def _get_native_crop(self, observation: TrackObservation) -> bytes | None:
         """從環形快取中的原生高畫質（4K）影格等比映射裁切，解決縮放過小 (<96px) 或壓縮模糊問題。"""
@@ -246,11 +251,67 @@ class V02AnalysisPipeline:
         try:
             import io
             crop_img = cached_img.crop((nx1, ny1, nx2, ny2))
+            if crop_img.width < 96 or crop_img.height < 96:
+                scale = max(96 / crop_img.width, 96 / crop_img.height)
+                new_w = max(96, int(round(crop_img.width * scale)))
+                new_h = max(96, int(round(crop_img.height * scale)))
+                crop_img = crop_img.resize((new_w, new_h), Image.Resampling.BICUBIC)
             buf = io.BytesIO()
-            crop_img.save(buf, format="JPEG", quality=90)
+            crop_img.save(buf, format="JPEG", quality=92)
             return buf.getvalue()
         except Exception:
             return None
+
+    def _find_stitching_predecessor(self, observation: TrackObservation) -> str | int | None:
+        now = observation.captured_at
+        curr_bbox = observation.bbox
+        cx, cy = curr_bbox.center
+        cw, ch = curr_bbox.width, curr_bbox.height
+
+        best_match = None
+        best_dist = float("inf")
+
+        for prev_track_id, prev_time, prev_bbox in reversed(self._recent_tracks):
+            if prev_track_id == observation.track_id:
+                continue
+            elapsed = (now - prev_time).total_seconds()
+            if elapsed < 0 or elapsed > 1.5:
+                continue
+            px, py = prev_bbox.center
+            dist = ((cx - px) ** 2 + (cy - py) ** 2) ** 0.5
+
+            x1 = max(curr_bbox.x1, prev_bbox.x1)
+            y1 = max(curr_bbox.y1, prev_bbox.y1)
+            x2 = min(curr_bbox.x2, prev_bbox.x2)
+            y2 = min(curr_bbox.y2, prev_bbox.y2)
+            inter = max(0.0, x2 - x1) * max(0.0, y2 - y1)
+            area1 = curr_bbox.width * curr_bbox.height
+            area2 = prev_bbox.width * prev_bbox.height
+            union = area1 + area2 - inter
+            iou = inter / union if union > 0 else 0.0
+
+            max_allowed_dist = max(120.0, max(cw, ch) * 0.8)
+            if iou >= 0.2 or dist <= max_allowed_dist:
+                if dist < best_dist:
+                    best_dist = dist
+                    best_match = prev_track_id
+
+        return best_match
+
+    def _stitch_tracks(self, from_track_id: str | int, to_track_id: str | int) -> None:
+        self._track_stitches[to_track_id] = from_track_id
+        if hasattr(self.temporal_identity, "inherit_history"):
+            self.temporal_identity.inherit_history(from_track_id, to_track_id)
+        if from_track_id in self._stable_identity:
+            prev_stable = self._stable_identity[from_track_id]
+            if prev_stable.stable and prev_stable.predicted_pet_id:
+                self._stable_identity[to_track_id] = prev_stable
+        if hasattr(self.identity_resolver, "inherit_track_history"):
+            self.identity_resolver.inherit_track_history(from_track_id, to_track_id)
+        if from_track_id in self._track_postures and to_track_id not in self._track_postures:
+            self._track_postures[to_track_id] = self._track_postures[from_track_id]
+        if self.logger:
+            self.logger(f"🔗 跨微小跳號平滑關聯：軌跡 {from_track_id} -> {to_track_id}，身分特徵樣本已平滑接續。")
 
     def process(self, frame: FramePacket) -> V02FrameResult:
         samples: dict[str, float] = {}
@@ -306,7 +367,13 @@ class V02AnalysisPipeline:
         finalized: list[BehaviorEvent] = []
         for observation in observations:
             stage = time.perf_counter()
+            if observation.track_id not in self._seen_tracks:
+                predecessor = self._find_stitching_predecessor(observation)
+                if predecessor is not None:
+                    self._stitch_tracks(predecessor, observation.track_id)
+
             self.history.update(observation)
+            self._recent_tracks.append((observation.track_id, observation.captured_at, observation.bbox))
             identity = self._stable_identity.get(observation.track_id)
             if identity is None:
                 identity = self._unknown_prediction(observation.track_id)
@@ -651,6 +718,19 @@ class V02AnalysisPipeline:
                 track_id=track_id, pet_id=stable.predicted_pet_id,
                 confidence=stable.similarity, resolved_at=captured_at,
             )
+        if stable.stable and stable.predicted_pet_id and stable.predicted_pet_id != "unknown":
+            if hasattr(self, "clip_service") and self.clip_service is not None:
+                try:
+                    p_tag = getattr(getattr(stable, "posture", None), "posture", None)
+                    self.clip_service.elevate_event_caption(
+                        target_event_id,
+                        stable.predicted_pet_id,
+                        track_id=track_id,
+                        posture=p_tag,
+                    )
+                except Exception as exc:
+                    if self.logger:
+                        self.logger(f"⚠️ 延遲身分自動升級觸發異常：{type(exc).__name__}")
 
     def _dispatch_track_summary(
         self,

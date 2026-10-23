@@ -235,11 +235,13 @@ class TelegramNotifier:
         self._call("editMessageText", fields={"chat_id": chat_id, "message_id": str(message_id),
                                              "text": text, "reply_markup": json.dumps(_styled_reply_markup(reply_markup), ensure_ascii=False)})
 
-    def edit_message_caption(self, chat_id: str, message_id: int, text: str, *, reply_markup: Mapping[str, Any]) -> None:
+    def edit_message_caption(self, chat_id: str, message_id: int, text: str, *, reply_markup: Mapping[str, Any] | None = None) -> None:
         if not chat_id or type(message_id) is not int or message_id <= 0 or not 1 <= len(text.encode("utf-16-le"))//2 <= 1024:
             raise ValueError("Telegram照片回報說明格式不正確。")
-        self._call("editMessageCaption",fields={"chat_id":chat_id,"message_id":str(message_id),"caption":text,
-                                               "reply_markup":json.dumps(_styled_reply_markup(reply_markup),ensure_ascii=False)})
+        fields: dict[str, Any] = {"chat_id": chat_id, "message_id": str(message_id), "caption": text}
+        if reply_markup is not None:
+            fields["reply_markup"] = json.dumps(_styled_reply_markup(reply_markup), ensure_ascii=False)
+        self._call("editMessageCaption", fields=fields)
 
     def send_photo(
         self,

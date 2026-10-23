@@ -790,8 +790,17 @@ class RepositoryCoreController(CoreController):
                 maximum_size_mb=self.maximum_size_mb,
             )
             from meowkeeper.storage.semantic_jobs import SemanticJobJournal
+
+            def _on_semantic_result(event_id, result):
+                self.store.record_event_semantics(event_id, result)
+                if clip_service is not None:
+                    try:
+                        clip_service.update_event_semantics(event_id, result)
+                    except Exception:
+                        pass
+
             semantic_service = EventSemanticService(
-                self.vision_provider, result_sink=self.store.record_event_semantics,
+                self.vision_provider, result_sink=_on_semantic_result,
                 journal=SemanticJobJournal(self.store),
             )
             clip_service = EventClipService(
@@ -811,6 +820,8 @@ class RepositoryCoreController(CoreController):
             )
             analyzer = AdaptiveAnalyzer(self._create_analyzer(), fps=self.analysis_fps,
                                         input_size=self.analysis_width, logger=self._log)
+            if hasattr(analyzer, "set_clip_service"):
+                analyzer.set_clip_service(clip_service)
             semantic_service.pressure_probe = self.semantic_pressure
             if semantic_service is not None and self.vision_provider is not None:
                 enable_frames = getattr(analyzer, "enable_semantic_frames", None)

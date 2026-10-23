@@ -110,6 +110,14 @@ class BackgroundIdentityResolver:
                 self.scheduler.cancel(task_id)
         return self._generation
 
+    def inherit_track_history(self, from_track_id: str | int, to_track_id: str | int) -> None:
+        """跨微小跳號平滑關聯：接續最近的辨識時間戳與最近特徵簽名。"""
+        with self._lock:
+            if from_track_id in self._last_resolved and to_track_id not in self._last_resolved:
+                self._last_resolved[to_track_id] = self._last_resolved[from_track_id]
+            if from_track_id in self._recent_crops and to_track_id not in self._recent_crops:
+                self._recent_crops[to_track_id] = list(self._recent_crops[from_track_id])
+
     def should_submit(
         self,
         track_id: str | int,

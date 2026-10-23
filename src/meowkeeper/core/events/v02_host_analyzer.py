@@ -125,6 +125,10 @@ class V02HostAnalyzer:
             native_snapshot_provider=native_snapshot_provider,
         )
 
+    def set_clip_service(self, clip_service: object) -> None:
+        if hasattr(self, "pipeline") and self.pipeline is not None:
+            self.pipeline.clip_service = clip_service
+
     def analyze(self, frame):
         samples: dict[str, float] = {}
         started = time.perf_counter()

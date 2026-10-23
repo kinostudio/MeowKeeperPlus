@@ -33,6 +33,12 @@ class AdaptiveAnalyzer:
         self._latencies: deque[float] = deque(maxlen=30)
         self._gpu_sampler = CachedGpuSampler()
 
+    def set_clip_service(self, clip_service: object) -> None:
+        if hasattr(self.analyzer, "set_clip_service"):
+            self.analyzer.set_clip_service(clip_service)
+        elif hasattr(self.analyzer, "pipeline"):
+            self.analyzer.pipeline.clip_service = clip_service
+
     def measured_fps(self) -> float:
         now = time.monotonic()
         while self._completed and self._completed[0] < now - 5:
