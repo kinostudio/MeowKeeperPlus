@@ -2,21 +2,24 @@
 
 **MeowKeeper+ — Local AI Pet Guardian**
 
-Windows本地寵物AI監控套件：共享攝影機串流、事件影片、Telegram通知、逐軌跡回饋與選用寵物身分辨識。
+Windows 本地寵物監控：共用攝影機影音來源、事件影片、Telegram 通知、逐軌跡人工回報與選用的貓咪身分／行為候選。
 
-## 最新下載
+## 使用與下載
 
-[r107 發布說明與下載](https://github.com/kinostudio/MeowKeeperPlus/releases/tag/r107)
+- [官方發布版本與安裝說明](https://github.com/kinostudio/MeowKeeperPlus/releases)
+- [一般使用指南](docs/PUBLIC_USER_GUIDE.md)
+- Windows 發布包內附 Python、FFmpeg 與必要模型；一般使用者不必建立 venv 或執行 pip。
+- 安裝與更新由使用者執行發布包中的安裝入口；Git 原始碼更新不會自動升級正式 Host。
 
-- 首頁硬體指標新增即時採樣倒數環、數值滾動與環形／指針平滑過渡；沿用既有狀態快照，不增加輪詢。
-- 提供完整Windows可攜包（內附Python、FFmpeg、模型），不要求終端使用者執行pip。
-- 大型ZIP使用分卷資產；請依Release提供的下載腳本完成合併與SHA-256校驗，勿單獨解壓part檔案。
-- 可攜開啟 `MeowKeeperPlus.cmd`；正式安裝／升級由使用者自行以管理員執行 `Install-MeowKeeperPlus.cmd -Upgrade`。
+## 原始碼協作
 
-## 狀態與界線
+本 repository 保存公開原始碼與一般說明。Codex／Argon 使用獨立 Git clone 與工作分支，以完整 commit SHA 交接；合併前檢查測試與公開內容。
 
-身分與行為辨識仍為experimental。CPU感測、PTZ、連續播放取決於硬體、攝影機、權限與瀏覽器；未支援或無可信資料時會顯示原因，不能將本機短測視為所有設備或24H保證。
+- [協作與交接](docs/ARGON_HANDOFF_SYNC.md)
+- [測試方式與驗收界線](docs/TESTING.md)
+- [目前目標](docs/CURRENT_GOALS.md)
+- [原始碼整合紀錄](docs/SOURCE_INTEGRATION.md)
 
-本repository為公開程式包發行區，不包含使用者私人設定、資料庫、帳密、攝影機畫面或Telegram憑證。更新清單有Ed25519簽章；請只使用此repository的官方Release。
+身分與行為辨識仍為 experimental。硬體效能、CPU 測溫、PTZ 及連續播放須依目標設備驗收；單元測試不能取代家庭實拍或長時間測試。
 
-[所有版本](https://github.com/kinostudio/MeowKeeperPlus/releases)
+私人設定、金鑰、資料庫、攝影機畫面、實機量測與操作紀錄只保存在使用者本機。安全管理見 [安全規範](docs/SECURITY.md)。
