@@ -20,10 +20,13 @@
       try {
         pc = new RTCPeerConnection({iceServers: []});
         pc.addTransceiver("video", {direction: "recvonly"});
+        pc.addTransceiver("audio", {direction: "recvonly"});
+        const remoteStream = new MediaStream();
+        video.srcObject = remoteStream;
         pc.ontrack = event => {
           if (closed) return;
-          video.srcObject = new MediaStream([event.track]);
-          video.play().catch(() => fail("瀏覽器未允許WebRTC播放；改用MSE。"));
+          remoteStream.addTrack(event.track);
+          video.play().catch(() => {});
         };
         await pc.setLocalDescription(await pc.createOffer());
         await new Promise((resolve, reject) => {

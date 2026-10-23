@@ -196,6 +196,112 @@
       element("p","提交會追加新修訂，不覆寫 Telegram 回報或既有歷史；人工結果不等於 AI 已確定。",root).className="field-help";
     }
   }
+
+  async function loadAndRenderIdentityEvidence(eventId) {
+    const root = byId("event-review-ai-evidence");
+    if (!root) return;
+    root.innerHTML = '<p class="muted">正在讀取 AI 身分比對證據…</p>';
+    if (!eventId) {
+      root.innerHTML = '<p class="muted">無此事件識別碼。</p>';
+      return;
+    }
+    const reasons = {
+      insufficient_evidence: '獨立影格不足', unstable_votes: '跨影格結果不一致',
+      small_margin: '候選太接近', low_similarity: '相似度不足',
+      no_gallery: '尚無有效特徵', model_mismatch: '模型版本不相容',
+      track_ambiguous: '軌跡可能混淆', calibration_required: '尚未通過家庭校準'
+    };
+    try {
+      const response = await fetch(`/api/v1/events/${encodeURIComponent(eventId)}/identity`, { cache: "no-store" });
+      if (!response.ok) throw new Error("身分證據讀取失敗。");
+      const data = await response.json();
+      root.replaceChildren();
+      const tracks = Array.isArray(data.tracks) ? data.tracks : [];
+      if (!tracks.length) {
+        root.innerHTML = '<p class="muted">此事件尚無逐影格身分比對證據（可能尚未提取或非貓事件）。</p>';
+        return;
+      }
+      tracks.forEach((track, idx) => {
+        const card = document.createElement("article");
+        card.className = "card";
+        card.style.margin = "8px 0";
+        card.style.padding = "10px";
+        card.style.border = "1px solid var(--line)";
+        card.style.borderRadius = "8px";
+
+        const title = document.createElement("h5");
+        title.style.margin = "0 0 6px 0";
+        title.textContent = `證據貓咪 ${idx + 1}：${track.decision === 'unknown' ? '身分尚未確認' : 'AI 候選識別'}`;
+        card.appendChild(title);
+
+        const info = document.createElement("p");
+        info.className = "field-help";
+        info.style.margin = "4px 0";
+        info.textContent = `影格跨度 ${(track.evidence_seconds || 0).toFixed(1)} 秒｜有效影格 ${track.valid_frames || 0}｜判定原因：${reasons[track.unknown_reason] || track.unknown_reason || '特徵比對完成'}`;
+        card.appendChild(info);
+
+        const mediaRow = document.createElement("div");
+        mediaRow.style.display = "flex";
+        mediaRow.style.flexWrap = "wrap";
+        mediaRow.style.gap = "10px";
+        mediaRow.style.alignItems = "flex-start";
+        mediaRow.style.margin = "8px 0";
+
+        if (track.crop_url) {
+          const fig = document.createElement("figure");
+          fig.style.margin = "0";
+          const img = document.createElement("img");
+          img.src = track.crop_url;
+          img.alt = "當次實拍裁切";
+          img.style.maxHeight = "140px";
+          img.style.borderRadius = "6px";
+          img.style.objectFit = "contain";
+          const cap = document.createElement("figcaption");
+          cap.className = "field-help";
+          cap.textContent = "實拍裁切 (DINOv2)";
+          fig.append(img, cap);
+          mediaRow.appendChild(fig);
+        }
+
+        const candList = document.createElement("div");
+        candList.style.flex = "1";
+        candList.style.minWidth = "180px";
+        (track.candidates || []).forEach(cand => {
+          const cBox = document.createElement("div");
+          cBox.style.marginBottom = "6px";
+          const cTitle = document.createElement("strong");
+          cTitle.style.fontSize = ".88rem";
+          cTitle.textContent = `可能是 ${cand.name}｜相似度 ${Number(cand.pet_score || 0).toFixed(3)}`;
+          cBox.appendChild(cTitle);
+
+          (cand.reference_matches || []).forEach(ref => {
+            if (ref.thumbnail_url) {
+              const rFig = document.createElement("figure");
+              rFig.style.margin = "4px 0 0 0";
+              rFig.style.display = "inline-block";
+              const rImg = document.createElement("img");
+              rImg.src = ref.thumbnail_url;
+              rImg.alt = `${cand.name} 參考照片`;
+              rImg.style.maxHeight = "80px";
+              rImg.style.borderRadius = "4px";
+              const rCap = document.createElement("figcaption");
+              rCap.className = "field-help";
+              rCap.textContent = `參考照相似度 ${Number(ref.cosine_score || 0).toFixed(3)}`;
+              rFig.append(rImg, rCap);
+              cBox.appendChild(rFig);
+            }
+          });
+          candList.appendChild(cBox);
+        });
+        mediaRow.appendChild(candList);
+        card.appendChild(mediaRow);
+        root.appendChild(card);
+      });
+    } catch (err) {
+      root.innerHTML = `<p class="muted">讀取身分證據失敗：${err.message}</p>`;
+    }
+  }
+
   document.addEventListener("meowkeeper:review",async event=> {
     if (busy) return; busy=true; item=event.detail; view=null; step=1; selected=[]; actions={}; notCat=false;
     requestId=window.MeowKeeperRequestId(); videoReady=false; videoFailed=false; submitted=false;
@@ -206,6 +312,7 @@
     byId("event-review-segment-start").value="0"; byId("event-review-segment-end").value="";
     byId("event-review-candidates").textContent="";
     message(item.clip_exists ? "正在讀取事件與回報歷史及影片…" : "這筆事件沒有已保存的影片，為避免猜測，暫時不能提交人工回報。");
+    loadAndRenderIdentityEvidence(item.event_id);
     byId("event-export-annotated").disabled = exportBusy || !item.clip_exists;
     if (!exportBusy) byId("event-export-status").textContent = "";
     if (dialog.showModal) dialog.showModal(); else dialog.setAttribute("open","");

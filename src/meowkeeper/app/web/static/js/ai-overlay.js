@@ -11,33 +11,74 @@
     help.className = "field-help preview-ai-help";
     help.textContent = "AI 標記是最近 2 秒內的採樣，並非逐幀同步，與連續影片可能稍有時間差；偵測框每次更新後會穩定保留約 0.85 秒避免閃爍，過期後自動隱藏。身分與動作仍是實驗性候選，可各自開關，不會寫進原始影片。";
     stage.after(help);
-    const choices = {};
-    const overlayTooltips = {
-      boxes: "偵測框：在預覽畫面標出 YOLO 即時偵測到的貓咪位置與信心分數（0～1）。每次偵測更新後會平滑保留約 0.85 秒避免閃爍；僅疊加於網頁預覽，不會寫入原始錄影或影響 Telegram 通知。",
-      identity: "身分候選（實驗性）：依據已建立的「寵物檔案」參考照片特徵（DINOv2），比對目前偵測框最接近哪一隻貓咪。分數未達門檻時會顯示「未知」；僅供畫面輔助預覽，不作為正式身分結論。",
-      behavior: "動作候選（實驗性）：依據貓咪移動軌跡、停留時間與畫面區域，初步推測目前動作（如行走、休息、進食等）。屬於即時候選提示，正式紀錄仍以事件影片與人工回報為準。"
+    const choices = {
+      boxes: { enabled: true },
+      identity: { enabled: true },
+      behavior: { enabled: true }
     };
-    for (const [key, label] of [["boxes", "偵測框"], ["identity", "身分候選"], ["behavior", "動作候選"]]) {
-      const button = document.createElement("button");
-      button.type = "button";
-      button.className = "preview-mode-button preview-overlay-toggle";
-      button.textContent = label;
-      const tip = overlayTooltips[key] || "只開關此頁疊圖，不改影片、AI 分析或 Telegram；候選為實驗性結果。";
-      button.title = tip;
-      button.setAttribute("aria-label", `${label}：${tip}`);
-      button.setAttribute("data-tooltip", tip);
-      let enabled = key === "boxes";
-      try { const saved = localStorage.getItem(`meowkeeper-overlay:${key}`); if (saved !== null) enabled = saved === "true"; } catch (_) { /* optional */ }
-      choices[key] = { button, enabled };
-      button.setAttribute("aria-pressed", String(enabled));
-      button.addEventListener("click", () => {
-        choices[key].enabled = !choices[key].enabled;
-        button.setAttribute("aria-pressed", String(choices[key].enabled));
-        try { localStorage.setItem(`meowkeeper-overlay:${key}`, String(choices[key].enabled)); } catch (_) { /* optional */ }
+    for (const key of ["boxes", "identity", "behavior"]) {
+      try {
+        const saved = localStorage.getItem(`meowkeeper-overlay:${key}`);
+        if (saved !== null) choices[key].enabled = saved === "true";
+      } catch (_) {}
+    }
+
+    // Single unified AI Icon button with dropdown popover
+    const aiDropdown = document.createElement("div");
+    aiDropdown.className = "preview-ai-dropdown";
+
+    const aiButton = document.createElement("button");
+    aiButton.type = "button";
+    aiButton.className = "preview-mode-button preview-mode-select preview-ai-toggle";
+    aiButton.setAttribute("aria-label", "AI 偵測框與身分動作顯示設定");
+    aiButton.setAttribute("aria-haspopup", "true");
+    aiButton.innerHTML = `<span class="preview-mode-icon" aria-hidden="true"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 8V5a1 1 0 0 1 1-1h3M4 16v3a1 1 0 0 0 1 1h3M16 4h3a1 1 0 0 1 1 1v3M16 20h3a1 1 0 0 0 1-1v-3"/><circle cx="12" cy="12" r="3"/><line x1="12" y1="5" x2="12" y2="7"/><line x1="12" y1="17" x2="12" y2="19"/><line x1="5" y1="12" x2="7" y2="12"/><line x1="17" y1="12" x2="19" y2="12"/></svg></span>`;
+
+    const aiMenu = document.createElement("div");
+    aiMenu.className = "preview-ai-menu";
+
+    const optionsConfig = [
+      { key: "boxes", label: "偵測框顯示" },
+      { key: "identity", label: "身分偵測顯示 (本地AI·DINOv2)" },
+      { key: "behavior", label: "動作顯示 (本地AI·DINOv2)" }
+    ];
+
+    optionsConfig.forEach(({ key, label }) => {
+      const optLabel = document.createElement("label");
+      optLabel.className = "preview-ai-option";
+      const chk = document.createElement("input");
+      chk.type = "checkbox";
+      chk.checked = choices[key].enabled;
+      chk.addEventListener("change", () => {
+        choices[key].enabled = chk.checked;
+        try { localStorage.setItem(`meowkeeper-overlay:${key}`, String(chk.checked)); } catch (_) {}
+        updateAiState();
         draw();
       });
-      hud.append(button);
+      const txt = document.createElement("span");
+      txt.textContent = label;
+      optLabel.append(chk, txt);
+      aiMenu.appendChild(optLabel);
+    });
+
+    function updateAiState() {
+      const anyActive = choices.boxes.enabled || choices.identity.enabled || choices.behavior.enabled;
+      aiButton.setAttribute("aria-pressed", String(anyActive));
     }
+    updateAiState();
+
+    aiButton.addEventListener("click", (e) => {
+      e.stopPropagation();
+      aiDropdown.classList.toggle("is-open");
+    });
+    document.addEventListener("click", (e) => {
+      if (!aiDropdown.contains(e.target)) {
+        aiDropdown.classList.remove("is-open");
+      }
+    });
+
+    aiDropdown.append(aiButton, aiMenu);
+    hud.append(aiDropdown);
     let overlay = null, lastNonEmptyOverlay = null, lastSeenPerf = 0, media = null, timer = 0;
     function activeOverlay() {
       const nowMs = Date.now();
@@ -80,9 +121,9 @@
         box.style.borderWidth = choices.boxes.enabled ? "2px" : "0";
         Object.assign(box.style, { left: `${dx + b[0] * width * scale}px`, top: `${dy + b[1] * height * scale}px`, width: `${(b[2]-b[0])*width*scale}px`, height: `${(b[3]-b[1])*height*scale}px` });
         const labels = [];
-        if (choices.boxes.enabled) labels.push(`貓 ${index + 1} · ${Number(item.confidence || 0).toFixed(2)}（AI 採樣）`);
-        if (choices.identity.enabled) labels.push(`身分候選：${item.identity || "未知"}（實驗性）`);
-        if (choices.behavior.enabled) labels.push(`動作候選：${item.behavior || "尚未判斷"}（實驗性）`);
+        if (choices.boxes.enabled) labels.push(`貓 ${index + 1} · ${Number(item.confidence || 0).toFixed(2)}`);
+        if (choices.identity.enabled) labels.push(`身分偵測：${item.identity || "未知"} (DINOv2)`);
+        if (choices.behavior.enabled) labels.push(`動作：${item.behavior || "尚未判斷"} (DINOv2)`);
         if (!labels.length) continue;
         const label = document.createElement("span");
         label.textContent = labels.join("\n");

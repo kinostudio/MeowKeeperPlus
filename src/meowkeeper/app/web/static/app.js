@@ -227,4 +227,21 @@
   load();
   if ($("monitor-status") || $("monitor-toggle")) window.setInterval(() => { if (!document.hidden) load(); }, 5000);
   if ($("tailscale-status")) window.setInterval(() => { if (!document.hidden) loadTailscale(); }, 10000);
+
+  // Global backdrop click to close any native <dialog>
+  document.addEventListener("click", (event) => {
+    if (event.target && event.target.tagName === "DIALOG" && event.target.open) {
+      const rect = event.target.getBoundingClientRect();
+      const isInDialog = (
+        rect.top <= event.clientY &&
+        event.clientY <= rect.top + rect.height &&
+        rect.left <= event.clientX &&
+        event.clientX <= rect.left + rect.width
+      );
+      if (!isInDialog) {
+        event.target.close();
+      }
+    }
+  });
+
 })();

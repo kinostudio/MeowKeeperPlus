@@ -22,7 +22,7 @@ class PacketQueue(asyncio.Queue):
 def validate_offer(sdp):
     if (not isinstance(sdp, str) or len(sdp) > 65536 or "a=recvonly" not in sdp
             or sdp.count("m=video ") != 1
-            or any(x in sdp for x in ("a=sendrecv", "a=sendonly", "m=audio", "m=application"))):
+            or any(x in sdp for x in ("a=sendrecv", "a=sendonly", "m=application"))):
         raise ValueError("WebRTC只接受單一唯讀影像。")
     networks = [ipaddress.ip_network(value) for value in
                 ("127.0.0.0/8", "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "100.64.0.0/10", "::1/128", "fc00::/7", "fe80::/10")]
@@ -61,16 +61,19 @@ class SharedRtcSource:
                 raise ValueError("來源正在切換；請稍後重試。")
             if self._player is None:
                 player = await asyncio.to_thread(self.player_factory or MediaPlayer, url, format="rtsp", decode=False,
-                                                 options={"rtsp_transport": "tcp", "allowed_media_types": "video"}, timeout=3)
+                                                 options={"rtsp_transport": "tcp", "allowed_media_types": "video,audio"}, timeout=3)
                 if player.video is None:
                     # aiortc 1.15 packet passthrough supports H264/VP8, not HEVC.
                     await asyncio.to_thread(player._stop, None)
                     raise ValueError("WebRTC無法原碼傳送此編碼；改用MSE，不啟動轉碼。")
-                # aiortc 1.15's player queue is otherwise unbounded.
                 player.video._queue = PacketQueue(maxsize=32)
+                if player.audio is not None:
+                    player.audio._queue = PacketQueue(maxsize=32)
                 self._player, self._relay, self._url = player, MediaRelay(), url
             self.viewers += 1
-            return self._relay.subscribe(self._player.video, buffered=False)
+            v_sub = self._relay.subscribe(self._player.video, buffered=False)
+            a_sub = self._relay.subscribe(self._player.audio, buffered=False) if self._player.audio is not None else None
+            return v_sub, a_sub
 
     async def release(self):
         async with self._lock:
@@ -144,10 +147,17 @@ async def serve_rtc(websocket, *, core, sessions, go2rtc, slots, source, viewer_
         transceiver = peer.addTransceiver("video", direction="sendonly")
         transceiver.setCodecPreferences([c for c in RTCRtpSender.getCapabilities("video").codecs
                                         if c.mimeType.lower() == "video/h264"])
+        if "m=audio" in sdp:
+            audio_transceiver = peer.addTransceiver("audio", direction="sendonly")
+            audio_caps = [c for c in RTCRtpSender.getCapabilities("audio").codecs if c.mimeType.lower() in ("audio/opus", "audio/pcmu", "audio/pcma")]
+            if audio_caps:
+                audio_transceiver.setCodecPreferences(audio_caps)
         await peer.setRemoteDescription(RTCSessionDescription(sdp=sdp, type="offer"))
-        track = await source.acquire(f"rtsp://127.0.0.1:{port}/{stream}")
+        v_track, a_track = await source.acquire(f"rtsp://127.0.0.1:{port}/{stream}")
         acquired = True
-        peer.addTrack(track)
+        peer.addTrack(v_track)
+        if a_track is not None and "m=audio" in sdp:
+            peer.addTrack(a_track)
         await peer.setLocalDescription(await peer.createAnswer())
         await websocket.send_json({"type": "answer", "sdp": peer.localDescription.sdp})
 

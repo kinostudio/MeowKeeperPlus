@@ -118,10 +118,48 @@
     if(!items.length){target.textContent=eventTab==="pending"?"最近事件沒有待確認項目。":"尚無事件紀錄。";return;}
     for(const item of items){
       const card=document.createElement("article");card.className="overview-event-card";
-      const heading=document.createElement("strong");heading.textContent=`${item.event_type||"事件"} · ${item.trigger_at?new Date(item.trigger_at).toLocaleTimeString("zh-TW"):"時間未確認"}`;card.append(heading);
-      if(item.snapshot_exists){const photo=document.createElement("img");photo.src=`/api/v1/events/${encodeURIComponent(item.event_id)}/snapshot`;photo.alt="事件當下影格，需人工確認";photo.loading="lazy";card.append(photo);}
-      const detail=document.createElement("p");detail.textContent=`身分：${item.pet_id&&item.pet_id!=="unknown"?item.pet_id+"（候選）":"尚未確認"}｜信心 ${number(item.confidence)}｜影片 ${item.clip_exists?"已保存":"尚未完成"}`;card.append(detail);
-      const button=document.createElement("button");button.className="button";button.textContent="確認貓咪與動作 →";button.addEventListener("click",()=>document.dispatchEvent(new CustomEvent("meowkeeper:review",{detail:item})));card.append(button);target.append(card);
+
+      // Formatted Title
+      let titleText = "發現貓咪";
+      if (Array.isArray(item.predicted_names) && item.predicted_names.length === 1) {
+        titleText = `發現 ${item.predicted_names[0]}`;
+      } else if (Array.isArray(item.predicted_names) && item.predicted_names.length > 1) {
+        titleText = `發現 ${item.predicted_names.join("、")}`;
+      } else if (item.pet_id && item.pet_id !== "unknown") {
+        titleText = `發現 ${item.pet_id}`;
+      } else if (item.event_type && item.event_type !== "cat_detected") {
+        titleText = "監控事件";
+      }
+      const timeStr = item.trigger_at ? new Date(item.trigger_at).toLocaleTimeString("zh-TW") : "時間未確認";
+      const heading=document.createElement("strong");heading.textContent=`${titleText} · ${timeStr}`;card.append(heading);
+
+      // Tag Badges
+      const tagsBox = document.createElement("div"); tagsBox.className = "event-tags-container";
+      if (item.has_local_ai) {
+        const localTag = document.createElement("span"); localTag.className = "event-tag tag-local-ai";
+        localTag.textContent = "🏷️ 本地辨識 (DINOv2)";
+        tagsBox.appendChild(localTag);
+      }
+      if (item.has_cloud_ai) {
+        const cloudTag = document.createElement("span"); cloudTag.className = "event-tag tag-cloud-ai";
+        cloudTag.textContent = "🏷️ 雲端辨識";
+        tagsBox.appendChild(cloudTag);
+      }
+      card.append(tagsBox);
+
+      if(item.snapshot_exists){const photo=document.createElement("img");photo.src=`/api/v1/events/${encodeURIComponent(item.event_id)}/snapshot`;photo.alt="事件當下影格";photo.loading="lazy";card.append(photo);}
+
+      let petDesc = "尚未確認";
+      if (Array.isArray(item.predicted_names) && item.predicted_names.length) {
+        petDesc = item.predicted_names.join("、");
+      } else if (item.pet_id && item.pet_id !== "unknown") {
+        petDesc = item.pet_id;
+      }
+      const scoreStr = item.confidence != null ? `${Math.round(item.confidence * 100)}%` : "未提供";
+      const posture = item.posture_zh ? `｜姿態：${item.posture_zh}` : "";
+      const detail=document.createElement("p");detail.textContent=`身分：${petDesc} (${scoreStr})${posture}｜影片 ${item.clip_exists?"已保存":"尚未完成"}`;card.append(detail);
+
+      const button=document.createElement("button");button.className="button";button.textContent="檢視詳情與覆核 →";button.addEventListener("click",()=>document.dispatchEvent(new CustomEvent("meowkeeper:review",{detail:item})));card.append(button);target.append(card);
     }
   }
   document.addEventListener("meowkeeper:events",event=>{recentEvents=event.detail;renderEvents();});

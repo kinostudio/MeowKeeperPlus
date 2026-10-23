@@ -1371,13 +1371,14 @@ def create_app(
 
         from PIL import Image
 
-        bounded_limit = max(1, min(60, int(limit)))
+        bounded_limit = max(1, min(120, int(limit)))
         registry = pet_registry()
         pets = [
             {"pet_id": p.pet_id, "display_name": p.display_name}
             for p in registry.list_pets(enabled_only=True)
         ]
         pet_names = {p["pet_id"]: p["display_name"] for p in pets}
+        target_pet_id = filter_mode.split(":", 1)[1] if filter_mode.startswith("pet:") else None
         with core.store._connection_lock:
             total_evidence = int(
                 core.store.connection.execute(
@@ -1389,16 +1390,30 @@ def create_app(
                     "SELECT COUNT(*) FROM identity_feedback_evidence WHERE learning_status = 'eligible'"
                 ).fetchone()[0]
             )
-            rows = core.store.connection.execute(
-                """SELECT e.event_id, e.crop_jpeg, e.captured_at, e.created_at, e.learning_status,
-                          e.feature_json IS NOT NULL AS has_feature,
-                          b.track_id, b.behavior_state, b.motion_state
-                   FROM identity_feedback_evidence e
-                   LEFT JOIN behavior_events b ON b.event_id = e.event_id
-                   WHERE e.learning_status NOT IN ('blurred', 'invalid_crop', 'checksum_failed')
-                   ORDER BY e.captured_at DESC
-                   LIMIT 120"""
-            ).fetchall()
+            if target_pet_id:
+                rows = core.store.connection.execute(
+                    """SELECT e.event_id, e.crop_jpeg, e.captured_at, e.created_at, e.learning_status,
+                              e.feature_json IS NOT NULL AS has_feature,
+                              b.track_id, b.behavior_state, b.motion_state
+                       FROM identity_feedback_evidence e
+                       JOIN behavior_event_annotations a ON a.event_id = e.event_id AND a.dimension = 'identity' AND a.label = ?
+                       LEFT JOIN behavior_events b ON b.event_id = e.event_id
+                       WHERE e.learning_status NOT IN ('blurred', 'invalid_crop', 'checksum_failed')
+                       ORDER BY e.captured_at DESC
+                       LIMIT 120""",
+                    (target_pet_id,),
+                ).fetchall()
+            else:
+                rows = core.store.connection.execute(
+                    """SELECT e.event_id, e.crop_jpeg, e.captured_at, e.created_at, e.learning_status,
+                              e.feature_json IS NOT NULL AS has_feature,
+                              b.track_id, b.behavior_state, b.motion_state
+                       FROM identity_feedback_evidence e
+                       LEFT JOIN behavior_events b ON b.event_id = e.event_id
+                       WHERE e.learning_status NOT IN ('blurred', 'invalid_crop', 'checksum_failed')
+                       ORDER BY e.captured_at DESC
+                       LIMIT 120"""
+                ).fetchall()
             event_ids = [r["event_id"] for r in rows]
             annotations_by_event: dict[str, list[Any]] = {}
             ai_candidates_by_event: dict[str, list[dict[str, Any]]] = {}
@@ -1467,6 +1482,8 @@ def create_app(
                         r.get("learning_consent") and r.get("identity") == assigned_pet_id
                         for r in by_rev.values()
                     )
+            if target_pet_id and assigned_pet_id != target_pet_id:
+                continue
             if filter_mode == "unlabeled" and assigned_pet_id is not None:
                 continue
             if filter_mode == "enrolled" and (assigned_pet_id is None or assigned_pet_id == "not_cat"):
@@ -1652,6 +1669,112 @@ def create_app(
             "learning": learning,
             "pets": [pet_payload(p, job=pet_job(p.pet_id)) for p in registry.list_pets()],
             "message_zh_tw": "已成功刪除此軌跡截圖，並同步更新特徵庫。",
+        }
+
+    @app.post("/api/v1/pets/track-candidates/batch")
+    def pets_track_candidates_batch(
+        request: Request,
+        body: Any = Body(default=None),  # noqa: B008
+    ) -> dict[str, Any]:
+        """批次更新或刪除近期攝影機軌跡截圖，並在結束時一次性同步寫入 feedback_embeddings.npz。"""
+        require_mutation(request)
+        if core.store is None:
+            raise HTTPException(status_code=503, detail="事件資料庫尚未接入。")
+        payload = json_body(body)
+        operations = payload.get("operations", [])
+        if not isinstance(operations, list) or not operations:
+            raise HTTPException(status_code=422, detail="批次操作清單不可為空。")
+
+        reviewer = web_reviewer_ref(request)
+        registry = pet_registry()
+        enabled_pets = {p.pet_id: p.display_name for p in registry.list_pets(enabled_only=True)}
+
+        def apply_batch() -> None:
+            for op in operations:
+                if not isinstance(op, dict):
+                    continue
+                action = str(op.get("action") or "").strip()
+                event_id = str(op.get("event_id") or "").strip()
+                if not event_id:
+                    continue
+
+                if action == "delete":
+                    core.store.connection.execute(
+                        "DELETE FROM identity_feedback_evidence WHERE event_id=?",
+                        (event_id,),
+                    )
+                    core.store.connection.execute(
+                        "DELETE FROM behavior_event_annotations WHERE event_id=?",
+                        (event_id,),
+                    )
+                    core.store.connection.execute(
+                        "UPDATE behavior_events SET identity_status='unknown', pet_id=NULL WHERE event_id=?",
+                        (event_id,),
+                    )
+                elif action in ("assign", "clear"):
+                    pet_id = str(op.get("pet_id") or "").strip()
+                    existing_be = core.store.connection.execute(
+                        "SELECT 1 FROM behavior_events WHERE event_id=?",
+                        (event_id,),
+                    ).fetchone()
+                    if existing_be is None:
+                        ev_row = core.store.connection.execute(
+                            "SELECT captured_at FROM identity_feedback_evidence WHERE event_id=?",
+                            (event_id,),
+                        ).fetchone()
+                        captured = str((ev_row["captured_at"] if ev_row else None) or datetime.now(timezone.utc).isoformat())
+                        core.store.connection.execute(
+                            """INSERT OR IGNORE INTO behavior_events(
+                                   event_id, pet_id, track_id, behavior_state, motion_state,
+                                   event_tags, started_at, ended_at, duration_seconds,
+                                   raw_confidence, smoothed_confidence, inference_method,
+                                   model_version, rule_profile_version, source_id, camera_preset
+                               ) VALUES (?, NULL, 'camera', 'resting', 'stationary', '[]', ?, ?, 0.0, 0.8, 0.8, 'rule', 'v02', 'v02', 'camera', NULL)""",
+                            (event_id, captured, captured),
+                        )
+                    core.store.connection.execute(
+                        "DELETE FROM behavior_event_annotations WHERE event_id=? AND dimension IN ('cat_presence', 'identity')",
+                        (event_id,),
+                    )
+                    if pet_id == "clear" or action == "clear":
+                        core.store.connection.execute(
+                            "UPDATE identity_feedback_evidence SET learning_status='pending' WHERE event_id=?",
+                            (event_id,),
+                        )
+                    elif pet_id == "not_cat":
+                        core.store.connection.execute(
+                            """INSERT INTO behavior_event_annotations(event_id, reviewer_ref, dimension, label, learning_consent)
+                               VALUES (?, ?, 'cat_presence', 'not_cat', 0)""",
+                            (event_id, reviewer),
+                        )
+                        core.store.connection.execute(
+                            "UPDATE identity_feedback_evidence SET learning_status='unconfirmed_or_conflicting' WHERE event_id=?",
+                            (event_id,),
+                        )
+                    elif pet_id in enabled_pets:
+                        core.store.connection.execute(
+                            """INSERT INTO behavior_event_annotations(event_id, reviewer_ref, dimension, label, learning_consent)
+                               VALUES (?, ?, 'cat_presence', 'cat', 0)""",
+                            (event_id, reviewer),
+                        )
+                        core.store.connection.execute(
+                            """INSERT INTO behavior_event_annotations(event_id, reviewer_ref, dimension, label, learning_consent)
+                               VALUES (?, ?, 'identity', ?, 1)""",
+                            (event_id, reviewer, pet_id),
+                        )
+                        core.store.connection.execute(
+                            "UPDATE identity_feedback_evidence SET created_at=CURRENT_TIMESTAMP WHERE event_id=?",
+                            (event_id,),
+                        )
+
+        core.store._transaction(apply_batch)
+        learning = sync_feedback_learning(max_new_samples=64, upgrade_pending_consent=True)
+        return {
+            "status": "batch_applied",
+            "operations_count": len(operations),
+            "learning": learning,
+            "pets": [pet_payload(p, job=pet_job(p.pet_id)) for p in registry.list_pets()],
+            "message_zh_tw": f"已成功批次套用 {len(operations)} 筆軌跡變更，並同步更新特徵庫！",
         }
 
     @app.post("/api/v1/pets")

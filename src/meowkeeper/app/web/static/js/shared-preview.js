@@ -88,13 +88,14 @@
     audioButton.addEventListener("click", () => {
       audioEnabled = !audioEnabled;
       video.muted = !audioEnabled;
+      if (audioEnabled) video.volume = 1.0;
       updateAudioButton();
       if (audioEnabled) {
         if (mode === "smooth") {
           video.play?.().catch?.(() => {});
           say("已開啟即時現場收音。");
         } else {
-          say("已開啟現場收音；請切換至「流暢」連續播放模式以收聽現場聲音。");
+          say("已開啟現場收音；請切換至「流暢」模式收聽聲音。");
         }
       } else {
         video.muted = true;
@@ -102,67 +103,7 @@
       }
     });
 
-    const fsEnterSvg = '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/></svg>';
-    const fsExitSvg = '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3v3a2 2 0 0 1-2 2H3m18 0h-3a2 2 0 0 1-2-2V3m0 18v-3a2 2 0 0 1 2-2h3M3 16h3a2 2 0 0 1 2 2v3"/></svg>';
 
-    const fullscreenButton = document.createElement("button");
-    fullscreenButton.type = "button";
-    fullscreenButton.className = "preview-mode-button preview-mode-select preview-fullscreen-toggle";
-    fullscreenButton.dataset.previewControl = "fullscreen";
-    fullscreenButton.setAttribute("aria-pressed", "false");
-    const fsTooltipId = `preview-fullscreen-tooltip-${scope}`;
-    fullscreenButton.setAttribute("aria-describedby", fsTooltipId);
-
-    const fsIcon = document.createElement("span");
-    fsIcon.className = "preview-mode-icon";
-    fsIcon.setAttribute("aria-hidden", "true");
-
-    const fsTooltip = document.createElement("span");
-    fsTooltip.id = fsTooltipId;
-    fsTooltip.className = "preview-mode-tooltip";
-    fsTooltip.setAttribute("role", "tooltip");
-
-    function isCurrentFullscreen() {
-      const el = document.fullscreenElement || document.webkitFullscreenElement;
-      return Boolean(el && (el === stage || stage.contains(el)));
-    }
-
-    function updateFullscreenButton() {
-      const active = isCurrentFullscreen();
-      fullscreenButton.setAttribute("aria-pressed", String(active));
-      if (active) {
-        fullscreenButton.setAttribute("aria-label", "退出全螢幕：返回一般視窗檢視");
-        fsTooltip.textContent = "退出全螢幕｜點擊返回一般視窗畫面";
-        fsIcon.innerHTML = fsExitSvg;
-      } else {
-        fullscreenButton.setAttribute("aria-label", "全螢幕：展開預覽畫面為全螢幕檢視");
-        fsTooltip.textContent = "全螢幕｜點擊將即時預覽畫面切換為全螢幕";
-        fsIcon.innerHTML = fsEnterSvg;
-      }
-    }
-    updateFullscreenButton();
-    fullscreenButton.append(fsIcon, fsTooltip);
-    hud.append(fullscreenButton);
-
-    async function toggleFullscreen() {
-      try {
-        if (isCurrentFullscreen()) {
-          if (document.exitFullscreen) await document.exitFullscreen();
-          else if (document.webkitExitFullscreen) await document.webkitExitFullscreen();
-        } else {
-          if (stage.requestFullscreen) await stage.requestFullscreen();
-          else if (stage.webkitRequestFullscreen) await stage.webkitRequestFullscreen();
-          else if (video.requestFullscreen) await video.requestFullscreen();
-        }
-      } catch (_) {
-        say("瀏覽器拒絕全螢幕；請確認瀏覽器全螢幕權限。");
-      } finally {
-        updateFullscreenButton();
-      }
-    }
-    fullscreenButton.addEventListener("click", toggleFullscreen);
-    document.addEventListener("fullscreenchange", updateFullscreenButton);
-    if ("onwebkitfullscreenchange" in document) document.addEventListener("webkitfullscreenchange", updateFullscreenButton);
 
     const stats = document.createElement("div");
     stats.className = "preview-mode-stats";

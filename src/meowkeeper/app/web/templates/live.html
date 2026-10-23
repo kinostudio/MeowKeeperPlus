@@ -256,20 +256,43 @@
   let verifiedSourceMetadata = null;
   let qualitySwitchAvailable = false;
 
+  function isFsActive() {
+    return Boolean(
+      document.fullscreenElement ||
+      document.webkitFullscreenElement ||
+      previewStage?.classList.contains("is-mobile-fullscreen")
+    );
+  }
+
   function updateFullscreenAvailability() {
     if (!fullscreenButton) return;
     const displaying = sharedPreview?.isDisplaying() || (!image.hidden && Boolean(image.src));
-    fullscreenButton.disabled = !displaying || !(document.fullscreenEnabled || previewStage?.requestFullscreen);
-    fullscreenButton.textContent = document.fullscreenElement === previewStage ? "退出全螢幕" : "全螢幕";
+    fullscreenButton.disabled = !displaying;
+    fullscreenButton.textContent = isFsActive() ? "退出全螢幕" : "全螢幕";
   }
 
   async function toggleFullscreen() {
-    if (!previewStage || !(sharedPreview?.isDisplaying() || (!image.hidden && image.src))) return;
+    if (!previewStage) return;
     try {
-      if (document.fullscreenElement) await document.exitFullscreen();
-      else if (previewStage.requestFullscreen) await previewStage.requestFullscreen();
+      if (previewStage.classList.contains("is-mobile-fullscreen")) {
+        previewStage.classList.remove("is-mobile-fullscreen");
+        document.body.classList.remove("is-mobile-fullscreen-active");
+      } else if (document.fullscreenElement || document.webkitFullscreenElement) {
+        if (document.exitFullscreen) await document.exitFullscreen();
+        else if (document.webkitExitFullscreen) await document.webkitExitFullscreen();
+      } else {
+        if (previewStage.requestFullscreen) {
+          await previewStage.requestFullscreen();
+        } else if (previewStage.webkitRequestFullscreen) {
+          await previewStage.webkitRequestFullscreen();
+        } else {
+          previewStage.classList.add("is-mobile-fullscreen");
+          document.body.classList.add("is-mobile-fullscreen-active");
+        }
+      }
     } catch (_) {
-      message.textContent = "瀏覽器拒絕全螢幕；請使用瀏覽器的全螢幕權限。";
+      previewStage.classList.toggle("is-mobile-fullscreen");
+      document.body.classList.toggle("is-mobile-fullscreen-active", previewStage.classList.contains("is-mobile-fullscreen"));
     } finally {
       updateFullscreenAvailability();
     }
@@ -277,6 +300,14 @@
 
   fullscreenButton?.addEventListener("click", toggleFullscreen);
   document.addEventListener("fullscreenchange", updateFullscreenAvailability);
+  if ("onwebkitfullscreenchange" in document) document.addEventListener("webkitfullscreenchange", updateFullscreenAvailability);
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && previewStage?.classList.contains("is-mobile-fullscreen")) {
+      previewStage.classList.remove("is-mobile-fullscreen");
+      document.body.classList.remove("is-mobile-fullscreen-active");
+      updateFullscreenAvailability();
+    }
+  });
 
   function setMetadata(data) {
     if(data?.source_epoch!==undefined&&data.source_epoch!==null){

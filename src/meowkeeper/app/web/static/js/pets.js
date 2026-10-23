@@ -99,13 +99,43 @@
   const trackStatus = document.getElementById("pet-track-candidates-status");
   const trackMessage = document.getElementById("pet-track-candidates-message");
   const trackReload = document.getElementById("pet-track-candidates-reload");
+  const trackSave = document.getElementById("pet-track-candidates-save");
+  const trackCancel = document.getElementById("pet-track-candidates-cancel");
+  const trackBatchDeleteAll = document.getElementById("pet-track-batch-delete-all");
+  const trackDynamicFilters = document.getElementById("pet-track-dynamic-filters");
   let trackFilter = "all";
   let trackCandidatesData = { items: [], pets: [] };
+  const stagedActions = new Map(); // eventId -> { action: 'assign'|'delete'|'clear', petId, petName, trackId }
 
   function formatTrackTime(iso) {
     if (!iso) return "時間未知";
     const parsed = new Date(iso);
     return Number.isNaN(parsed.getTime()) ? String(iso) : parsed.toLocaleString();
+  }
+
+  function updateSaveButton() {
+    const count = stagedActions.size;
+    if (trackSave) {
+      trackSave.disabled = count === 0;
+      trackSave.textContent = count > 0 ? `更新變更 (${count} 筆待套用)` : "更新變更";
+    }
+    if (trackCancel) {
+      trackCancel.style.display = count > 0 ? "" : "none";
+    }
+  }
+
+  function renderDynamicFilters() {
+    if (!trackDynamicFilters) return;
+    const pets = Array.isArray(trackCandidatesData.pets) ? trackCandidatesData.pets : [];
+    trackDynamicFilters.innerHTML = pets.map((pet) => {
+      const active = trackFilter === `pet:${pet.pet_id}`;
+      return `<button type="button" class="button secondary ${active ? "is-active" : ""}" data-track-filter="pet:${escapeHtml(pet.pet_id)}">已入庫：${escapeHtml(pet.display_name)}</button>`;
+    }).join("");
+    trackDynamicFilters.querySelectorAll("[data-track-filter]").forEach((button) => {
+      button.addEventListener("click", () => {
+        setTrackFilter(button.dataset.trackFilter);
+      });
+    });
   }
 
   function renderTrackCandidates() {
@@ -116,34 +146,75 @@
     const isNotCat = (item) => item.assigned_pet_id === "not_cat" || item.annotated_identity === "not_cat";
     const enrolledCount = allItems.filter(isEnrolled).length;
     const unlabeledCount = allItems.filter((item) => !item.assigned_pet_id && !isNotCat(item)).length;
+
     if (trackStatus) {
       trackStatus.textContent = `清晰截圖 ${allItems.length} 張｜已入庫 ${enrolledCount} 張｜待標註 ${unlabeledCount} 張`;
       trackStatus.className = `status-pill ${enrolledCount > 0 ? "status-ok" : "status-info"}`;
     }
+
     const filtered = allItems.filter((item) => {
+      if (trackFilter.startsWith("pet:")) {
+        const pId = trackFilter.split(":")[1];
+        const staged = stagedActions.get(item.event_id);
+        if (staged) {
+          if (staged.action === "delete") return true;
+          return staged.petId === pId;
+        }
+        return item.assigned_pet_id === pId;
+      }
       if (trackFilter === "unlabeled") return !item.assigned_pet_id && !isNotCat(item);
       if (trackFilter === "enrolled") return Boolean(isEnrolled(item) || (item.assigned_pet_id && !isNotCat(item)));
       return true;
     });
+
+    if (trackBatchDeleteAll) {
+      trackBatchDeleteAll.style.display = filtered.length > 0 ? "" : "none";
+    }
+
     if (!filtered.length) {
-      trackGrid.innerHTML = `<p class="muted">${allItems.length ? "此篩選條件下尚無截圖，可切換上方篩選查看全部近期截圖。" : "目前尚無符合清晰度條件（單貓、≥96px、非模糊）的近期攝影機軌跡截圖。"}</p>`;
+      trackGrid.innerHTML = `<p class="muted">${allItems.length ? "此篩選條件下尚無截圖，可切換上方篩選查看其他截圖。" : "目前尚無符合清晰度條件（單貓、≥96px、非模糊）的近期攝影機軌跡截圖。"}</p>`;
       return;
     }
     if (!pets.length) {
       trackGrid.innerHTML = '<p class="muted">請先在上方登錄至少一隻貓咪，即可從近期攝影機截圖一鍵指定身分並加入特徵庫。</p>';
       return;
     }
+
     trackGrid.innerHTML = filtered.map((item) => {
-      const assignedPet = pets.find((pet) => pet.pet_id === item.assigned_pet_id);
+      const eid = item.event_id;
+      const staged = stagedActions.get(eid);
+      const assignedPet = pets.find((pet) => pet.pet_id === (staged?.petId || item.assigned_pet_id));
       const enrolled = isEnrolled(item);
-      const notCat = isNotCat(item);
-      const badgeHtml = notCat
-        ? '<span class="status-pill status-warn">🚫 已標記非貓／略過</span>'
-        : enrolled && assignedPet
-          ? `<span class="status-pill status-ok">✅ 已入庫特徵：${escapeHtml(assignedPet.display_name)}</span>`
-          : assignedPet
-            ? `<span class="status-pill status-info">📌 已標註：${escapeHtml(assignedPet.display_name)}</span>`
-            : '<span class="status-pill status-unknown">⏳ 待標註</span>';
+      const notCat = staged ? staged.petId === "not_cat" : isNotCat(item);
+
+      let cardClass = "track-candidate-card";
+      let badgeHtml = "";
+
+      if (staged) {
+        if (staged.action === "delete") {
+          cardClass += " is-staged-delete";
+          badgeHtml = '<span class="status-pill status-warn">🗑️ [待儲存] 標記刪除</span>';
+        } else if (staged.action === "clear") {
+          cardClass += " is-staged-clear";
+          badgeHtml = '<span class="status-pill status-unknown">⏳ [待儲存] 清除標註</span>';
+        } else if (staged.petId === "not_cat") {
+          cardClass += " is-staged-assign";
+          badgeHtml = '<span class="status-pill status-warn">🚫 [待儲存] 標記非貓</span>';
+        } else if (assignedPet) {
+          cardClass += " is-staged-assign";
+          badgeHtml = `<span class="status-pill status-info">📌 [待儲存] 設為：${escapeHtml(assignedPet.display_name)}</span>`;
+        }
+      } else {
+        if (enrolled) cardClass += " is-enrolled";
+        badgeHtml = notCat
+          ? '<span class="status-pill status-warn">🚫 已標記非貓／略過</span>'
+          : enrolled && assignedPet
+            ? `<span class="status-pill status-ok">✅ 已入庫特徵：${escapeHtml(assignedPet.display_name)}</span>`
+            : assignedPet
+              ? `<span class="status-pill status-info">📌 已標註：${escapeHtml(assignedPet.display_name)}</span>`
+              : '<span class="status-pill status-unknown">⏳ 待標註</span>';
+      }
+
       const topAi = Array.isArray(item.ai_candidates) && item.ai_candidates.length ? item.ai_candidates[0] : null;
       const candName = topAi ? topAi.name : item.candidate_pet_name;
       const candScore = topAi ? topAi.score : item.candidate_confidence;
@@ -151,21 +222,26 @@
         ? `AI 候選：${escapeHtml(candName)}${candScore != null ? ` (${Math.round(Number(candScore) * 100)}%)` : ""}`
         : "AI 候選：尚未確認";
       const trackIdVal = item.track_id || "track_01";
+      const currentAssignedId = staged?.petId || item.assigned_pet_id;
+
       const petButtons = pets.map((pet) => {
-        const isCurrent = item.assigned_pet_id === pet.pet_id;
-        return `<button type="button" class="button ${isCurrent ? "" : "secondary"} track-assign-btn" data-event-id="${encodeURIComponent(item.event_id)}" data-track-id="${encodeURIComponent(trackIdVal)}" data-pet-id="${encodeURIComponent(pet.pet_id)}">${isCurrent ? `✓ 已設為 ${escapeHtml(pet.display_name)}` : `➕ 設為 ${escapeHtml(pet.display_name)}`}</button>`;
+        const isCurrent = currentAssignedId === pet.pet_id;
+        return `<button type="button" class="button ${isCurrent ? "" : "secondary"} track-assign-btn" data-event-id="${encodeURIComponent(eid)}" data-track-id="${encodeURIComponent(trackIdVal)}" data-pet-id="${encodeURIComponent(pet.pet_id)}" data-pet-name="${escapeHtml(pet.display_name)}">${isCurrent ? `✓ 已設為 ${escapeHtml(pet.display_name)}` : `➕ 設為 ${escapeHtml(pet.display_name)}`}</button>`;
       }).join("");
-      const extraButtons = `<button type="button" class="button secondary track-assign-btn" data-event-id="${encodeURIComponent(item.event_id)}" data-track-id="${encodeURIComponent(trackIdVal)}" data-pet-id="not_cat" title="標記為非貓或略過此截圖">🚫 非貓／略過</button>`
-        + `<button type="button" class="button secondary track-delete-btn" data-event-id="${encodeURIComponent(item.event_id)}" title="刪除此截圖（若雙貓重疊或模糊樣本建議刪除以防特徵污染）">🗑️ 刪除截圖</button>`
-        + ((item.assigned_pet_id || notCat)
-          ? `<button type="button" class="button secondary track-assign-btn" data-event-id="${encodeURIComponent(item.event_id)}" data-track-id="${encodeURIComponent(trackIdVal)}" data-pet-id="clear" title="清除標註並撤回此筆特徵">清除</button>`
+
+      const isDeleteStaged = staged?.action === "delete";
+      const extraButtons = `<button type="button" class="button secondary track-assign-btn" data-event-id="${encodeURIComponent(eid)}" data-track-id="${encodeURIComponent(trackIdVal)}" data-pet-id="not_cat" data-pet-name="非貓" title="標記為非貓或略過此截圖">🚫 非貓</button>`
+        + `<button type="button" class="button secondary track-delete-btn" data-event-id="${encodeURIComponent(eid)}" title="刪除此截圖">${isDeleteStaged ? "↩️ 復原刪除" : "🗑️ 刪除截圖"}</button>`
+        + ((currentAssignedId || notCat)
+          ? `<button type="button" class="button secondary track-assign-btn" data-event-id="${encodeURIComponent(eid)}" data-track-id="${encodeURIComponent(trackIdVal)}" data-pet-id="clear" data-pet-name="清除" title="清除標註並撤回此筆特徵">清除</button>`
           : "");
       const widthVal = Number(item.width || item.crop_width || 0);
       const heightVal = Number(item.height || item.crop_height || 0);
       const timeVal = item.captured_at || item.trigger_at;
-      return `<article class="track-candidate-card ${enrolled ? "is-enrolled" : ""}">`
+
+      return `<article class="${cardClass}" data-event-id="${encodeURIComponent(eid)}">`
         + `<div class="track-candidate-media">`
-        + `<img src="${escapeHtml(item.crop_url)}" alt="事件 ${escapeHtml(item.event_id)} 軌跡截圖" loading="lazy">`
+        + `<img src="${escapeHtml(item.crop_url)}" alt="事件 ${escapeHtml(eid)} 軌跡截圖" loading="lazy">`
         + `<div class="track-candidate-badge">${badgeHtml}</div>`
         + `</div>`
         + `<div class="track-candidate-body">`
@@ -178,17 +254,48 @@
     }).join("");
 
     trackGrid.querySelectorAll(".track-assign-btn").forEach((button) => {
-      button.addEventListener("click", () => assignTrackCandidate(button));
+      button.addEventListener("click", () => stageAssign(button));
     });
     trackGrid.querySelectorAll(".track-delete-btn").forEach((button) => {
-      button.addEventListener("click", () => deleteTrackCandidate(button));
+      button.addEventListener("click", () => stageDelete(button));
     });
+    updateSaveButton();
+  }
+
+  function stageAssign(button) {
+    const eventId = decodeURIComponent(button.dataset.eventId || "");
+    const trackId = decodeURIComponent(button.dataset.trackId || "");
+    const petId = decodeURIComponent(button.dataset.petId || "");
+    const petName = button.dataset.petName || "";
+    if (!eventId || !petId) return;
+
+    if (petId === "clear") {
+      stagedActions.set(eventId, { action: "clear", petId: "clear", trackId });
+    } else {
+      stagedActions.set(eventId, { action: "assign", petId, petName, trackId });
+    }
+    renderTrackCandidates();
+    if (trackMessage) trackMessage.textContent = `已暫存變更：設為「${petName}」。請點擊上方「更新變更」一次性儲存。`;
+  }
+
+  function stageDelete(button) {
+    const eventId = decodeURIComponent(button.dataset.eventId || "");
+    if (!eventId) return;
+    if (stagedActions.get(eventId)?.action === "delete") {
+      stagedActions.delete(eventId);
+      if (trackMessage) trackMessage.textContent = "已復原此截圖刪除標記。";
+    } else {
+      stagedActions.set(eventId, { action: "delete" });
+      if (trackMessage) trackMessage.textContent = "已標記刪除此截圖。請點擊上方「更新變更」一次性儲存。";
+    }
+    renderTrackCandidates();
   }
 
   async function loadTrackCandidates() {
     if (!trackGrid) return;
     try {
-      const response = await fetch("/api/v1/pets/track-candidates?limit=36", {
+      const url = `/api/v1/pets/track-candidates?limit=120&filter_mode=${encodeURIComponent(trackFilter)}`;
+      const response = await fetch(url, {
         cache: "no-store",
         headers: { Accept: "application/json" },
       });
@@ -198,6 +305,7 @@
         items: Array.isArray(data.items) ? data.items : [],
         pets: Array.isArray(data.pets) ? data.pets : [],
       };
+      renderDynamicFilters();
       renderTrackCandidates();
     } catch (error) {
       if (trackStatus) trackStatus.textContent = "讀取失敗";
@@ -205,72 +313,81 @@
     }
   }
 
-  async function deleteTrackCandidate(button) {
-    const eventId = decodeURIComponent(button.dataset.eventId || "");
-    if (!eventId) return;
-    const card = button.closest(".track-candidate-card");
-    if (!confirm("確定要刪除這張攝影機軌跡截圖嗎？此動作會將其自候選與特徵庫中完全刪除。")) return;
-    if (card) card.querySelectorAll("button").forEach((btn) => { btn.disabled = true; });
-    if (trackMessage) trackMessage.textContent = "正在刪除軌跡截圖並同步特徵庫…";
-    try {
-      const response = await fetch(`/api/v1/pets/track-candidates/${encodeURIComponent(eventId)}`, {
-        method: "DELETE",
-        headers: {
-          "X-MeowKeeper-CSRF": csrfToken(),
-          Accept: "application/json",
-        },
-      });
-      const data = await response.json();
-      if (!response.ok) throw new Error(data.detail || "刪除截圖失敗。");
-      if (trackMessage) trackMessage.textContent = data.message_zh_tw || "已刪除此軌跡截圖。";
-      await Promise.all([loadTrackCandidates(), load()]);
-    } catch (error) {
-      if (trackMessage) trackMessage.textContent = error.message;
-      if (card) card.querySelectorAll("button").forEach((btn) => { btn.disabled = false; });
-    }
+  function setTrackFilter(mode) {
+    trackFilter = mode || "all";
+    document.querySelectorAll("[data-track-filter]").forEach((btn) => {
+      btn.classList.toggle("is-active", btn.dataset.trackFilter === trackFilter);
+    });
+    loadTrackCandidates();
   }
 
-  async function assignTrackCandidate(button) {
-    const eventId = decodeURIComponent(button.dataset.eventId || "");
-    const trackId = decodeURIComponent(button.dataset.trackId || "");
-    const petId = decodeURIComponent(button.dataset.petId || "");
-    if (!eventId || !trackId || !petId) return;
-    const card = button.closest(".track-candidate-card");
-    if (card) card.querySelectorAll("button").forEach((btn) => { btn.disabled = true; });
-    if (trackMessage) trackMessage.textContent = "正在更新軌跡身分並同步提取 DINOv2 特徵向量…";
+  async function saveBatch() {
+    if (!stagedActions.size) return;
+    if (trackSave) trackSave.disabled = true;
+    if (trackCancel) trackCancel.disabled = true;
+    if (trackMessage) trackMessage.textContent = `正在批次套用 ${stagedActions.size} 筆軌跡變更並更新 DINOv2 特徵庫…`;
+
+    const operations = Array.from(stagedActions.entries()).map(([eventId, op]) => ({
+      event_id: eventId,
+      ...op,
+    }));
+
     try {
-      const response = await fetch(`/api/v1/pets/track-candidates/${encodeURIComponent(eventId)}/assign`, {
+      const response = await fetch("/api/v1/pets/track-candidates/batch", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
           "X-MeowKeeper-CSRF": csrfToken(),
           Accept: "application/json",
         },
-        body: JSON.stringify({ track_id: trackId, pet_id: petId }),
+        body: JSON.stringify({ operations }),
       });
       const data = await response.json();
-      if (!response.ok) throw new Error(data.detail || "設定軌跡特徵失敗。");
-      if (trackMessage) trackMessage.textContent = data.message_zh_tw || "已更新軌跡特徵。";
+      if (!response.ok) throw new Error(data.detail || "批次更新失敗。");
+      stagedActions.clear();
+      if (trackMessage) trackMessage.textContent = data.message_zh_tw || "已成功批次更新特徵庫！";
       await Promise.all([loadTrackCandidates(), load()]);
     } catch (error) {
       if (trackMessage) trackMessage.textContent = error.message;
-      if (card) card.querySelectorAll("button").forEach((btn) => { btn.disabled = false; });
+    } finally {
+      if (trackSave) trackSave.disabled = stagedActions.size === 0;
+      if (trackCancel) trackCancel.disabled = false;
     }
   }
 
   document.querySelectorAll("[data-track-filter]").forEach((button) => {
     button.addEventListener("click", () => {
-      trackFilter = button.dataset.trackFilter || "all";
-      document.querySelectorAll("[data-track-filter]").forEach((btn) => btn.classList.toggle("is-active", btn === button));
-      renderTrackCandidates();
+      setTrackFilter(button.dataset.trackFilter);
     });
   });
+
   if (trackReload) {
     trackReload.addEventListener("click", () => {
       if (trackMessage) trackMessage.textContent = "正在重新載入近期攝影機軌跡截圖…";
       loadTrackCandidates().then(() => {
         if (trackMessage) trackMessage.textContent = "已更新近期軌跡截圖清單。";
       });
+    });
+  }
+
+  if (trackSave) trackSave.addEventListener("click", saveBatch);
+  if (trackCancel) {
+    trackCancel.addEventListener("click", () => {
+      stagedActions.clear();
+      renderTrackCandidates();
+      if (trackMessage) trackMessage.textContent = "已放棄所有尚未儲存的暫存變更。";
+    });
+  }
+  if (trackBatchDeleteAll) {
+    trackBatchDeleteAll.addEventListener("click", () => {
+      const allItems = Array.isArray(trackCandidatesData.items) ? trackCandidatesData.items : [];
+      if (!allItems.length) return;
+      if (!confirm(`確定要將目前篩選檢視下的 ${allItems.length} 張截圖全部標記為刪除嗎？\n（需再點擊「更新變更」才會真正寫入資料庫與撤回特徵庫）`)) return;
+      allItems.forEach((item) => {
+        stagedActions.set(item.event_id, { action: "delete" });
+      });
+      renderTrackCandidates();
+      if (trackMessage) trackMessage.textContent = `已將目前檢視下的 ${allItems.length} 張截圖標記為刪除。請點擊「更新變更」執行。`;
     });
   }
 

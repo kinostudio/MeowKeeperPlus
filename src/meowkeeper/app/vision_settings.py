@@ -51,7 +51,7 @@ LEGACY_QUALITY_DEFAULTS_V5 = {
 }
 PROFILE_FIELDS = (*QUOTA_FIELDS, *QUALITY_FIELDS)
 DEFAULTS = {"schema_version": 7, "provider_id": "openai_compatible", "endpoint": "", "model_id": "",
-            "enabled": False, "json_object_supported": False, "grace_seconds": 5,
+            "enabled": False, "json_object_supported": False, "grace_seconds": 0,
             "consent_reference": None, "consent_at": None,
             "scene_reference_consent_reference": None, "scene_reference_consent_at": None,
             **QUOTA_DEFAULTS, **QUALITY_DEFAULTS,

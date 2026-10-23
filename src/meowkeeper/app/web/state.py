@@ -358,6 +358,84 @@ class CoreStateFacade:
             item["has_human_review"] = bool(item.get("has_human_review", False))
             item["clip_size_bytes"] = item.get("clip_size_bytes") or (candidate.stat().st_size if candidate else None)
             items.append(item)
+
+        if items and self.store is not None:
+            event_ids = [it["event_id"] for it in items]
+            placeholders = ",".join("?" for _ in event_ids)
+            with self.store._connection_lock:
+                inf_rows = self.store.connection.execute(
+                    f"SELECT event_id, note FROM identity_inference_history WHERE event_id IN ({placeholders}) AND note LIKE '%identity_evidence_v1%' ORDER BY id DESC",
+                    event_ids,
+                ).fetchall()
+                cloud_rows = self.store.connection.execute(
+                    f"SELECT event_id, status FROM event_semantic_candidates WHERE event_id IN ({placeholders})",
+                    event_ids,
+                ).fetchall()
+                beh_rows = self.store.connection.execute(
+                    f"SELECT event_id, pet_id, behavior_state, motion_state FROM behavior_events WHERE event_id IN ({placeholders})",
+                    event_ids,
+                ).fetchall()
+
+            import json
+            inf_by_id = {}
+            for r in inf_rows:
+                eid = r["event_id"]
+                if eid in inf_by_id:
+                    continue
+                try:
+                    inf_by_id[eid] = json.loads(r["note"])
+                except Exception:
+                    pass
+
+            cloud_by_id = {r["event_id"]: r["status"] for r in cloud_rows}
+            beh_by_id = {r["event_id"]: dict(r) for r in beh_rows}
+
+            pet_display_names = {}
+            try:
+                from meowkeeper.core.identity.pet_registry import PetRegistry
+                reg = PetRegistry(self.event_directory.parent / "pets")
+                pet_display_names = {pet.pet_id: pet.display_name for pet in reg.list_pets()}
+            except Exception:
+                pass
+
+            for it in items:
+                eid = it["event_id"]
+                local_data = inf_by_id.get(eid)
+                beh_data = beh_by_id.get(eid)
+                cloud_status = cloud_by_id.get(eid)
+
+                it["has_local_ai"] = bool(local_data or beh_data)
+                it["has_cloud_ai"] = bool(cloud_status and cloud_status not in ("not_requested", None))
+                it["cloud_status"] = cloud_status
+
+                # Map candidate pet names
+                predicted_names = []
+                candidates = []
+                posture_zh = None
+                if local_data and isinstance(local_data, dict):
+                    cands = local_data.get("candidates", [])
+                    if isinstance(cands, list):
+                        for c in cands:
+                            if isinstance(c, dict) and c.get("name"):
+                                p_id = c.get("pet_id")
+                                name = pet_display_names.get(p_id, c.get("name"))
+                                score = float(c.get("pet_score") or c.get("score") or 0.0)
+                                candidates.append({"pet_id": p_id, "name": name, "score": round(score, 3)})
+                                if score >= 0.65 and name not in predicted_names:
+                                    predicted_names.append(name)
+                    pred_name = local_data.get("predicted_name")
+                    if pred_name and pred_name not in predicted_names and float(local_data.get("similarity") or 0) >= 0.65:
+                        predicted_names.insert(0, pred_name)
+                    posture_zh = local_data.get("posture", {}).get("label_zh")
+
+                if not predicted_names and it.get("pet_id") and it.get("pet_id") != "unknown":
+                    raw_id = it.get("pet_id")
+                    predicted_names.append(pet_display_names.get(raw_id, raw_id))
+
+                it["predicted_names"] = predicted_names
+                it["candidates"] = candidates
+                it["posture_zh"] = posture_zh
+
         return items
 
     def get_event(self, event_id: str) -> dict[str, Any] | None:

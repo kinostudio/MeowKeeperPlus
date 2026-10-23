@@ -1,6 +1,6 @@
 {% from '_term_help.html' import term_help with context %}
 <dialog id="event-review-dialog" aria-labelledby="event-review-title">
-<div class="panel-heading"><h3 id="event-review-title">人工回報</h3><button class="button secondary" id="event-review-close" type="button">關閉</button></div>
+<div class="panel-heading"><h3 id="event-review-title">事件詳情、影片與 AI 覆核</h3><button class="button secondary" id="event-review-close" type="button">關閉</button></div>
 <p class="field-help">先確認貓咪個體與數量，再逐隻選擇行為，最後確認提交。這是對此事件的人工標籤，不會自動重訓模型，也不會冒用軌跡編號。</p>
 <p class="field-help">先播放影片確認畫面，再開始回報。若載入失敗可重新載入；影片準備完成後才能保存。</p>
 <video id="event-review-video" controls playsinline preload="metadata" hidden></video>
@@ -11,6 +11,14 @@
 <button class="button secondary" id="event-export-annotated" type="button">匯出含 AI 標記影片</button>
 <p id="event-export-status" role="status"></p>
 </details>
+
+<section class="review-ai-evidence-section" style="margin: 14px 0; padding: 12px; background: rgba(0,0,0,0.03); border: 1px solid var(--line); border-radius: 8px;">
+  <h4 style="margin: 0 0 8px 0; font-size: .95rem;">AI 身分比對依據 (DINOv2)</h4>
+  <div id="event-review-ai-evidence" class="cards" style="margin-top: 6px;">
+    <p class="muted">正在載入 AI 身分證據…</p>
+  </div>
+</section>
+
 <fieldset><legend>{{ term_help('tag_review', '這次回報的影片範圍') }}</legend>
 <p id="event-review-segment-help" class="field-help">秒數從影片開頭計算。可只回報一小段；多段不同動作請分別保存，歷史會全部保留。</p>
 <p>在同一條時間軸拖動兩個控制點：左側選片段起點、右側選終點。</p>

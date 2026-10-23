@@ -572,3 +572,139 @@
   font-size:.78rem;
   padding:5px 10px;
 }
+
+
+/* Batch staging & Dynamic filters for Track Candidates */
+.track-candidates-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+.pet-track-dynamic-filters {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.track-candidates-batch-controls {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.track-candidate-card.is-staged-assign {
+  border-color: #2563eb !important;
+  box-shadow: 0 0 0 2px rgba(37,99,235,.25) !important;
+}
+.track-candidate-card.is-staged-delete {
+  border-color: #dc2626 !important;
+  border-style: dashed !important;
+  opacity: 0.65;
+  box-shadow: 0 0 0 2px rgba(220,38,38,.2) !important;
+}
+.track-candidate-card.is-staged-clear {
+  border-color: #d97706 !important;
+  box-shadow: 0 0 0 2px rgba(217,119,6,.2) !important;
+}
+#pet-track-candidates-save:not(:disabled) {
+  background: #16a34a;
+  border-color: #16a34a;
+  color: #fff;
+  font-weight: 600;
+  box-shadow: 0 2px 8px rgba(22,163,74,.3);
+  animation: pulse-save 2s infinite;
+}
+@keyframes pulse-save {
+  0% { transform: scale(1); }
+  50% { transform: scale(1.02); }
+  100% { transform: scale(1); }
+}
+
+/* Event List & Dashboard tags */
+.event-tags-container {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 4px 0;
+}
+.event-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: 9999px;
+  font-size: .74rem;
+  font-weight: 500;
+  line-height: 1.4;
+}
+.event-tag.tag-local-ai {
+  background: rgba(37, 99, 235, 0.12);
+  color: #1d4ed8;
+  border: 1px solid rgba(37, 99, 235, 0.25);
+}
+.event-tag.tag-cloud-ai {
+  background: rgba(147, 51, 234, 0.12);
+  color: #7e22ce;
+  border: 1px solid rgba(147, 51, 234, 0.25);
+}
+
+/* Mobile pseudo-fullscreen for live preview */
+.preview-stage.is-mobile-fullscreen {
+  position: fixed !important;
+  inset: 0 !important;
+  width: 100vw !important;
+  height: 100vh !important;
+  max-width: none !important;
+  max-height: none !important;
+  z-index: 99999 !important;
+  margin: 0 !important;
+  border-radius: 0 !important;
+  background: #000 !important;
+}
+body.is-mobile-fullscreen-active {
+  overflow: hidden !important;
+}
+
+/* Compact AI HUD overlay dropdown */
+.preview-ai-dropdown {
+  position: relative;
+  display: inline-block;
+}
+.preview-ai-menu {
+  display: none;
+  position: absolute;
+  top: 100%;
+  right: 0;
+  margin-top: 6px;
+  background: rgba(28, 25, 23, 0.95);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 10px;
+  padding: 8px 10px;
+  min-width: 220px;
+  box-shadow: 0 10px 25px rgba(0,0,0,0.5);
+  z-index: 1000;
+  color: #f5f5f4;
+  font-size: .8rem;
+}
+.preview-ai-dropdown:hover .preview-ai-menu,
+.preview-ai-dropdown:focus-within .preview-ai-menu,
+.preview-ai-dropdown.is-open .preview-ai-menu {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.preview-ai-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  user-select: none;
+}
+.preview-ai-option input[type="checkbox"] {
+  cursor: pointer;
+  accent-color: #f0b36f;
+}

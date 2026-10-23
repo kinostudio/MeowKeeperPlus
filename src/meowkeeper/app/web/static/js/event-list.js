@@ -53,29 +53,60 @@
     items.forEach((item) => {
       const row = document.createElement("article"); row.className = "event-row";
       const info = document.createElement("div");
-      const title = document.createElement("strong"); title.textContent = item.event_type === "cat_detected" ? "發現貓咪" : "監控事件";
+
+      // Dynamic Title
+      let titleText = "發現貓咪";
+      if (Array.isArray(item.predicted_names) && item.predicted_names.length === 1) {
+        titleText = `發現 ${item.predicted_names[0]}`;
+      } else if (Array.isArray(item.predicted_names) && item.predicted_names.length > 1) {
+        titleText = `發現 ${item.predicted_names.join("、")}`;
+      } else if (item.pet_id && item.pet_id !== "unknown") {
+        titleText = `發現 ${item.pet_id}`;
+      } else if (item.event_type !== "cat_detected") {
+        titleText = "監控事件";
+      }
+      const title = document.createElement("strong"); title.textContent = titleText;
+
+      // Tags Container
+      const tagsContainer = document.createElement("div"); tagsContainer.className = "event-tags-container";
+      if (item.has_local_ai) {
+        const localTag = document.createElement("span"); localTag.className = "event-tag tag-local-ai";
+        localTag.textContent = "🏷️ 本地辨識 (DINOv2)";
+        tagsContainer.appendChild(localTag);
+      }
+      if (item.has_cloud_ai) {
+        const cloudTag = document.createElement("span"); cloudTag.className = "event-tag tag-cloud-ai";
+        cloudTag.textContent = "🏷️ 雲端辨識";
+        tagsContainer.appendChild(cloudTag);
+      }
+
       const detail = document.createElement("small"); detail.style.display = "block";
       const date = new Date(item.trigger_at);
       const time = Number.isFinite(date.getTime()) ? date.toLocaleString("zh-TW") : "時間尚未提供";
-      const pet = !item.pet_id || item.pet_id === "unknown" ? "尚未確認" : item.pet_id;
-      const score = item.confidence == null ? "未提供" : `${Math.round(item.confidence * 100)}%（非準確率）`;
+
+      let petDesc = "尚未確認";
+      if (Array.isArray(item.predicted_names) && item.predicted_names.length) {
+        petDesc = item.predicted_names.join("、");
+      } else if (item.pet_id && item.pet_id !== "unknown") {
+        petDesc = item.pet_id;
+      }
+      const score = item.confidence == null ? "未提供" : `${Math.round(item.confidence * 100)}%`;
       const duration = item.actual_duration_seconds == null ? "未提供" : `${Number(item.actual_duration_seconds).toFixed(1)} 秒`;
-      detail.textContent = `${time}｜寵物：${pet}｜模型分數：${score}｜影片：${duration}｜通知：${notification[item.telegram_status] || "狀態待確認"}`;
-      info.append(title, detail); row.appendChild(info);
-      if (item.clip_exists) {
-        const play = document.createElement("button"); play.type="button"; play.className = "button secondary"; play.textContent = "播放事件影片";
-        play.addEventListener("click",()=>openPlayback(item));row.appendChild(play);
-      } else {
-        const missing = document.createElement("small"); missing.textContent = "目前沒有可播放的影片"; row.appendChild(missing);
-      }
-      if (item.event_type === "cat_detected" && item.trigger_origin === "detector") {
-        const review = document.createElement("button"); review.type = "button";
-        review.className = "button secondary"; review.textContent = "確認貓咪／回報行為";
-        review.addEventListener("click",() => document.dispatchEvent(new CustomEvent("meowkeeper:review",{detail:item})));
-        row.append(review);
-      }
+      const posture = item.posture_zh ? `｜姿態：${item.posture_zh}` : "";
+      detail.textContent = `${time}｜身分：${petDesc} (${score})${posture}｜影片：${duration}｜通知：${notification[item.telegram_status] || "狀態待確認"}`;
+
+      info.append(title, tagsContainer, detail); row.appendChild(info);
+
+      // Unified Action Button: Consolidates video playback, AI comparison & review into one dialog
+      const actions = document.createElement("div"); actions.className = "actions";
+      const viewBtn = document.createElement("button"); viewBtn.type = "button";
+      viewBtn.className = "button";
+      viewBtn.textContent = "檢視詳情與覆核 →";
+      viewBtn.addEventListener("click", () => document.dispatchEvent(new CustomEvent("meowkeeper:review", { detail: item })));
+      actions.appendChild(viewBtn);
+      row.appendChild(actions);
+
       root.appendChild(row);
-      const identity=document.createElement('button');identity.type='button';identity.className='button secondary';identity.textContent='查看 AI 身分比對';identity.onclick=()=>document.dispatchEvent(new CustomEvent('meowkeeper:identity',{detail:item}));row.append(identity);
     });
     if (!root.children.length) root.textContent = "這一頁沒有符合選項的事件。可切換顯示條件或頁數。";
     root.scrollTop=0;

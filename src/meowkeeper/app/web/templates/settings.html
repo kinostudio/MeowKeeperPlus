@@ -320,12 +320,18 @@
     <span id="pet-track-candidates-status" class="status-pill status-info">載入中…</span>
   </div>
   <div class="track-candidates-toolbar">
-    <div class="actions" role="group" aria-label="篩選軌跡截圖狀態">
+    <div class="actions" role="group" aria-label="篩選軌跡截圖狀態" id="pet-track-filter-group">
       <button type="button" class="button secondary is-active" data-track-filter="all">全部近期截圖</button>
       <button type="button" class="button secondary" data-track-filter="unlabeled">待標註</button>
       <button type="button" class="button secondary" data-track-filter="enrolled">已入庫特徵</button>
+      <span id="pet-track-dynamic-filters" class="pet-track-dynamic-filters"></span>
     </div>
-    <button type="button" class="button secondary" id="pet-track-candidates-reload">重新整理截圖</button>
+    <div class="track-candidates-batch-controls">
+      <button type="button" class="button secondary" id="pet-track-batch-delete-all" style="display:none;" title="將目前篩選檢視下的所有截圖一次性標記刪除">標記全部刪除</button>
+      <button type="button" class="button secondary" id="pet-track-candidates-cancel" style="display:none;">放棄暫存</button>
+      <button type="button" class="button" id="pet-track-candidates-save" disabled>更新變更</button>
+      <button type="button" class="button secondary" id="pet-track-candidates-reload">重新整理截圖</button>
+    </div>
   </div>
   <p id="pet-track-candidates-message" class="field-help" role="status" aria-live="polite"></p>
   <div id="pet-track-candidates-grid" class="track-candidates-grid"><p class="muted">正在載入近期攝影機軌跡截圖…</p></div>

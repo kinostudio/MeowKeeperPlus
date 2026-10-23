@@ -330,10 +330,10 @@ class Go2RtcXiaomiDiscovery:
     def _with_profile(source: str, profile_name: str) -> str:
         parsed = urlsplit(source)
         query = [(key, value) for key, value in parse_qsl(parsed.query, keep_blank_values=True) if key != "subtype"]
-        # Video monitoring must not fail when a Xiaomi profile sends no audio.
+        # Video & audio monitoring: default to audio=1 so live sound and event clips have audio
         # Preserve an explicit audio choice supplied by the source.
         if not any(key == "audio" for key, _ in query):
-            query.append(("audio", "0"))
+            query.append(("audio", "1"))
         if profile_name.startswith("subtype="):
             query.append(("subtype", profile_name.split("=", 1)[1]))
         return urlunsplit((parsed.scheme, parsed.netloc, parsed.path, urlencode(query), parsed.fragment))

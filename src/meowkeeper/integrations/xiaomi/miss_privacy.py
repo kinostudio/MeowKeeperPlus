@@ -206,25 +206,39 @@ class MissPrivacyAdapter:
         with self._lock:
             device, reference = self._context()
             config = self._load()
+            powered_on = False
+
+            # 若具備原生電源開關，優先嘗試上電喚醒（支援由外部米家 App 休眠後恢復）
+            if self.power is not None:
+                try:
+                    self._power(device, True)
+                    powered_on = True
+                except Exception:
+                    pass
+
             if config.get("mode", "position") == "standby":
-                if config.get("device_hash") != reference or config.get("standby_restore") is not True:
-                    raise ValueError("此攝影機沒有可恢復的待機紀錄；沒有自行開啟鏡頭。")
-                self._power(device, True)
                 pose = config.get("standby_pose")
-                if not isinstance(pose, dict):
-                    raise ValueError("舊待機紀錄沒有原座標；攝影機已開啟，但無法確認原位置。")
-                self._restore_pose(device, pose)
+                if isinstance(pose, dict):
+                    try:
+                        self._restore_pose(device, pose)
+                    except Exception:
+                        pass
                 config["standby_restore"] = None
                 config.pop("standby_pose", None)
                 self._save(config)
                 return {"success": True}
-            if config.get("device_hash") != reference or not config.get("restore"):
-                raise ValueError("此攝影機沒有可恢復的原位置。")
-            result = self.move(device, **config["restore"])
-            if result.get("success") is not True:
-                return {"success": False}
-            if self._position(self.read(device)) != config["restore"]:
-                return {"success": False}
-            config["restore"] = None
-            self._save(config)
-            return {"success": True}
+
+            if config.get("device_hash") == reference and config.get("restore"):
+                result = self.move(device, **config["restore"])
+                if result.get("success") is not True:
+                    return {"success": False}
+                if self._position(self.read(device)) != config["restore"]:
+                    return {"success": False}
+                config["restore"] = None
+                self._save(config)
+                return {"success": True}
+
+            if powered_on:
+                return {"success": True}
+
+            raise ValueError("此攝影機沒有可恢復的原位置或待機紀錄。")
