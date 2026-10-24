@@ -223,39 +223,27 @@
       }
       tracks.forEach((track, idx) => {
         const card = document.createElement("article");
-        card.className = "card";
-        card.style.margin = "8px 0";
-        card.style.padding = "10px";
-        card.style.border = "1px solid var(--line)";
-        card.style.borderRadius = "8px";
+        card.className = "review-evidence-card";
 
         const title = document.createElement("h5");
-        title.style.margin = "0 0 6px 0";
         title.textContent = `證據貓咪 ${idx + 1}：${track.decision === 'unknown' ? '身分尚未確認' : 'AI 候選識別'}`;
         card.appendChild(title);
 
         const info = document.createElement("p");
         info.className = "field-help";
-        info.style.margin = "4px 0";
         info.textContent = `影格跨度 ${(track.evidence_seconds || 0).toFixed(1)} 秒｜有效影格 ${track.valid_frames || 0}｜判定原因：${reasons[track.unknown_reason] || track.unknown_reason || '特徵比對完成'}`;
         card.appendChild(info);
 
         const mediaRow = document.createElement("div");
-        mediaRow.style.display = "flex";
-        mediaRow.style.flexWrap = "wrap";
-        mediaRow.style.gap = "10px";
-        mediaRow.style.alignItems = "flex-start";
-        mediaRow.style.margin = "8px 0";
+        mediaRow.className = "review-evidence-body";
 
         if (track.crop_url) {
           const fig = document.createElement("figure");
-          fig.style.margin = "0";
+          fig.className = "review-evidence-crop";
           const img = document.createElement("img");
           img.src = track.crop_url;
           img.alt = "當次實拍裁切";
-          img.style.maxHeight = "140px";
-          img.style.borderRadius = "6px";
-          img.style.objectFit = "contain";
+          img.onerror = () => { fig.hidden = true; };
           const cap = document.createElement("figcaption");
           cap.className = "field-help";
           cap.textContent = "實拍裁切 (DINOv2)";
@@ -264,33 +252,34 @@
         }
 
         const candList = document.createElement("div");
-        candList.style.flex = "1";
-        candList.style.minWidth = "180px";
+        candList.className = "review-evidence-candidates";
         (track.candidates || []).forEach(cand => {
           const cBox = document.createElement("div");
-          cBox.style.marginBottom = "6px";
+          cBox.className = "review-candidate-item";
           const cTitle = document.createElement("strong");
-          cTitle.style.fontSize = ".88rem";
           cTitle.textContent = `可能是 ${cand.name}｜相似度 ${Number(cand.pet_score || 0).toFixed(3)}`;
           cBox.appendChild(cTitle);
 
+          const refList = document.createElement("div");
+          refList.className = "review-ref-list";
           (cand.reference_matches || []).forEach(ref => {
             if (ref.thumbnail_url) {
               const rFig = document.createElement("figure");
-              rFig.style.margin = "4px 0 0 0";
-              rFig.style.display = "inline-block";
+              rFig.className = "review-ref-item";
               const rImg = document.createElement("img");
               rImg.src = ref.thumbnail_url;
               rImg.alt = `${cand.name} 參考照片`;
-              rImg.style.maxHeight = "80px";
-              rImg.style.borderRadius = "4px";
+              rImg.onerror = () => { rFig.hidden = true; };
               const rCap = document.createElement("figcaption");
               rCap.className = "field-help";
               rCap.textContent = `參考照相似度 ${Number(ref.cosine_score || 0).toFixed(3)}`;
               rFig.append(rImg, rCap);
-              cBox.appendChild(rFig);
+              refList.appendChild(rFig);
             }
           });
+          if (refList.children.length) {
+            cBox.appendChild(refList);
+          }
           candList.appendChild(cBox);
         });
         mediaRow.appendChild(candList);
