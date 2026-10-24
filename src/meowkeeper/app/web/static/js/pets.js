@@ -158,7 +158,7 @@
         const staged = stagedActions.get(item.event_id);
         if (staged) {
           if (staged.action === "delete") return true;
-          return staged.petId === pId;
+          return (staged.pet_id || staged.petId) === pId;
         }
         return item.assigned_pet_id === pId;
       }
@@ -183,9 +183,10 @@
     trackGrid.innerHTML = filtered.map((item) => {
       const eid = item.event_id;
       const staged = stagedActions.get(eid);
-      const assignedPet = pets.find((pet) => pet.pet_id === (staged?.petId || item.assigned_pet_id));
+      const stagedPetId = staged ? (staged.pet_id || staged.petId) : null;
+      const assignedPet = pets.find((pet) => pet.pet_id === (stagedPetId || item.assigned_pet_id));
       const enrolled = isEnrolled(item);
-      const notCat = staged ? staged.petId === "not_cat" : isNotCat(item);
+      const notCat = staged ? stagedPetId === "not_cat" : isNotCat(item);
 
       let cardClass = "track-candidate-card";
       let badgeHtml = "";
@@ -194,10 +195,10 @@
         if (staged.action === "delete") {
           cardClass += " is-staged-delete";
           badgeHtml = '<span class="status-pill status-warn">🗑️ [待儲存] 標記刪除</span>';
-        } else if (staged.action === "clear") {
+        } else if (staged.action === "clear" || stagedPetId === "clear") {
           cardClass += " is-staged-clear";
           badgeHtml = '<span class="status-pill status-unknown">⏳ [待儲存] 清除標註</span>';
-        } else if (staged.petId === "not_cat") {
+        } else if (stagedPetId === "not_cat") {
           cardClass += " is-staged-assign";
           badgeHtml = '<span class="status-pill status-warn">🚫 [待儲存] 標記非貓</span>';
         } else if (assignedPet) {
@@ -222,7 +223,7 @@
         ? `AI 候選：${escapeHtml(candName)}${candScore != null ? ` (${Math.round(Number(candScore) * 100)}%)` : ""}`
         : "AI 候選：尚未確認";
       const trackIdVal = item.track_id || "track_01";
-      const currentAssignedId = staged?.petId || item.assigned_pet_id;
+      const currentAssignedId = stagedPetId || item.assigned_pet_id;
 
       const petButtons = pets.map((pet) => {
         const isCurrent = currentAssignedId === pet.pet_id;
@@ -270,9 +271,25 @@
     if (!eventId || !petId) return;
 
     if (petId === "clear") {
-      stagedActions.set(eventId, { action: "clear", petId: "clear", trackId });
+      stagedActions.set(eventId, {
+        action: "clear",
+        event_id: eventId,
+        pet_id: "clear",
+        petId: "clear",
+        track_id: trackId,
+        trackId,
+      });
     } else {
-      stagedActions.set(eventId, { action: "assign", petId, petName, trackId });
+      stagedActions.set(eventId, {
+        action: "assign",
+        event_id: eventId,
+        pet_id: petId,
+        petId,
+        pet_name: petName,
+        petName,
+        track_id: trackId,
+        trackId,
+      });
     }
     renderTrackCandidates();
     if (trackMessage) trackMessage.textContent = `已暫存變更：設為「${petName}」。請點擊上方「更新變更」一次性儲存。`;
@@ -285,7 +302,7 @@
       stagedActions.delete(eventId);
       if (trackMessage) trackMessage.textContent = "已復原此截圖刪除標記。";
     } else {
-      stagedActions.set(eventId, { action: "delete" });
+      stagedActions.set(eventId, { action: "delete", event_id: eventId });
       if (trackMessage) trackMessage.textContent = "已標記刪除此截圖。請點擊上方「更新變更」一次性儲存。";
     }
     renderTrackCandidates();
@@ -329,7 +346,11 @@
 
     const operations = Array.from(stagedActions.entries()).map(([eventId, op]) => ({
       event_id: eventId,
-      ...op,
+      action: op.action,
+      pet_id: op.pet_id || op.petId || "",
+      petId: op.pet_id || op.petId || "",
+      track_id: op.track_id || op.trackId || "camera",
+      trackId: op.track_id || op.trackId || "camera",
     }));
 
     try {
@@ -384,7 +405,7 @@
       if (!allItems.length) return;
       if (!confirm(`確定要將目前篩選檢視下的 ${allItems.length} 張截圖全部標記為刪除嗎？\n（需再點擊「更新變更」才會真正寫入資料庫與撤回特徵庫）`)) return;
       allItems.forEach((item) => {
-        stagedActions.set(item.event_id, { action: "delete" });
+        stagedActions.set(item.event_id, { action: "delete", event_id: item.event_id });
       });
       renderTrackCandidates();
       if (trackMessage) trackMessage.textContent = `已將目前檢視下的 ${allItems.length} 張截圖標記為刪除。請點擊「更新變更」執行。`;

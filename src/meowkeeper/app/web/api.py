@@ -1529,7 +1529,7 @@ def create_app(
         if core.store is None:
             raise HTTPException(status_code=503, detail="事件資料庫尚未接入。")
         payload = json_body(body)
-        pet_id = str(payload.get("pet_id") or "").strip()
+        pet_id = str(payload.get("pet_id") or payload.get("petId") or "").strip()
         registry = pet_registry()
         enabled_pets = {p.pet_id: p.display_name for p in registry.list_pets(enabled_only=True)}
         if pet_id not in enabled_pets and pet_id not in {"not_cat", "clear"}:
@@ -1555,10 +1555,10 @@ def create_app(
                 core.store.connection.execute(
                     """INSERT OR IGNORE INTO behavior_events(
                            event_id, pet_id, track_id, behavior_state, motion_state,
-                           event_tags, started_at, ended_at, duration_seconds,
+                           event_tags_json, started_at, ended_at, evidence_json,
                            raw_confidence, smoothed_confidence, inference_method,
                            model_version, rule_profile_version, source_id, camera_preset
-                       ) VALUES (?, NULL, 'camera', 'resting', 'stationary', '[]', ?, ?, 0.0, 0.8, 0.8, 'rule', 'v02', 'v02', 'camera', NULL)""",
+                       ) VALUES (?, NULL, 'camera', 'resting', 'stationary', '[]', ?, ?, '{}', 0.0, 0.8, 'rule', 'v02', 'v02', 'camera', NULL)""",
                     (event_id, captured, captured),
                 )
             core.store.connection.execute(
@@ -1570,6 +1570,10 @@ def create_app(
                     "UPDATE identity_feedback_evidence SET learning_status='pending' WHERE event_id=?",
                     (event_id,),
                 )
+                core.store.connection.execute(
+                    "UPDATE behavior_events SET identity_status='unknown', pet_id=NULL WHERE event_id=?",
+                    (event_id,),
+                )
             elif pet_id == "not_cat":
                 core.store.connection.execute(
                     """INSERT INTO behavior_event_annotations(event_id, reviewer_ref, dimension, label, learning_consent)
@@ -1578,6 +1582,10 @@ def create_app(
                 )
                 core.store.connection.execute(
                     "UPDATE identity_feedback_evidence SET learning_status='unconfirmed_or_conflicting' WHERE event_id=?",
+                    (event_id,),
+                )
+                core.store.connection.execute(
+                    "UPDATE behavior_events SET identity_status='unknown', pet_id=NULL WHERE event_id=?",
                     (event_id,),
                 )
             else:
@@ -1594,6 +1602,10 @@ def create_app(
                 core.store.connection.execute(
                     "UPDATE identity_feedback_evidence SET created_at=CURRENT_TIMESTAMP WHERE event_id=?",
                     (event_id,),
+                )
+                core.store.connection.execute(
+                    "UPDATE behavior_events SET identity_status='confirmed', pet_id=? WHERE event_id=?",
+                    (pet_id, event_id),
                 )
 
         core.store._transaction(apply_assignment)
@@ -1694,7 +1706,7 @@ def create_app(
                 if not isinstance(op, dict):
                     continue
                 action = str(op.get("action") or "").strip()
-                event_id = str(op.get("event_id") or "").strip()
+                event_id = str(op.get("event_id") or op.get("eventId") or "").strip()
                 if not event_id:
                     continue
 
@@ -1712,7 +1724,7 @@ def create_app(
                         (event_id,),
                     )
                 elif action in ("assign", "clear"):
-                    pet_id = str(op.get("pet_id") or "").strip()
+                    pet_id = str(op.get("pet_id") or op.get("petId") or "").strip()
                     existing_be = core.store.connection.execute(
                         "SELECT 1 FROM behavior_events WHERE event_id=?",
                         (event_id,),
@@ -1726,10 +1738,10 @@ def create_app(
                         core.store.connection.execute(
                             """INSERT OR IGNORE INTO behavior_events(
                                    event_id, pet_id, track_id, behavior_state, motion_state,
-                                   event_tags, started_at, ended_at, duration_seconds,
+                                   event_tags_json, started_at, ended_at, evidence_json,
                                    raw_confidence, smoothed_confidence, inference_method,
                                    model_version, rule_profile_version, source_id, camera_preset
-                               ) VALUES (?, NULL, 'camera', 'resting', 'stationary', '[]', ?, ?, 0.0, 0.8, 0.8, 'rule', 'v02', 'v02', 'camera', NULL)""",
+                               ) VALUES (?, NULL, 'camera', 'resting', 'stationary', '[]', ?, ?, '{}', 0.0, 0.8, 'rule', 'v02', 'v02', 'camera', NULL)""",
                             (event_id, captured, captured),
                         )
                     core.store.connection.execute(
@@ -1741,6 +1753,10 @@ def create_app(
                             "UPDATE identity_feedback_evidence SET learning_status='pending' WHERE event_id=?",
                             (event_id,),
                         )
+                        core.store.connection.execute(
+                            "UPDATE behavior_events SET identity_status='unknown', pet_id=NULL WHERE event_id=?",
+                            (event_id,),
+                        )
                     elif pet_id == "not_cat":
                         core.store.connection.execute(
                             """INSERT INTO behavior_event_annotations(event_id, reviewer_ref, dimension, label, learning_consent)
@@ -1749,6 +1765,10 @@ def create_app(
                         )
                         core.store.connection.execute(
                             "UPDATE identity_feedback_evidence SET learning_status='unconfirmed_or_conflicting' WHERE event_id=?",
+                            (event_id,),
+                        )
+                        core.store.connection.execute(
+                            "UPDATE behavior_events SET identity_status='unknown', pet_id=NULL WHERE event_id=?",
                             (event_id,),
                         )
                     elif pet_id in enabled_pets:
@@ -1765,6 +1785,10 @@ def create_app(
                         core.store.connection.execute(
                             "UPDATE identity_feedback_evidence SET created_at=CURRENT_TIMESTAMP WHERE event_id=?",
                             (event_id,),
+                        )
+                        core.store.connection.execute(
+                            "UPDATE behavior_events SET identity_status='confirmed', pet_id=? WHERE event_id=?",
+                            (pet_id, event_id),
                         )
 
         core.store._transaction(apply_batch)
