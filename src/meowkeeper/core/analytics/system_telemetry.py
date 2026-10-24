@@ -13,16 +13,40 @@ def gpu_sample() -> dict:
     if not executable:
         return {}
     try:
+        # First try extended query with pstate and clock to filter Optimus sleep wake-up glitches
         result = subprocess.run(
-            [executable, "--query-gpu=name,utilization.gpu,temperature.gpu", "--format=csv,noheader,nounits"],
+            [executable, "--query-gpu=name,utilization.gpu,temperature.gpu,pstate,clocks.current.graphics", "--format=csv,noheader,nounits"],
             capture_output=True, text=True, timeout=2, shell=False, check=False,
             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
         )
         rows = list(csv.reader(result.stdout.splitlines()))
-        if result.returncode != 0 or len(rows) != 1 or len(rows[0]) != 3:
-            return {}  # 多 GPU 不任意把其中一張視為整台 GPU。
-        name, load, temperature = rows[0]
-        return {"gpu_name": name.strip(), "system_gpu_percent": float(load), "gpu_temperature_c": float(temperature)}
+        if result.returncode != 0 or len(rows) != 1 or len(rows[0]) < 3:
+            # Fallback for standard 3-field query
+            result = subprocess.run(
+                [executable, "--query-gpu=name,utilization.gpu,temperature.gpu", "--format=csv,noheader,nounits"],
+                capture_output=True, text=True, timeout=2, shell=False, check=False,
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+            )
+            rows = list(csv.reader(result.stdout.splitlines()))
+            if result.returncode != 0 or len(rows) != 1 or len(rows[0]) != 3:
+                return {}  # 多 GPU 不任意把其中一張視為整台 GPU。
+            name, load, temperature = rows[0]
+            return {"gpu_name": name.strip(), "system_gpu_percent": float(load), "gpu_temperature_c": float(temperature)}
+
+        row = [item.strip() for item in rows[0]]
+        name = row[0]
+        load = float(row[1])
+        temperature = float(row[2])
+        pstate = row[3] if len(row) > 3 else ""
+        clock = float(row[4]) if len(row) > 4 and row[4].replace(".", "", 1).isdigit() else 0.0
+
+        # Optimus low-power wake-up spike filtering:
+        # Dual-GPU laptops (e.g. Intel UHD + NVIDIA MX250) keep dGPU in P8 low-power state (~139MHz).
+        # Querying nvidia-smi can trigger power-state transition spikes reporting 99-100% load at 139MHz.
+        if pstate in {"P8", "P12"} and clock < 300 and load >= 85.0:
+            load = 0.0
+
+        return {"gpu_name": name, "system_gpu_percent": float(load), "gpu_temperature_c": float(temperature)}
     except (OSError, ValueError, subprocess.SubprocessError):
         return {}
 

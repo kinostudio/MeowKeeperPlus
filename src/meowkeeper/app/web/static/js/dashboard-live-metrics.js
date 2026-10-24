@@ -197,7 +197,11 @@
     const gpuName = telemetry.gpu_name || "GPU 型號尚未提供";
     if (byId("overview-gpu-name")) byId("overview-gpu-name").textContent = gpuName;
     setValue(byId("overview-gpu-state"), gpu === null ? "感測未接通" : gpu < 70 ? "負載正常" : "負載偏高");
-    setValue(byId("overview-gpu-detail"), gpu === null ? "目前沒有可用的 GPU 使用率讀值。" : "此值為整張 GPU 負載，包含其他程式。");
+    const isDgpu = gpuName.includes("NVIDIA") || gpuName.includes("GeForce");
+    const gpuDetail = gpu === null
+      ? "目前沒有可用的 GPU 使用率讀值。"
+      : (isDgpu ? "NVIDIA 獨立顯卡讀值；AI 於 CPU 執行，無 CUDA 負載。" : "此值為整張 GPU 負載，包含其他程式。");
+    setValue(byId("overview-gpu-detail"), gpuDetail);
     setTemperature("cpu", telemetry.cpu_temperature_c);
     setTemperature("gpu", telemetry.gpu_temperature_c);
     const sensorTime = telemetry.cpu_sensor?.observed_at;

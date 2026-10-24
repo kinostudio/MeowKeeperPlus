@@ -165,8 +165,14 @@
   document.addEventListener("meowkeeper:events",event=>{recentEvents=event.detail;renderEvents();});
   document.querySelectorAll("[data-event-tab]").forEach(button=>button.addEventListener("click",()=>{eventTab=button.dataset.eventTab;document.querySelectorAll("[data-event-tab]").forEach(b=>b.classList.toggle("active",b===button));renderEvents();}));
   byId("overview-full-status").addEventListener("click",()=>{byId("full-system-status").open=true;byId("full-system-status").scrollIntoView({block:"start"});});
-  byId("overview-fullscreen").disabled=false;
-  byId("overview-fullscreen").addEventListener("click",async()=>{try{await byId("overview-preview").requestFullscreen();}catch(_){text("overview-frame-note","此瀏覽器未提供全螢幕；可至即時畫面查看。");}});
+  const fsBtn = byId("overview-fullscreen");
+  if (fsBtn) {
+    fsBtn.disabled = false;
+    fsBtn.addEventListener("click", async () => {
+      try { await byId("overview-preview")?.requestFullscreen(); }
+      catch (_) { text("overview-frame-note", "此瀏覽器未提供全螢幕；可至即時畫面查看。"); }
+    });
+  }
   document.querySelectorAll("[data-save-capture]").forEach(button=>button.addEventListener("click",async()=>{
     const buttons=document.querySelectorAll("[data-save-capture]");buttons.forEach(b=>b.disabled=true);text("capture-result","正在保存既有影音…");
     try{const cookie=document.cookie.split(";").map(s=>s.trim()).find(s=>s.startsWith("meowkeeper_csrf="));const response=await fetch("/api/v1/live/save",{method:"POST",headers:{"Content-Type":"application/json","X-MeowKeeper-CSRF":cookie?decodeURIComponent(cookie.split("=").slice(1).join("=")):""},body:JSON.stringify({kind:button.dataset.saveCapture})});const result=await response.json();text("capture-result",result.message_zh_tw||result.detail||"保存結果未確認");}
