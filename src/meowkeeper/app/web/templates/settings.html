@@ -340,7 +340,7 @@
   <div class="panel-heading"><h3>已登錄寵物</h3><span class="muted">身分辨識仍屬實驗性</span></div>
   <div id="pets-list" class="event-list"><p class="muted">尚無登錄資料。</p></div>
 </section>
-<script src="/static/js/pets.js?v={{ release_info.cache_key }}" defer></script>
+<script src="/static/js/pets.js?v={{ ui_cache_key }}" defer></script>
 <dialog id="pet-crop-dialog" aria-labelledby="pet-crop-title"><h3 id="pet-crop-title">選出照片中的這隻貓（選用）</h3>
 <p>只有照片裡有多隻貓、人物或背景太多時才需要框選。只圈住這隻貓，AI 才能用正確範圍整理參考資料。</p>
 <label>框選方式<select id="pet-crop-mode"><option value="rectangle">拖曳長方形</option><option value="polygon">逐點圈選不規則範圍</option></select></label>
@@ -349,7 +349,7 @@
 <button class="button secondary" id="pet-crop-clear" type="button">清除重畫</button>
 <label class="checkbox-line"><input type="checkbox" id="pet-crop-confirm">我確認此範圍只有這隻貓</label>
 <p id="pet-crop-message" role="status"></p><button class="button" id="pet-crop-save" type="button">保存裁切並更新 AI 參考資料</button><button class="button secondary" id="pet-crop-close" type="button">取消</button></dialog>
-<script src="/static/js/pet-crop.js?v={{ release_info.cache_key }}" defer></script>
+<script src="/static/js/pet-crop.js?v={{ ui_cache_key }}" defer></script>
 {% elif page_path == '/settings/telegram' %}
 <section class="panel telegram-panel">
   <div class="panel-heading"><h3>Telegram 事件通知</h3><span id="telegram-runtime-status" class="muted">狀態讀取中…</span></div>
@@ -437,7 +437,7 @@
   </section>
   <p class="muted">Dashboard 必須明確允許區網存取或由使用者自行設定官方 Serve，才可能有可用的遠端網址。`0.0.0.0` 只代表監聽所有網卡，不是可分享網址。</p>
 </section>
-<script src="/static/js/tailscale.js?v={{ release_info.cache_key }}" defer></script>
+<script src="/static/js/tailscale.js?v={{ ui_cache_key }}" defer></script>
 {% else %}
 <section class="notice"><strong>讓其他裝置查看 Dashboard</strong><p>平常只在這台電腦使用時，保留預設即可。若要用同一住處的手機查看，可啟用下方區網存取，保存後重新啟動服務；其他裝置仍需要登入。</p></section>
 {% endif %}

@@ -52,9 +52,9 @@
   <p id="summary-message" class="field-help" role="status"></p>
   <div id="summary-results" class="behavior-results-grid"></div>
 </section>
-<script src="/static/js/analytics.js?v={{ release_info.cache_key }}-ui6" defer></script>
-<script src="/static/js/dashboard-resource-charts.js?v={{ release_info.cache_key }}" defer></script>
-<script src="/static/js/resource-history.js?v={{ release_info.cache_key }}" defer></script>
+<script src="/static/js/analytics.js?v={{ ui_cache_key }}-ui6" defer></script>
+<script src="/static/js/dashboard-resource-charts.js?v={{ ui_cache_key }}" defer></script>
+<script src="/static/js/resource-history.js?v={{ ui_cache_key }}" defer></script>
 <section class="panel" aria-labelledby="semantic-performance-title">
   <h2 id="semantic-performance-title">AI 候選與通知・{{ term_help('pipeline_total', '處理效能') }}（實驗性）</h2>
   <p>只讀取本機已保存的模型貓咪事件，不會重新分析影片或呼叫外部 API。不同工作可能{{ term_help('parallel', '並行處理') }}，下面時間不能直接相加。</p>

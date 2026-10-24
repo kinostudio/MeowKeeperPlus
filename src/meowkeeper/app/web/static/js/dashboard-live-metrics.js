@@ -200,7 +200,7 @@
     const isDgpu = gpuName.includes("NVIDIA") || gpuName.includes("GeForce");
     const gpuDetail = gpu === null
       ? "目前沒有可用的 GPU 使用率讀值。"
-      : (isDgpu ? "NVIDIA 獨立顯卡讀值；AI 於 CPU 執行，無 CUDA 負載。" : "此值為整張 GPU 負載，包含其他程式。");
+      : (isDgpu ? "NVIDIA 獨立顯卡（ONNX Runtime CUDA AI 推論加速）。" : "此值為整張 GPU 負載，包含其他程式。");
     setValue(byId("overview-gpu-detail"), gpuDetail);
     setTemperature("cpu", telemetry.cpu_temperature_c);
     setTemperature("gpu", telemetry.gpu_temperature_c);

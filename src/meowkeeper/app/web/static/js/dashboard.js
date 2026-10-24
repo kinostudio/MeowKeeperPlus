@@ -93,8 +93,16 @@
     text("overview-local-host",location.host);
     text("overview-lan-state",payload.dashboard?.lan_access_enabled?"已啟用，需登入":"僅限本機");
     text("overview-network-state",payload.dashboard?.lan_access_enabled?"區網登入保護":"本機登入保護");
-    const used=history?.latest?.total_disk_bytes,total=payload.disk?.total_bytes||m.disk?.total_bytes;
-    const storageMeter=byId("overview-storage-meter");storageMeter.hidden=!(Number.isFinite(used)&&Number.isFinite(total)&&total>0);if(!storageMeter.hidden)storageMeter.value=used/total*100;
+    const used=history?.latest?.total_disk_bytes ?? m.telemetry?.total_disk_bytes;
+    if(Number.isFinite(used)){
+      text("overview-storage-used",number(used/1000000000," GB"));
+    }
+    const total=payload.disk?.total_bytes||m.disk?.total_bytes;
+    const storageMeter=byId("overview-storage-meter");
+    if(storageMeter){
+      storageMeter.hidden=!(Number.isFinite(used)&&Number.isFinite(total)&&total>0);
+      if(!storageMeter.hidden)storageMeter.value=used/total*100;
+    }
     loadSystem();
   }
   async function loadSystem() {
@@ -328,5 +336,22 @@
     finally { fullBusy = false; }
   });
   window.addEventListener("resize",() => { clearTimeout(resizeTimer); resizeTimer = setTimeout(renderHistory,150); });
-  history={points:[],bucket_seconds:60}; renderHistory(); loadHistory(); loadActivity();
+    async function loadTailscaleDirect() {
+    try {
+      const resp = await fetch("/api/v1/tailscale/status", {cache: "no-store"});
+      if (resp.ok) {
+        const data = await resp.json(), devices = data.device_summary || {};
+        const online = Number.isInteger(devices.online_device_count) ? `${devices.online_device_count} 台在線` : "在線數未知";
+        const active = Number.isInteger(devices.active_device_count) ? `${devices.active_device_count} 台有活動` : "活動數未知";
+        const sessions = Number.isInteger(devices.dashboard_session_count) ? `${devices.dashboard_session_count} 個 Dashboard 工作階段` : "Dashboard 使用未知";
+        const watching = Number.isInteger(devices.live_viewer_device_count) ? `${devices.live_viewer_device_count} 台已確認觀看` : "觀看數未知";
+        const unknown = Number.isInteger(devices.unidentified_live_viewer_connections) && devices.unidentified_live_viewer_connections > 0
+          ? `；${devices.unidentified_live_viewer_connections} 條未辨識` : "";
+        const state = data.logged_in ? "已登入" : data.status === "not_installed" ? "未安裝" : "未確認";
+        text("overview-tail-state", `${state}｜在線 ${online}｜活動 ${active}｜使用 ${sessions}｜觀看 ${watching}${unknown}`);
+      }
+    } catch (_) {}
+  }
+
+  history={points:[],bucket_seconds:60}; renderHistory(); loadHistory(); loadActivity(); loadTailscaleDirect(); loadSystem();
 })();

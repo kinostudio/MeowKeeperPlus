@@ -103,6 +103,83 @@
       }
     });
 
+    const fsEnterSvg = '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/></svg>';
+    const fsExitSvg = '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3v3a2 2 0 0 1-2 2H3m18 0h-3a2 2 0 0 1-2-2V3m0 18v-3a2 2 0 0 1 2-2h3M3 16h3a2 2 0 0 1 2 2v3"/></svg>';
+
+    const fullscreenButton = document.createElement("button");
+    fullscreenButton.type = "button";
+    fullscreenButton.className = "preview-mode-button preview-mode-select preview-fullscreen-toggle";
+    fullscreenButton.dataset.previewControl = "fullscreen";
+    fullscreenButton.setAttribute("aria-pressed", "false");
+    const fsTooltipId = `preview-fullscreen-tooltip-${scope}`;
+    fullscreenButton.setAttribute("aria-describedby", fsTooltipId);
+
+    const fsIcon = document.createElement("span");
+    fsIcon.className = "preview-mode-icon";
+    fsIcon.setAttribute("aria-hidden", "true");
+
+    const fsTooltip = document.createElement("span");
+    fsTooltip.id = fsTooltipId;
+    fsTooltip.className = "preview-mode-tooltip";
+    fsTooltip.setAttribute("role", "tooltip");
+
+    function isCurrentFullscreen() {
+      const el = document.fullscreenElement || document.webkitFullscreenElement;
+      return Boolean(el && (el === stage || stage.contains(el))) || stage.classList.contains("is-mobile-fullscreen");
+    }
+
+    function updateFullscreenButton() {
+      const active = isCurrentFullscreen();
+      fullscreenButton.setAttribute("aria-pressed", String(active));
+      if (active) {
+        fullscreenButton.setAttribute("aria-label", "退出全螢幕：返回一般視窗檢視");
+        fsTooltip.textContent = "退出全螢幕｜點擊返回一般視窗畫面";
+        fsIcon.innerHTML = fsExitSvg;
+      } else {
+        fullscreenButton.setAttribute("aria-label", "全螢幕：展開預覽畫面為全螢幕檢視");
+        fsTooltip.textContent = "全螢幕｜點擊將即時預覽畫面切換為全螢幕";
+        fsIcon.innerHTML = fsEnterSvg;
+      }
+    }
+    updateFullscreenButton();
+    fullscreenButton.append(fsIcon, fsTooltip);
+    hud.append(fullscreenButton);
+
+    async function toggleFullscreen() {
+      try {
+        if (stage.classList.contains("is-mobile-fullscreen")) {
+          stage.classList.remove("is-mobile-fullscreen");
+          document.body.classList.remove("is-mobile-fullscreen-active");
+        } else if (isCurrentFullscreen()) {
+          if (document.exitFullscreen) await document.exitFullscreen();
+          else if (document.webkitExitFullscreen) await document.webkitExitFullscreen();
+        } else {
+          if (stage.requestFullscreen) await stage.requestFullscreen();
+          else if (stage.webkitRequestFullscreen) await stage.webkitRequestFullscreen();
+          else if (video.requestFullscreen) await video.requestFullscreen();
+          else {
+            stage.classList.add("is-mobile-fullscreen");
+            document.body.classList.add("is-mobile-fullscreen-active");
+          }
+        }
+      } catch (_) {
+        stage.classList.toggle("is-mobile-fullscreen");
+        document.body.classList.toggle("is-mobile-fullscreen-active", stage.classList.contains("is-mobile-fullscreen"));
+      } finally {
+        updateFullscreenButton();
+      }
+    }
+    fullscreenButton.addEventListener("click", toggleFullscreen);
+    document.addEventListener("fullscreenchange", updateFullscreenButton);
+    if ("onwebkitfullscreenchange" in document) document.addEventListener("webkitfullscreenchange", updateFullscreenButton);
+    document.addEventListener("keydown", (e) => {
+      if (e.key === "Escape" && stage.classList.contains("is-mobile-fullscreen")) {
+        stage.classList.remove("is-mobile-fullscreen");
+        document.body.classList.remove("is-mobile-fullscreen-active");
+        updateFullscreenButton();
+      }
+    });
+
 
 
     const stats = document.createElement("div");
