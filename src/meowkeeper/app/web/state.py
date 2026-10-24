@@ -395,16 +395,34 @@ class CoreStateFacade:
             placeholders = ",".join("?" for _ in event_ids)
             with self.store._connection_lock:
                 inf_rows = self.store.connection.execute(
-                    f"SELECT event_id, note FROM identity_inference_history WHERE event_id IN ({placeholders}) AND note LIKE '%identity_evidence_v1%' ORDER BY id DESC",
-                    event_ids,
+                    f"""SELECT i.id AS iid, m.event_id, i.note
+                        FROM identity_inference_history i
+                        JOIN media_events m ON (m.track_id = i.track_id OR m.event_id = i.event_id)
+                        WHERE m.event_id IN ({placeholders}) AND i.note LIKE '%identity_evidence_v1%'
+                        UNION ALL
+                        SELECT i.id AS iid, mt.event_id, i.note
+                        FROM identity_inference_history i
+                        JOIN media_event_tracks mt ON (mt.track_id = i.track_id)
+                        WHERE mt.event_id IN ({placeholders}) AND i.note LIKE '%identity_evidence_v1%'
+                        ORDER BY iid DESC""",
+                    [*event_ids, *event_ids],
                 ).fetchall()
                 cloud_rows = self.store.connection.execute(
                     f"SELECT event_id, status FROM event_semantic_candidates WHERE event_id IN ({placeholders})",
                     event_ids,
                 ).fetchall()
                 beh_rows = self.store.connection.execute(
-                    f"SELECT event_id, pet_id, behavior_state, motion_state FROM behavior_events WHERE event_id IN ({placeholders})",
-                    event_ids,
+                    f"""SELECT b.rowid AS rid, m.event_id, b.pet_id, b.behavior_state, b.motion_state
+                        FROM behavior_events b
+                        JOIN media_events m ON (m.track_id = b.track_id OR m.event_id = b.event_id)
+                        WHERE m.event_id IN ({placeholders})
+                        UNION ALL
+                        SELECT b.rowid AS rid, mt.event_id, b.pet_id, b.behavior_state, b.motion_state
+                        FROM behavior_events b
+                        JOIN media_event_tracks mt ON (mt.track_id = b.track_id)
+                        WHERE mt.event_id IN ({placeholders})
+                        ORDER BY rid DESC""",
+                    [*event_ids, *event_ids],
                 ).fetchall()
 
             import json
@@ -436,7 +454,7 @@ class CoreStateFacade:
                 cloud_status = cloud_by_id.get(eid)
 
                 it["has_local_ai"] = bool(local_data or beh_data)
-                it["has_cloud_ai"] = bool(cloud_status and cloud_status not in ("not_requested", None))
+                it["has_cloud_ai"] = bool(cloud_status == "completed")
                 it["cloud_status"] = cloud_status
 
                 # Map candidate pet names
