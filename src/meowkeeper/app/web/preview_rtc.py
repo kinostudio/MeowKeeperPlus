@@ -61,7 +61,7 @@ class SharedRtcSource:
                 raise ValueError("來源正在切換；請稍後重試。")
             if self._player is None:
                 player = await asyncio.to_thread(self.player_factory or MediaPlayer, url, format="rtsp", decode=False,
-                                                 options={"rtsp_transport": "tcp", "allowed_media_types": "video,audio"}, timeout=3)
+                                                 options={"rtsp_transport": "tcp", "allowed_media_types": "video+audio"}, timeout=3)
                 if player.video is None:
                     # aiortc 1.15 packet passthrough supports H264/VP8, not HEVC.
                     await asyncio.to_thread(player._stop, None)
@@ -181,7 +181,10 @@ async def serve_rtc(websocket, *, core, sessions, go2rtc, slots, source, viewer_
     except ValueError as error:
         # Only our fixed messages may reach the browser; SDP/parser errors stay generic.
         text = str(error) if str(error).startswith(("目前沒有", "本機媒體", "WebRTC", "只接受", "來源正在")) else "WebRTC格式無法協商；改用MSE。"
-        await websocket.send_text(json.dumps({"type": "error", "value": text}, ensure_ascii=False))
+        try:
+            await websocket.send_text(json.dumps({"type": "error", "value": text}, ensure_ascii=False))
+        except Exception:
+            pass
     except Exception:  # noqa: BLE001 - no SDP, credentials or codec internals in logs
         try:
             await websocket.send_json({"type": "error", "value": "WebRTC暫時不可用；改用MSE。"})
