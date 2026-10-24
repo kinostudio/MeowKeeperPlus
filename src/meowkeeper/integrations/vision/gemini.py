@@ -150,7 +150,10 @@ class GeminiVision:
                 if board.track_id in cand_map:
                     track_dict["identity_candidate"] = cand_map[board.track_id]
                 parsed_tracks.append(track_dict)
-            return ProviderReply({"tracks": parsed_tracks}, **provenance)
+            payload = {"tracks": parsed_tracks}
+            if getattr(normalized, "caption", None):
+                payload["caption"] = normalized.caption
+            return ProviderReply(payload, **provenance)
         finally:
             self._lease.release()
 

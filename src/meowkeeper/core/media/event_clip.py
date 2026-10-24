@@ -86,21 +86,43 @@ class _AssemblyJob:
     accepted_monotonic: float | None = None
 
 
+def _format_time_and_clip_line(trigger_at: Any, clip_start: Any = None, clip_end: Any = None) -> str:
+    """Format unified event trigger time and video clip interval line."""
+    if not trigger_at:
+        return ""
+    if isinstance(trigger_at, str):
+        trig = datetime.fromisoformat(trigger_at)
+    else:
+        trig = trigger_at
+    if trig.tzinfo is None:
+        trig = trig.replace(tzinfo=timezone.utc)
+    t_str = trig.astimezone().strftime("%m/%d %H:%M")
+    if clip_start and clip_end:
+        s_dt = datetime.fromisoformat(clip_start) if isinstance(clip_start, str) else clip_start
+        e_dt = datetime.fromisoformat(clip_end) if isinstance(clip_end, str) else clip_end
+        if s_dt.tzinfo is None:
+            s_dt = s_dt.replace(tzinfo=timezone.utc)
+        if e_dt.tzinfo is None:
+            e_dt = e_dt.replace(tzinfo=timezone.utc)
+        return f"{t_str}｜影片 {s_dt.astimezone().strftime('%H:%M:%S')}～{e_dt.astimezone().strftime('%H:%M:%S')}"
+    return t_str
+
+
 def _format_natural_cat_headline(subject: str, tags: Any = (), posture: str | None = None) -> str:
     """將貓咪名稱、行為標籤與姿態轉化為溫馨生動的繁體中文語意描述。"""
     tag_set = set(tags) if tags else set()
     if posture:
         tag_set.add(posture)
 
-    # 0. 多重行為標籤：保留組合描述
+    # 0. 多重行為標籤：保留組合描述（時態使用進行式「正在…」）
     valid_tags = [t for t in tags if t in TAG_LABELS and t not in {"unknown", "possible"}]
     if len(valid_tags) > 1:
         joined = "、".join(TAG_LABELS[t] for t in valid_tags[:3])
-        return f"{subject}剛剛在{joined}。"
+        return f"{subject}正在{joined}。"
 
     # 1. 飲食與水
     if "eating" in tag_set:
-        return f"{subject}現在正在吃飯飯，要看看嗎？"
+        return f"{subject}正在吃飯飯，要看看嗎？"
     if "drinking" in tag_set:
         return f"{subject}正在大口喝水補充水分～"
 
@@ -108,9 +130,9 @@ def _format_natural_cat_headline(subject: str, tags: Any = (), posture: str | No
     if "sleeping" in tag_set:
         return f"{subject}正在安心熟睡中，好舒服～"
     if "resting" in tag_set and "lying" in tag_set:
-        return f"{subject}現在躺在床上休息，好舒服～"
+        return f"{subject}正躺著放鬆休息，好舒服～"
     if "resting" in tag_set:
-        return f"{subject}現在正安靜地休息放空喔～"
+        return f"{subject}正安靜地休息放空喔～"
     if "lying" in tag_set:
         return f"{subject}正舒舒服服地趴躺著放鬆～"
 
@@ -130,7 +152,7 @@ def _format_natural_cat_headline(subject: str, tags: Any = (), posture: str | No
 
     # 4. 單一標籤後備
     if valid_tags:
-        return f"{subject}剛剛在{TAG_LABELS[valid_tags[0]]}。"
+        return f"{subject}正在{TAG_LABELS[valid_tags[0]]}。"
 
     return f"{subject}剛剛出現在畫面。"
 
@@ -1037,15 +1059,34 @@ class EventClipService:
             if not headline.startswith("🐈"):
                 headline = f"🐈 {headline}"
 
-            media_row = self.store.get_media_event(event_id)
-            if media_row and media_row["trigger_at"]:
-                trig = datetime.fromisoformat(media_row["trigger_at"]) if isinstance(media_row["trigger_at"], str) else media_row["trigger_at"]
-                if trig.tzinfo is None:
-                    trig = trig.replace(tzinfo=timezone.utc)
-                time_str = trig.astimezone().strftime("%m/%d %H:%M")
-                caption_text = f"{headline}\n{time_str}｜喵喵守護者+ DINOv2辨識"
-            else:
-                caption_text = f"{headline}\n喵喵守護者+ DINOv2辨識"
+            media_row = None
+            if self.store is not None:
+                m_item = self.store.get_media_event(event_id)
+                if m_item is not None:
+                    media_row = dict(m_item)
+                elif track_id is not None:
+                    try:
+                        with self.store._connection_lock:
+                            row = self.store.connection.execute(
+                                "SELECT * FROM media_events WHERE track_id=? ORDER BY created_at DESC LIMIT 1",
+                                (str(track_id),),
+                            ).fetchone()
+                            if row:
+                                media_row = dict(row)
+                    except Exception:
+                        pass
+
+            time_line = ""
+            if media_row and media_row.get("trigger_at"):
+                time_line = _format_time_and_clip_line(
+                    media_row["trigger_at"],
+                    media_row.get("clip_start_at"),
+                    media_row.get("clip_end_at"),
+                )
+            if not time_line:
+                time_line = datetime.now(timezone.utc).astimezone().strftime("%m/%d %H:%M")
+
+            caption_text = f"{headline}\n{time_line}\n喵喵守護者+ DINOv2辨識"
 
             fake_req = EventClipRequest(event_id=event_id, trigger_at=datetime.now(timezone.utc),
                                         event_type="cat_detected", source_id=(media_row["source_id"] if media_row and media_row["source_id"] else "camera"), trigger_origin="detector")
@@ -1090,15 +1131,23 @@ class EventClipService:
 
             chat_map = {hashlib.sha256(cid.encode("utf-8")).hexdigest(): cid for cid in self.chat_ids}
 
-            media_row = self.store.get_media_event(event_id)
-            time_str = ""
-            if media_row and media_row["trigger_at"]:
-                trig = datetime.fromisoformat(media_row["trigger_at"]) if isinstance(media_row["trigger_at"], str) else media_row["trigger_at"]
-                if trig.tzinfo is None:
-                    trig = trig.replace(tzinfo=timezone.utc)
-                time_str = trig.astimezone().strftime("%m/%d %H:%M")
+            media_row = None
+            if self.store is not None:
+                m_item = self.store.get_media_event(event_id)
+                if m_item is not None:
+                    media_row = dict(m_item)
 
-            base_caption = f"🐈 貓咪剛剛出現在畫面。\n{time_str}\n喵喵守護者+"
+            time_line = ""
+            if media_row and media_row.get("trigger_at"):
+                time_line = _format_time_and_clip_line(
+                    media_row["trigger_at"],
+                    media_row.get("clip_start_at"),
+                    media_row.get("clip_end_at"),
+                )
+            if not time_line:
+                time_line = datetime.now(timezone.utc).astimezone().strftime("%m/%d %H:%M")
+
+            base_caption = f"🐈 貓咪剛剛出現在畫面。\n{time_line}\n喵喵守護者+"
             elevated = self._merge_candidate_caption(
                 base_caption, semantics,
                 pet_registry_dir=self.output_directory.parent / "pets",
@@ -1145,13 +1194,31 @@ class EventClipService:
             return local_caption
         first, separator, rest = local_caption.partition("\n")
 
+        cleaned = first.removeprefix("🐈").strip()
         local_pet = "貓咪"
-        if first.startswith("🐈 "):
-            for marker in ("現在", "剛剛", "正"):
-                idx = first.find(marker)
-                if idx > 2:
-                    local_pet = first[2:idx].strip()
-                    break
+
+        known_names: list[str] = []
+        if pet_registry_dir is not None:
+            try:
+                reg = PetRegistry(pet_registry_dir)
+                known_names = [p.display_name for p in reg.list_pets() if p.enabled and p.display_name]
+            except Exception:
+                pass
+
+        matched_name = None
+        for name in sorted(known_names, key=len, reverse=True):
+            if name and cleaned.startswith(name):
+                matched_name = name
+                break
+
+        if matched_name:
+            local_pet = matched_name
+        elif cleaned.startswith("貓咪"):
+            local_pet = "貓咪"
+        else:
+            m = re.match(r"^(.*?)(?:剛剛出現在|剛剛在|剛剛|現在正在|現在正|現在|正在|正|出現在)", cleaned)
+            if m and m.group(1).strip():
+                local_pet = m.group(1).strip()
 
         cloud_pet_name = None
         cand_map = dict(getattr(semantics, "identity_candidates", ()))
