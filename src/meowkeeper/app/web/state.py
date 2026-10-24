@@ -57,6 +57,8 @@ class CoreStateFacade:
         self._resource_last: tuple[float, dict[tuple[int, float], float]] | None = None
         self._resource_cached: tuple[float, dict[str, Any]] | None = None
         self._resource_collecting = False
+        self._external_app_pids: set[int] = set()
+        self._external_app_scanned_at: float = 0.0
 
     @property
     def state(self) -> str:
@@ -177,23 +179,49 @@ class CoreStateFacade:
             pids.update(child.pid for child in psutil.Process(os.getpid()).children(recursive=True))
         except (psutil.Error, OSError):
             pass
-        root_text = str(root).replace("/", "\\").lower().rstrip("\\") + "\\"
-        for process in psutil.process_iter(attrs=["pid", "exe", "cmdline"]):
+
+        # Retain known external processes (e.g. Tray) if still alive
+        external_pids = getattr(self, "_external_app_pids", set())
+        alive_external: set[int] = set()
+        for epid in external_pids:
             try:
-                info = process.info
-                executable = str(info.get("exe") or "").replace("/", "\\").lower()
-                if not executable.startswith(root_text):
-                    continue
-                name = Path(executable).name
-                arguments = " ".join(str(part) for part in info.get("cmdline") or ()).replace("/", "\\").lower()
-                if name in {"go2rtc.exe", "ffmpeg.exe", "ffprobe.exe"} or (
-                    name in {"python.exe", "pythonw.exe"}
-                    and root_text in arguments
-                    and ("run_host.py" in arguments or "run_tray.py" in arguments)
-                ):
-                    pids.add(int(info["pid"]))
+                if psutil.pid_exists(epid):
+                    alive_external.add(epid)
             except (psutil.Error, OSError):
-                continue
+                pass
+        self._external_app_pids = alive_external
+        pids.update(self._external_app_pids)
+
+        # Full external process scan runs at most once every 30 seconds to prevent sampling jitter
+        last_scanned = getattr(self, "_external_app_scanned_at", 0.0)
+        if now - last_scanned >= 30.0:
+            self._external_app_scanned_at = now
+            root_text = str(root).replace("/", "\\").lower().rstrip("\\") + "\\"
+            target_names = {"go2rtc.exe", "ffmpeg.exe", "ffprobe.exe", "python.exe", "pythonw.exe"}
+            try:
+                for process in psutil.process_iter(attrs=["pid", "name"]):
+                    try:
+                        p_name = str(process.info.get("name") or "").lower()
+                        if p_name not in target_names:
+                            continue
+                        executable = str(process.exe() or "").replace("/", "\\").lower()
+                        if not executable.startswith(root_text):
+                            continue
+                        name = Path(executable).name
+                        arguments = " ".join(str(part) for part in process.cmdline() or ()).replace("/", "\\").lower()
+                        if name in {"go2rtc.exe", "ffmpeg.exe", "ffprobe.exe"} or (
+                            name in {"python.exe", "pythonw.exe"}
+                            and root_text in arguments
+                            and ("run_host.py" in arguments or "run_tray.py" in arguments)
+                        ):
+                            p_pid = int(process.info["pid"])
+                            self._external_app_pids.add(p_pid)
+                            pids.add(p_pid)
+                    except (psutil.Error, OSError):
+                        continue
+            except (psutil.Error, OSError):
+                pass
+
         rss = 0
         cpu_times: dict[tuple[int, float], float] = {}
         counted = 0
@@ -213,11 +241,14 @@ class CoreStateFacade:
         if previous is not None and now > previous[0]:
             delta = sum(max(0.0, value - previous[1].get(pid, value)) for pid, value in cpu_times.items())
             cpu_percent = round(100.0 * delta / (now - previous[0]) / max(1, psutil.cpu_count() or 1), 1)
-        return {
+        result = {
             "status": "ok", "process_count": counted, "rss_bytes": rss,
             "cpu_percent": cpu_percent,
             "message_zh_tw": "整合 Host、Tray、go2rtc 與內附 FFmpeg 的資源總計；Windows 中仍是多個必要程序。",
         }
+        with self._lock:
+            self._resource_cached = (now, result)
+        return result
 
     def _dashboard_snapshot(self) -> dict[str, Any]:
         service = self._dashboard_network

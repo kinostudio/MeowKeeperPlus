@@ -206,12 +206,14 @@ class ResourceRecorder:
         except Exception:  # noqa: BLE001 - isolated telemetry must not stop monitoring
             self.last_error = "資源監測套件無法使用。"
         while not self.stop_event.is_set():
+            loop_start = time.monotonic()
             try:
                 self.sample(persist=time.monotonic() - self.last_persisted >= 60)
                 self.last_error = None
             except Exception:  # noqa: BLE001 - skip one sample, never stop media
                 self.last_error = "資源歷史暫時無法保存；影音監控不受影響。"
-            self.stop_event.wait(5)
+            elapsed = time.monotonic() - loop_start
+            self.stop_event.wait(max(0.2, 5.0 - elapsed))
 
     def live_snapshot(self) -> dict:
         with self.lock:

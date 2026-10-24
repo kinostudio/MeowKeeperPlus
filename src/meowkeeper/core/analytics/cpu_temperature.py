@@ -221,7 +221,7 @@ class BrokerCpuProvider:
             vendor = "intel" if "intel" in names.lower() else "amd" if "amd" in names.lower() else "unknown"
             result = select_temperature(payload, vendor=vendor)
             age = (datetime.now(timezone.utc) - parse_sensor_time(payload.get("observed_at"))).total_seconds()
-            if not -2 <= age <= 20:
+            if not -2 <= age <= 35:
                 return unavailable(reason="broker_starting", provider="libre_hardware_monitor")
             self.alive = True
             result["transport"] = "protected_local_cache"
@@ -333,7 +333,9 @@ class CpuTemperatureMonitor:
                 age = (datetime.now(timezone.utc) - parse_sensor_time(value["observed_at"])).total_seconds()
             except (ValueError, TypeError):
                 age = float("inf")
-            if age > max(15, self.interval * 3) or age < -2:
+            transport = value.get("transport")
+            max_age = 40 if transport == "protected_local_cache" else max(15, self.interval * 3)
+            if age > max_age or age < -2:
                 value.update(status="stale", temperature_c=None, confidence="unavailable", error_reason="sample_expired")
         value.update(enabled=self.enabled, sample_interval_seconds=self.interval,
                      helper_running=any(getattr(p, "alive", False) for p in self.providers))
