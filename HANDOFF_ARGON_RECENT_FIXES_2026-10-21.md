@@ -11,7 +11,7 @@
 
 - 本機分支：`codex/r110-candidate`
 - 本機 `HEAD`：`a028de49d4cabf5e5344b8cec8a00a79d647b6cb`
-- `dist/release-r111/MeowKeeperPlus-r111-windows-x64.zip` 存在；同步時應以此包與 SHRIMP 正式安裝 manifest 做第一方檔案基準核對。分支名稱不是發布版本證據。
+- `dist/release-r111/MeowKeeperPlus-r111-windows-x64.zip` 存在；同步時應以此包與 <HOST-DEVICE> 正式安裝 manifest 做第一方檔案基準核對。分支名稱不是發布版本證據。
 - 工作區有大量未提交／未追蹤修改，含與本交接無關內容。先檢查實際 diff，保留所有既有修改；禁止 `git reset`、`git clean`、覆寫整個工作區或把整個分支推定為 r111。
 - 本輪沒有建置、發布、推送 GitHub、安裝或修改正式 Host。
 

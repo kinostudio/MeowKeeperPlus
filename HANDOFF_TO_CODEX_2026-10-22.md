@@ -1,16 +1,16 @@
-# MeowKeeper+ 交接報告（SHRIMP-ASUS → aero15 Codex / GitHub）
+# MeowKeeper+ 交接報告（<HOST-DEVICE> → aero15 Codex / GitHub）
 **日期**：2026-10-22
-**發起節點**：SHRIMP-ASUS（實機即時測試環境）
+**發起節點**：<HOST-DEVICE>（實機即時測試環境）
 **目標節點**：aero15 / Codex 工作區 / GitHub upstream
 **基準版本**：MeowKeeper+ r111 安裝版本基準（`C:\ProgramData\MeowKeeperPlus\App\src`）
-**交付包路徑**：`C:\Users\user\Desktop\HandoffToCodex-2026-10-22`
+**交付包路徑**：`<DESKTOP>/HandoffToCodex-2026-10-22`
 **GitHub 遠端**：`https://github.com/kinostudio/MeowKeeperPlus`（branch: `main`）
 
 ---
 
 ## 交付內容與使用方式
 
-本目錄包含由 SHRIMP 實機實測驗收通過的完整修正與功能更新，Codex 可選擇以下任一種方式套用並推送到 GitHub：
+本目錄包含由 <HOST-DEVICE> 實機實測驗收通過的完整修正與功能更新，Codex 可選擇以下任一種方式套用並推送到 GitHub：
 
 ### 方式 A：使用標準 Git Patch（推薦）
 在 aero15 的 MeowKeeperPlus Git repo 根目錄執行：
@@ -60,7 +60,7 @@ git push origin main
 
 ### 7. 寵物特徵庫與雲端 Vision API 語意文字特徵輔助回報（NEW）
 * **實作**：
-  * `PetProfile` 新增 `semantic_traits` 欄位與 `effective_traits()` 提取（嗨寶：橘白/橘貓/白底虎斑；Saki：棕色/虎斑/豹花/米克斯）。
+  * `PetProfile` 新增 `semantic_traits` 欄位與 `effective_traits()` 提取（<PET_A>：橘白/橘貓/白底虎斑；<PET_B>：棕色/虎斑/豹花/米克斯）。
   * `SemanticRequest` 攜帶 `pet_profiles` 資訊。
   * `GeminiVision` 在提示詞中自動注入已登錄寵物代號與特徵清單，要求回傳 `identity_candidate`（`pet_id`, `certainty`, `reason`），不得隨意捏造未登錄身分。
   * `normalize_result` 與 `normalize_storyboard_result` 安全解析身分候選；雲端身分僅作為「候選提示」，不覆蓋本機 DINO 辨識。
@@ -79,7 +79,7 @@ git push origin main
 
 ## 測試驗證紀錄
 
-在 SHRIMP-ASUS 上執行單元測試全數通過：
+在 <HOST-DEVICE> 上執行單元測試全數通過：
 * `test_event_semantics.py`：通過
 * `test_vision_settings.py`：31 項通過
 * `test_v02_identity_behavior.py`：10 項通過

@@ -15,7 +15,7 @@
 
 發布包沒有 Git commit 欄位，本地也沒有 r111 tag，因此這是可核對的 r111 發布檔案基準證據，不能宣稱完成不存在的 tag／提交祖先驗證。此次比對的是磁碟上正式包，不用它推定執行中程序的版本。
 
-每次交接前以 `tools/sync_to_argon.py` 更新 `C:\Users\user\Desktop\MeowKeeperPlus-Workspace`。工作區根目錄包含 `.argon-git-meta.json`、`ARGON_UNCOMMITTED.diff`、本交接文件與逐檔 SHA-256 manifest；本文件另複製到該帳戶桌面。詳細規則見 `docs/ARGON_HANDOFF_SYNC.md`。正式 App 不會被同步工具覆寫或重啟。
+每次交接前以 `tools/sync_to_argon.py` 更新 `<DESKTOP>\MeowKeeperPlus-Workspace`。工作區根目錄包含 `.argon-git-meta.json`、`ARGON_UNCOMMITTED.diff`、本交接文件與逐檔 SHA-256 manifest；本文件另複製到該帳戶桌面。詳細規則見 `docs/ARGON_HANDOFF_SYNC.md`。正式 App 不會被同步工具覆寫或重啟。
 
 ## 問題與重現線索
 
