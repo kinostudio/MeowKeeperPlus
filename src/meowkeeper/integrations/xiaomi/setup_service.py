@@ -997,6 +997,9 @@ class XiaomiSetupService:
                     "remote_relay_paired": bool(remote_url),
                     "profile_ready": profile is not None,
                     "remembered_profile": (remembered or {}).get("profile"),
+                    "source_audio_enabled": (remembered or {}).get("audio_enabled"),
+                    "audio_reconnect_available": bool(selected_live and not remote_active
+                        and callable(getattr(self.source_manager, "activate_stream", None))),
                     "resume_available": bool(remembered) and callable(
                         getattr(self.source_manager, "verify_active_profile", None)
                     ),
@@ -1083,7 +1086,9 @@ class XiaomiSetupService:
             raise ValueError("即時畫面只支援 subtype=sd、hd、auto 或 0～5。")
         return value
 
-    def set_live_profile(self, device_id: str, profile_name: str) -> dict[str, Any]:
+    def set_live_profile(self, device_id: str, profile_name: str, *, audio_enabled: bool | None = None) -> dict[str, Any]:
+        if audio_enabled is not None and type(audio_enabled) is not bool:
+            return {"status": "invalid", "success": False, "message_zh_tw": "來源音訊選項無效；未變更來源。"}
         self._reconcile_active_selection()
         if not self._camera_control_lock.acquire(blocking=False):
             return {"status": "busy", "success": False,
@@ -1091,11 +1096,11 @@ class XiaomiSetupService:
         try:
             if self.view_change is not None:
                 self.view_change("profile_change")
-            return self._set_live_profile(device_id, profile_name)
+            return self._set_live_profile(device_id, profile_name, audio_enabled=audio_enabled)
         finally:
             self._camera_control_lock.release()
 
-    def _set_live_profile(self, device_id: str, profile_name: str) -> dict[str, Any]:
+    def _set_live_profile(self, device_id: str, profile_name: str, *, audio_enabled: bool | None = None) -> dict[str, Any]:
         """Replace the active local stream profile without adding a producer."""
 
         try:
@@ -1107,6 +1112,9 @@ class XiaomiSetupService:
             return {"status": "not_found", "success": False, "message_zh_tw": "找不到已載入的 Xiaomi 裝置。"}
         internal_id, device = resolved
         if self._remote_active(internal_id, device):
+            if audio_enabled is not None:
+                return {"status": "unsupported", "success": False,
+                        "message_zh_tw": "請在提供中繼的攝影機主機啟用來源音訊；未遠端重接來源。"}
             try:
                 result = self._relay_control_client(internal_id, device).request("profile", profile=selected_name)
             except RelayControlError:
@@ -1137,6 +1145,10 @@ class XiaomiSetupService:
         profile = XiaomiQualityProfile(selected_name, None, None, None, None, None, False)
         previous_name = str((self._remembered_preference(internal_id, device) or {}).get("profile")
                             or self._state.get("selected_profile") or DEFAULT_LIVE_PROFILE)
+        previous_audio = (self._remembered_preference(internal_id, device) or {}).get("audio_enabled")
+        effective_audio = previous_audio if audio_enabled is None else audio_enabled
+        audio_options = {"audio_enabled": effective_audio} if type(effective_audio) is bool else {}
+        rollback_audio_options = {"audio_enabled": previous_audio} if type(previous_audio) is bool else {}
         verifier = getattr(self.source_manager, "verify_active_profile", None)
         if not callable(verifier):
             return {"status": "unavailable", "success": False,
@@ -1148,7 +1160,7 @@ class XiaomiSetupService:
             # Release the old consumer before PUT replaces the Stream object.
             if self.source_pause is not None:
                 self.source_pause()
-            manager_activate(internal_id, stream_name, profile)
+            manager_activate(internal_id, stream_name, profile, **audio_options)
             verified = verifier(stream_name, selected_name)
             if not isinstance(verified, XiaomiQualityProfile) or not verified.stable:
                 raise RuntimeError("畫質未取得有效影格。")
@@ -1167,7 +1179,7 @@ class XiaomiSetupService:
             try:
                 manager_activate(internal_id, stream_name, XiaomiQualityProfile(
                     previous_name, None, None, None, None, None, False,
-                ))
+                ), **rollback_audio_options)
                 restored = verifier(stream_name, previous_name)
                 rollback_ok = isinstance(restored, XiaomiQualityProfile) and restored.stable
                 if rollback_ok and self.source_switch is not None:
@@ -1190,7 +1202,7 @@ class XiaomiSetupService:
         self._profiles[internal_id] = [verified]
         self.camera_preferences.remember(internal_id, selected_name, stream_name, metadata={
             "width": verified.width, "height": verified.height, "fps": verified.fps,
-            "video_codec": verified.video_codec, "audio_codec": verified.audio_codec})
+            "video_codec": verified.video_codec, "audio_codec": verified.audio_codec}, audio_enabled=effective_audio)
         state = self._save(
             setup_stage="connected",
             selected_profile=selected_name,
@@ -1204,10 +1216,14 @@ class XiaomiSetupService:
             "success": True,
             "profile": selected_name,
             "video_verified": True,
+            "audio_requested": effective_audio,
+            "audio_verified": bool(verified.audio_codec),
             "source_metadata": {"width": verified.width, "height": verified.height,
-                                "fps": verified.fps, "video_codec": verified.video_codec},
+                                "fps": verified.fps, "video_codec": verified.video_codec, "audio_codec": verified.audio_codec},
             "stream_name": stream_name,
-            "message_zh_tw": f"已套用 {selected_name} 並取得有效影格：{verified.width}×{verified.height}；預覽尺寸可能另有縮放。",
+            "message_zh_tw": (f"已套用 {selected_name} 並取得有效影格：{verified.width}×{verified.height}；預覽尺寸可能另有縮放。"
+                + ("已驗證來源音軌；仍需瀏覽器解除靜音。" if audio_enabled is True and verified.audio_codec
+                   else "已要求來源音訊，但尚未驗證音軌；不能宣稱收音成功。" if audio_enabled is True else "")),
         }
 
     @staticmethod
@@ -1765,7 +1781,9 @@ class XiaomiSetupService:
         try:
             manager_activate = getattr(self.source_manager, "activate_stream", None) if self.source_manager is not None else None
             if callable(manager_activate):
-                local_url = str(manager_activate(internal_id, stream_name, selected))
+                audio_options = ({"audio_enabled": remembered["audio_enabled"]}
+                                 if remembered and type(remembered.get("audio_enabled")) is bool else {})
+                local_url = str(manager_activate(internal_id, stream_name, selected, **audio_options))
                 if resume:
                     selected = self.source_manager.verify_active_profile(stream_name, selected.name)
                     if not isinstance(selected, XiaomiQualityProfile) or not selected.stable:

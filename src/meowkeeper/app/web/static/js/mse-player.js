@@ -3,7 +3,8 @@
   "use strict";
   const candidates = [
     "avc1.640029", "avc1.64002A", "avc1.640033", "avc1.4D401F",
-    "avc1.42E01E", "hvc1.1.6.L153.B0"
+    "avc1.42E01E", "hvc1.1.6.L153.B0",
+    "mp4a.40.2", "mp4a.40.5", "opus", "flac"
   ];
   const mimePattern = /^video\/mp4;\s*codecs="([A-Za-z0-9., ]{1,256})"$/;
 
@@ -15,11 +16,12 @@
     });
   }
 
-  function create({ video, compatibility = false, onStats = () => {}, onStatus = () => {}, onError = () => {} }) {
+  function create({ video, compatibility = false, onStats = () => {}, onStatus = () => {}, onAudio = () => {}, onError = () => {} }) {
     let socket = null, mediaSource = null, sourceBuffer = null, objectUrl = null;
     let queue = [], queuedBytes = 0, totalBytes = 0, windowBytes = 0, lastStatsAt = null, frames = 0, lastPresentedFrames = null;
     let frameCallback = 0, statsTimer = 0, timeout = 0, closed = false, firstFrame = false, opening = false;
     const codecs = supportedCodecs();
+    let audioCodec = null;
 
     function fail(message) {
       if (closed) return;
@@ -111,7 +113,7 @@
     }
 
     function start() {
-      if (!codecs.length) {
+      if (!codecs.some(codec => /^(avc1|hvc1)\./.test(codec))) {
         fail("此瀏覽器沒有可用的 MSE 影片解碼器；已改回節能預覽。");
         return;
       }
@@ -145,6 +147,8 @@
             fail("此裝置無法解碼攝影機格式；已改回節能預覽。"); return;
           }
           mediaSource._meowMime = reply.value;
+          audioCodec = match[1].split(",").map(codec => codec.trim()).find(codec => /^(mp4a\.|opus$|flac$)/.test(codec)) || null;
+          onAudio({ available: Boolean(audioCodec), codec: audioCodec, state: "negotiated" });
           onStatus("negotiated", reply.transcode || null);
           if (mediaSource.readyState === "open") onSourceOpen();
           return;
@@ -213,9 +217,11 @@
         if (!firstFrame) fail("限時內沒有解碼到連續影格；改試相容播放或節能預覽。");
       }, compatibility ? 25000 : 10000);
       video.play().catch(() => {
+        if (closed) return;
         // Muted autoplay is normally allowed; retry muted if unmuted playback is blocked.
         if (!video.muted) {
           video.muted = true;
+          onAudio({ available: Boolean(audioCodec), codec: audioCodec, blocked: true });
           video.play().catch(() => {});
         }
       });

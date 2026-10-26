@@ -70,6 +70,8 @@ class CameraPreferences:
             if not isinstance(stream, str) or not re.fullmatch(r"[A-Za-z0-9_-]{1,80}", stream):
                 continue
             result[key] = {"profile": profile, "stream_name": stream}
+            if type(value.get("audio_enabled")) is bool:
+                result[key]["audio_enabled"] = value["audio_enabled"]
             metadata = self._metadata(value.get("metadata"))
             if metadata:
                 result[key]["metadata"] = metadata
@@ -79,7 +81,7 @@ class CameraPreferences:
         with self._lock:
             return self._read().get(self._key(device_id))
 
-    def remember(self, device_id: str, profile: str, stream_name: str, *, metadata: dict | None = None) -> None:
+    def remember(self, device_id: str, profile: str, stream_name: str, *, metadata: dict | None = None, audio_enabled: bool | None = None) -> None:
         # Reuse the strict loader before writing, including all existing rows.
         with self._lock:
             if profile in {"sd", "hd", "auto"}:
@@ -91,6 +93,11 @@ class CameraPreferences:
             items = self._read()
             previous = items.get(self._key(device_id), {})
             items[self._key(device_id)] = {"profile": profile, "stream_name": stream_name}
+            saved_audio = previous.get("audio_enabled") if audio_enabled is None else audio_enabled
+            if saved_audio is not None:
+                if type(saved_audio) is not bool:
+                    raise ValueError("來源音訊偏好必須是開啟或關閉。")
+                items[self._key(device_id)]["audio_enabled"] = saved_audio
             checked = self._metadata(metadata)
             if checked:
                 checked["verified_at"] = datetime.now(timezone.utc).isoformat()

@@ -1,21 +1,24 @@
 /* Shared presentation. Consumes existing status/preview updates; never polls hardware. */
 (() => {
   'use strict';
-  const by=id=>document.getElementById(id),ns='http://www.w3.org/2000/svg';
+  const consumers=[];
+  function mount(root) {
+  const by=id=>root.querySelector(`#${id}`),ns='http://www.w3.org/2000/svg';
   const finite=value=>typeof value==='number'&&Number.isFinite(value);
   const number=(v,unit='')=>finite(v)?`${Math.round(v*10)/10}${unit}`:'尚未取得';
   const text=(node,value)=>{if(node&&node.textContent!==String(value))node.textContent=value;};
-  const stage=document.querySelector('.preview-stage,.overview-preview');
+  const stage=root.querySelector('.preview-stage,.overview-preview');
   if(!stage)return;
   let status={},metadata={},original=null,originalKey=null,playback={},toastTimer=null,lastCaptureKind='photo';
-  document.querySelectorAll('[data-save-capture]').forEach(button=>{button.textContent=button.dataset.saveCapture==='photo'?'截圖':'錄影（15秒）';});
-  const result=by('capture-result');
+  root.querySelectorAll('[data-save-capture]').forEach(button=>{button.textContent=button.dataset.saveCapture==='photo'?'截圖':'錄影（15秒）';});
+  const result=document.getElementById('capture-result');
   if(result){
     const toast=document.createElement('div');toast.className='capture-toast';toast.hidden=true;
     toast.setAttribute('role','status');toast.setAttribute('aria-live','polite');toast.setAttribute('aria-atomic','true');stage.append(toast);
     result.classList.add('visually-hidden');result.setAttribute('aria-live','off');result.removeAttribute('role');
-    document.querySelectorAll('[data-save-capture]').forEach(button=>button.addEventListener('click',()=>{lastCaptureKind=button.dataset.saveCapture==='video'?'video':'photo';},{capture:true}));
+    root.querySelectorAll('[data-save-capture]').forEach(button=>button.addEventListener('click',()=>{lastCaptureKind=button.dataset.saveCapture==='video'?'video':'photo';},{capture:true}));
     new MutationObserver(()=>{
+      if(root.hidden)return;
       const msg=result.textContent.trim();if(!msg)return;
       const pending=/正在|稍候/.test(msg),success=/已保存|已儲存/.test(msg),photo=lastCaptureKind==='photo';
       toast.dataset.kind=pending?'info':success?'ok':'error';
@@ -25,7 +28,7 @@
     }).observe(result,{childList:true,subtree:true,characterData:true});
   }
   const facts=document.createElement('div');facts.className='stream-facts';
-  const groups=[['source','攝影機原始影像',['解析度','來源速度','編碼','驗證時間']],['play','目前播放',['播放方式','實際尺寸','更新速度','播放狀態']],['ai','AI 分析',['實際輸入','分析速度','設定上限','運算裝置','溫度／負載','調整原因']]];
+  const groups=[['source','攝影機原始影像',['解析度','來源速度','編碼','驗證時間']],['play','目前播放',['播放方式','實際尺寸','更新速度','播放狀態','收音狀態']],['ai','AI 分析',['實際輸入','分析速度','設定上限','運算裝置','溫度／負載','調整原因']]];
   const values={};
   for(const [key,title,labels] of groups){const card=document.createElement('section'),heading=document.createElement('h4'),dl=document.createElement('dl');heading.textContent=title;card.append(heading,dl);for(const label of labels){const row=document.createElement('div'),dt=document.createElement('dt'),dd=document.createElement('dd');dt.textContent=label;dd.textContent='尚未取得';row.append(dt,dd);dl.append(row);values[key+label]=dd;}facts.append(card);}
   const old=by('preview-metadata')||by('overview-source-spec');if(old){old.classList.add('visually-hidden');old.setAttribute('aria-live','off');if(by('overview-preview')){const detail=document.createElement('details'),summary=document.createElement('summary');detail.className='stream-facts-disclosure';summary.textContent='影像與 AI 規格';detail.append(summary,facts);old.after(detail);}else old.after(facts);}
@@ -38,9 +41,10 @@
     v('source驗證時間',original?.verified_at?`${original.historical?'上次驗證':'最近驗證'}：${new Date(original.verified_at).toLocaleString('zh-TW')}${original.historical?'（沿用記錄）':''}`:original?.historical?'已沿用上次驗證；時間未提供':'尚未提供驗證時間');
     v('play播放方式',playback.mode==='sleep'?'休眠':smooth?(playback.transport||'連續影片'):'節能 JPEG');v('play實際尺寸',smooth?`${video.videoWidth} × ${video.videoHeight}`:metadata.resolution||'尚未取得');
     v('play更新速度',stale?'資料已逾時':number(smooth?playback.fps:metadata.fps,' FPS'));v('play播放狀態',playback.reason|| (stale?'等待更新':playback.mode==='sleep'?'此頁已暫停播放':'依目前收到的畫面更新'));
+    v('play收音狀態',!playback.audioRequested?'靜音（流暢影片可能仍含音軌）':playback.audioState==='no-audio-mode'?'此模式沒有聲音；收音偏好已保存':playback.audioAvailable===false?'來源未提供可播放音軌':playback.audioAvailable?'已收到音軌並解除靜音；請確認系統音量':'等待音軌，尚未確認收音');
     v('ai實際輸入',number(a.inference_input_size??metadata.ai_input_size,' px'));v('ai分析速度',number(a.fps??metadata.ai_analysis_fps,' FPS'));v('ai設定上限',`${number(adaptive.effective_input_size,' px')}／${number(adaptive.effective_fps,' FPS')}`);v('ai運算裝置',a.backend||a.device||'尚未取得');v('ai溫度／負載',`${number(adaptive.temperature_c??t.gpu_temperature_c,'°C')}／${number(adaptive.load_percent,'%')}`);v('ai調整原因',adaptive.reason_zh_tw||'依已保存的分析設定執行');
   }
-  window.MeowKeeperMonitorUI={preview(data,source){metadata=data||{};const key=metadata.stream_name||metadata.source_id||"";if(key!==originalKey){original=null;originalKey=key;}const saved=metadata.original_source;if(saved&&Number.isInteger(saved.width)&&Number.isInteger(saved.height))original=saved;else if(source!==undefined)original=source;renderFacts();}};
+  consumers.push({preview(data,source){metadata=data||{};const key=metadata.stream_name||metadata.source_id||"";if(key!==originalKey){original=null;originalKey=key;}const saved=metadata.original_source;if(saved&&Number.isInteger(saved.width)&&Number.isInteger(saved.height))original=saved;else if(source!==undefined)original=source;renderFacts();}});
   stage.addEventListener('meowkeeper:playback',e=>{playback=e.detail||{};renderFacts();});
   const home=by('overview-preview'),gauges=new Map();
   if(home){
@@ -72,4 +76,8 @@
       cpuTemperature.detail.dataset.sensorSource=source;cpuTemperature.detail.setAttribute('aria-label',`${model}；${source}`);
     }
   });
+  }
+  const roots=[...document.querySelectorAll('[data-monitor-view]')];
+  (roots.length?roots:[document]).forEach(mount);
+  window.MeowKeeperMonitorUI={preview(data,source){consumers.forEach(consumer=>consumer.preview(data,source));}};
 })();

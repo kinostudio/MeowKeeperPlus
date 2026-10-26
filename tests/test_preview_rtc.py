@@ -130,7 +130,8 @@ class RtcPreviewTests(unittest.TestCase):
                         jobs.append(asyncio.create_task(serve_rtc(socket, core=core, sessions=sessions,
                             go2rtc=SimpleNamespace(api_url="http://127.0.0.1:1984", rtsp_port=8554), slots=slots, source=source)))
                         answer = await asyncio.wait_for(socket.answer, 8)
-                        await client.setRemoteDescription(RTCSessionDescription(**answer))
+                        self.assertFalse(answer["audio_available"], "video-only source must not claim an audio track")
+                        await client.setRemoteDescription(RTCSessionDescription(sdp=answer["sdp"], type=answer["type"]))
                         frames.append(received)
                     try:
                         received_frames = await asyncio.wait_for(asyncio.gather(*frames), 8)

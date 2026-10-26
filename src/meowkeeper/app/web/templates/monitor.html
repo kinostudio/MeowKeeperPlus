@@ -1,0 +1,9 @@
+{% extends "base.html" %}
+{% block content %}
+<div data-monitor-view="overview"{% if page_path == '/live' %} hidden inert{% endif %}>
+  {% with monitor_fragment=true %}{% include "dashboard.html" %}{% endwith %}
+</div>
+<div data-monitor-view="live"{% if page_path != '/live' %} hidden inert{% endif %}>
+  {% with monitor_fragment=true %}{% include "live.html" %}{% endwith %}
+</div>
+{% endblock %}

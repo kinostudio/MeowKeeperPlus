@@ -327,9 +327,14 @@ class Go2RtcXiaomiDiscovery:
         return self._sources.get(internal_id)
 
     @staticmethod
-    def _with_profile(source: str, profile_name: str) -> str:
+    def _with_profile(source: str, profile_name: str, *, audio_enabled: bool | None = None) -> str:
         parsed = urlsplit(source)
         query = [(key, value) for key, value in parse_qsl(parsed.query, keep_blank_values=True) if key != "subtype"]
+        if audio_enabled is not None:
+            if type(audio_enabled) is not bool:
+                raise ValueError("來源音訊選項必須是開啟或關閉。")
+            query = [(key, value) for key, value in query if key != "audio"]
+            query.append(("audio", "1" if audio_enabled else "0"))
         # Video & audio monitoring: default to audio=1 so live sound and event clips have audio
         # Preserve an explicit audio choice supplied by the source.
         if not any(key == "audio" for key, _ in query):
@@ -537,12 +542,12 @@ class Go2RtcXiaomiDiscovery:
             )
         return results
 
-    def activate_stream(self, internal_id: str, stream_name: str, profile: Any) -> str:
+    def activate_stream(self, internal_id: str, stream_name: str, profile: Any, *, audio_enabled: bool | None = None) -> str:
         source = self.source_for(internal_id)
         if not source:
             raise RuntimeError("找不到 Xiaomi source reference；請重新載入裝置。")
         profile_name = str(getattr(profile, "name", "subtype=auto"))
-        self.client.put_stream(stream_name, self._with_profile(source, profile_name))
+        self.client.put_stream(stream_name, self._with_profile(source, profile_name, audio_enabled=audio_enabled))
         return f"rtsp://127.0.0.1:{self.rtsp_port}/{stream_name}"
 
     def verify_active_profile(self, stream_name: str, profile_name: str) -> Any:
@@ -584,15 +589,31 @@ class Go2RtcXiaomiDiscovery:
                 if image.format != "JPEG":
                     raise ValueError("invalid_format")
                 image.verify()
+            audio_codec = self._received_audio_codec(stream_name)
             return XiaomiQualityProfile(
                 profile_name, width, height, self._parse_rate(video.get("avg_frame_rate")),
-                str(video.get("codec_name") or "") or None, None, True,
+                str(video.get("codec_name") or "") or None, audio_codec, True,
             )
         except (OSError, ValueError, TypeError, KeyError, subprocess.TimeoutExpired):
             raise RuntimeError("新畫質尚未取得有效影格；請查看連線診斷。") from None
 
     def remove_stream(self, stream_name: str) -> None:
         self.client.delete_stream(stream_name)
+
+    def _received_audio_codec(self, stream_name: str) -> str | None:
+        """Read packet evidence from the existing producer, never wait for a new audio source."""
+        try:
+            status = self.client.stream_status(stream_name)
+            if not isinstance(status, dict):
+                return None
+            for producer in status.get("producers") or []:
+                for receiver in producer.get("receivers") or []:
+                    codec = (receiver.get("codec") or {}).get("codec_name")
+                    if codec in {"opus", "aac", "pcma", "pcmu", "flac"} and int(receiver.get("packets") or 0) > 0:
+                        return codec
+        except (OSError, RuntimeError, ValueError, TypeError, AttributeError):
+            return None
+        return None
 
     def stream_status(self, stream_name: str) -> dict[str, Any] | str:
         return self.client.stream_status(stream_name)

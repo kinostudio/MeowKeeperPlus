@@ -181,7 +181,7 @@
       catch (_) { text("overview-frame-note", "此瀏覽器未提供全螢幕；可至即時畫面查看。"); }
     });
   }
-  document.querySelectorAll("[data-save-capture]").forEach(button=>button.addEventListener("click",async()=>{
+  (image.closest("[data-monitor-view]")||document).querySelectorAll("[data-save-capture]").forEach(button=>button.addEventListener("click",async()=>{
     const buttons=document.querySelectorAll("[data-save-capture]");buttons.forEach(b=>b.disabled=true);text("capture-result","正在保存既有影音…");
     try{const cookie=document.cookie.split(";").map(s=>s.trim()).find(s=>s.startsWith("meowkeeper_csrf="));const response=await fetch("/api/v1/live/save",{method:"POST",headers:{"Content-Type":"application/json","X-MeowKeeper-CSRF":cookie?decodeURIComponent(cookie.split("=").slice(1).join("=")):""},body:JSON.stringify({kind:button.dataset.saveCapture})});const result=await response.json();text("capture-result",result.message_zh_tw||result.detail||"保存結果未確認");}
     catch(_){text("capture-result","保存結果未確認，請檢查 photo／video 資料夾，避免重複保存。");}finally{buttons.forEach(b=>b.disabled=false);}

@@ -1,4 +1,4 @@
-{% extends "base.html" %}
+{% extends "_monitor_fragment.html" if monitor_fragment else "base.html" %}
 {% block content %}
 <div class="content-heading"><div><p class="eyebrow">看見牠的每一刻</p><h2>即時畫面</h2></div><small>顯示最近收到的畫面；預覽更新速度可能低於原始錄影幀率。開啟多個網頁仍共用同一來源。</small></div>
 <section class="panel">
@@ -38,7 +38,7 @@
   <p id="preview-message" class="muted" role="status" aria-live="polite">正在確認來源與影格狀態…</p>
   <p id="preview-metadata" class="muted" aria-live="polite">解析度：尚未取得｜FPS：尚未取得</p>
   <p id="capture-help" class="field-help">截圖優先從既有影音快取保存原始解析度；無法取得時改用預覽並顯示實際尺寸。即時預覽仍可維持 1080p，截圖不另開攝影機連線。影片取按下按鈕之前的壓縮影音快取。保存於 Host 資料主目錄的 photo／video 資料夾（可攜版 data；安裝版 ProgramData 的 Data）。啟動初期片段可能不足 15 秒；畫面會回報實際長度。手動保存檔案由你保留，請定期整理磁碟。</p>
-  <p id="capture-result" role="status" aria-live="polite"></p>
+  {% if not monitor_fragment %}<p id="capture-result" role="status" aria-live="polite"></p>{% endif %}
   <div class="actions" aria-label="即時畫面操作">
     <button class="button secondary" data-action="refresh">重新讀取</button>
   </div>
@@ -67,7 +67,9 @@
       <option value="subtype=5">5（進階，需實測）</option>
     </select>
     <button class="button secondary" id="live-quality-apply" type="button" disabled>套用畫質</button>
+    <button class="button secondary" id="live-source-audio" type="button" aria-describedby="live-source-audio-help" disabled>啟用來源音訊（需重接）</button>
   </div>
+  <p id="live-source-audio-help" class="field-help">收音圖示只控制瀏覽器靜音。若來源原本設定 audio=0，需在這裡明確啟用音訊：沿用目前畫質並短暫重接同一條來源，期間錄影與偵測可能短暫中斷。沒有驗證到音軌時不回報收音成功。設定會記住；靜音不會關閉來源音軌。</p>
   <p id="live-quality-help" class="muted" role="status" aria-live="polite">尚未載入目前畫質。</p>
   <p class="field-help">代碼不是固定像素：通常 1／SD 是低畫質，2／HD 是高畫質；部分新機用 3，舊機可能不支援 3。C701 社群回報 0～2 為 480p、3 為 2160p，並非所有韌體保證；026c02 也有 subtype=2 為 1920×1080 的實測。請以上方目前攝影機的驗證結果為準，不把另一台的規格當成此台規格。<a href="https://github.com/AlexxIT/go2rtc/issues/1982" target="_blank" rel="noopener noreferrer">go2rtc 機型回報</a>。預覽、錄影及 AI 共用單一來源；AI 分析尺寸可在「設定 → AI 與行為參數」調整，過載時會自動降階。</p>
 </section>
@@ -132,6 +134,8 @@
   const qualityStatus = document.getElementById("live-quality-status");
   const qualityProfile = document.getElementById("live-quality-profile");
   const qualityApply = document.getElementById("live-quality-apply");
+  const sourceAudioButton = document.getElementById("live-source-audio");
+  let sourceAudioEnabled = null, sourceAudioAvailable = false;
   const qualityHelp = document.getElementById("live-quality-help");
   let sharedPreview = null;
   let activePtzDeviceId = null;
@@ -350,7 +354,7 @@
       .find((value) => value.startsWith("meowkeeper_csrf="))?.split("=").slice(1).join("=") || "");
   }
 
-  document.querySelectorAll("[data-save-capture]").forEach((button) => {
+  (image.closest("[data-monitor-view]") || document).querySelectorAll("[data-save-capture]").forEach((button) => {
     button.addEventListener("click", async () => {
       const buttons = document.querySelectorAll("[data-save-capture]");
       const result = document.getElementById("capture-result");
@@ -397,6 +401,8 @@
     const fallbackOptions = ["subtype=1", "subtype=2", "subtype=3", "subtype=auto", "subtype=sd", "subtype=hd", "subtype=0", "subtype=4", "subtype=5"]
       .map((value) => ({ value, label: `${value}（即時畫面）` }));
     if (!active) {
+      sourceAudioAvailable = false;
+      if (sourceAudioButton) sourceAudioButton.disabled = true;
       activeQualityDeviceId = null;
       qualitySwitchAvailable = false;
       qualityProfile.replaceChildren();
@@ -440,6 +446,12 @@
     const selected = String(active.selected_profile || "subtype=1");
     qualityProfile.value = options.some((item) => String(item.value) === selected) ? selected : "subtype=1";
     qualitySwitchAvailable = active.quality_switch_available === true;
+    sourceAudioEnabled = active.source_audio_enabled;
+    sourceAudioAvailable = active.audio_reconnect_available === true;
+    if (sourceAudioButton) {
+      sourceAudioButton.disabled = !sourceAudioAvailable;
+      sourceAudioButton.textContent = sourceAudioEnabled === true ? "停用來源音訊（需重接）" : "啟用來源音訊（需重接）";
+    }
     qualityProfile.disabled = !qualitySwitchAvailable;
     qualityApply.disabled = !qualitySwitchAvailable;
     const remote = active.connection_mode === "remote_relay";
@@ -703,7 +715,9 @@
       sendPtz(payload, button);
     });
   });
+  // PTZ keyboard controls must never move a camera from the hidden live view.
   document.addEventListener("keydown", (event) => {
+    if (directionControls.closest?.("[data-monitor-view]")?.hidden && event.key !== "Escape") return;
     if (event.key === "Escape" && !event.target?.closest?.("input, textarea, select, [contenteditable]")) {
       emergencyStop();
       return;
@@ -791,6 +805,34 @@
   });
   window.addEventListener("blur", () => { if (ptzRequestInFlight) emergencyStop(); });
   qualityApply?.addEventListener("click", applyQuality);
+  sourceAudioButton?.addEventListener("click", async () => {
+    if (!sourceAudioAvailable || !activeQualityDeviceId || qualityRequestInFlight || ptzRequestInFlight) return;
+    const enabled = sourceAudioEnabled !== true;
+    if (!window.confirm(`${enabled ? "啟用" : "停用"}來源音訊會沿用目前畫質，短暫重接同一條攝影機來源，錄影與偵測可能短暫中斷。確定繼續？`)) return;
+    qualityRequestInFlight = true;
+    sourceAudioButton.disabled = true;
+    qualityApply.disabled = true;
+    try {
+      qualityHelp.textContent = "正在套用音訊偏好並確認新影格…";
+      const response = await fetch(`/api/v1/cameras/xiaomi/devices/${encodeURIComponent(activeQualityDeviceId)}/profile`, {
+        method: "POST", signal: AbortSignal.timeout(35000),
+        headers: { "Content-Type": "application/json", "X-MeowKeeper-CSRF": csrfToken() },
+        body: JSON.stringify({ profile: qualityProfile.value, audio_enabled: enabled, confirm_reconnect: true })
+      });
+      const result = await response.json();
+      if (!response.ok || result.success !== true) throw new Error(result.message_zh_tw || result.detail || "音訊來源未確認套用。");
+      qualityHelp.textContent = result.message_zh_tw;
+      await sharedPreview?.reconnect?.();
+    } catch (error) { qualityHelp.textContent = error.message || "來源音訊未確認，請查看診斷。"; }
+    finally {
+      qualityRequestInFlight = false;
+      const resultText = qualityHelp.textContent;
+      await loadPtz();
+      qualityHelp.textContent = resultText;
+      sourceAudioButton.disabled = !sourceAudioAvailable;
+      qualityApply.disabled = !qualitySwitchAvailable;
+    }
+  });
   ptzControls.querySelector("[data-ptz-refresh]")?.addEventListener("click", async (event) => {
     if (!activePtzDeviceId || ptzRequestInFlight) return;
     const button = event.currentTarget;
@@ -818,10 +860,14 @@
     }
   });
 
-  loadPtz();
   // The relay capability probe runs in the Host background. Refresh once
   // after it resolves, then retry sparingly while the control channel is down.
-  const previewPaused = () => document.hidden || sharedPreview?.mode() === "sleep";
+  const previewPaused = () => document.hidden || previewStage.closest("[data-monitor-view]")?.hidden || sharedPreview?.mode() === "sleep";
+  if (!previewPaused()) loadPtz();
+  document.addEventListener("meowkeeper:monitor-view", event => {
+    if (event.detail?.scope === "live" && !previewPaused()) loadPtz();
+    else if (event.detail?.scope !== "live" && ptzMoveStarted) emergencyStop();
+  });
   window.setTimeout(() => { if (!previewPaused()) loadPtz(); }, 2000);
   window.setInterval(() => { if (!previewPaused() && !qualitySwitchAvailable) loadPtz(); }, 15000);
 

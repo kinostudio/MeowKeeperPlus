@@ -4,13 +4,14 @@ const path = require('node:path');
 const vm = require('node:vm');
 
 class Element {
-  constructor(tag) { this.tagName=tag; this.children=[]; this.attrs={}; this.dataset={}; this.listeners={}; this.hidden=false; this.naturalWidth=640; this.naturalHeight=360; }
+  constructor(tag) { this.tagName=tag; this.children=[]; this.attrs={}; this.dataset={}; this.listeners={}; this.hidden=false; this.naturalWidth=640; this.naturalHeight=360; this.classList={contains:()=>false,add(){},remove(){},toggle(){}}; }
   append(...nodes) { this.children.push(...nodes); }
   setAttribute(k,v) { this.attrs[k]=v; }
   removeAttribute(k) { delete this.attrs[k]; if(k==='src') delete this.src; }
   addEventListener(k,v) { this.listeners[k]=v; }
   removeEventListener(k) { delete this.listeners[k]; }
   closest() { return this.parentElement; }
+  contains(node) { return this.children.includes(node); }
   pause() {} load() {} remove() {} async decode() {}
 }
 function deferred() { let resolve; const promise=new Promise(r=>{resolve=r;}); return {promise,resolve}; }

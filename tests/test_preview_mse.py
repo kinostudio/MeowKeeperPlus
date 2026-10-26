@@ -73,7 +73,7 @@ class PreviewMseContractTests(unittest.TestCase):
         self.assertIn('scope:"overview",defaultMode:"energy"', dashboard)
         self.assertIn('scope:"live",defaultMode:"smooth"', live)
         self.assertIn("/api/v1/preview/mse", player)
-        self.assertIn('previewPaused = () => document.hidden || sharedPreview?.mode() === "sleep"', live)
+        self.assertIn('previewPaused = () => document.hidden || previewStage.closest("[data-monitor-view]")?.hidden || sharedPreview?.mode() === "sleep"', live)
         self.assertNotIn("127.0.0.1:1984", player + shared)
         self.assertIn(".preview-mode-select", preview_css)
         self.assertIn(".preview-mode-select:hover .preview-mode-tooltip", preview_css)

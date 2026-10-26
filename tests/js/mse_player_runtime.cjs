@@ -25,7 +25,7 @@ class Media extends Events {
 class Socket extends Events {
   static CLOSING = 2;
   constructor() { super(); this.readyState = 1; socket = this; }
-  send() {}
+  send(value) { this.offer = JSON.parse(value); }
   close() { this.readyState = 3; }
 }
 const video = new Events();
@@ -37,10 +37,14 @@ vm.runInNewContext(fs.readFileSync(path.join(__dirname, '../../src/meowkeeper/ap
   URL: { createObjectURL: () => 'blob:fixture', revokeObjectURL() {} },
   setTimeout: () => 1, clearTimeout() {}, clearInterval() {}, performance: { now: () => 1000 }
 });
-const stats = [];
-const player = window.MeowKeeperMSE.create({ video, onError: message => errors.push(message), onStats: value => stats.push(value) });
+const stats = [], audio = [];
+const player = window.MeowKeeperMSE.create({ video, onError: message => errors.push(message), onStats: value => stats.push(value), onAudio: value => audio.push(value) });
 player.start();
-socket.fire('message', { data: JSON.stringify({ type: 'mse', value: 'video/mp4; codecs="hvc1.1.6.L153.B0"' }) });
+socket.fire('open');
+assert.ok(socket.offer.value.includes('mp4a.40.2'), 'MSE offer must include AAC audio, not just video');
+socket.fire('message', { data: JSON.stringify({ type: 'mse', value: 'video/mp4; codecs="hvc1.1.6.L153.B0,mp4a.40.2"' }) });
+assert.equal(audio.at(-1).available, true);
+assert.equal(audio.at(-1).codec, 'mp4a.40.2');
 socket.fire('message', { data: new ArrayBuffer(32) });
 assert.equal(buffer.appends, 1);
 buffer.finish(); // append completion prunes old media once
@@ -56,4 +60,9 @@ frameCallback(1000, { presentedFrames: 10 });
 frameCallback(2000, { presentedFrames: 30 });
 assert.equal(stats.at(-1).fps, 20, 'FPS counts presented frames even when callbacks are coalesced');
 player.close();
+const silent = window.MeowKeeperMSE.create({ video, onAudio: value => audio.push(value) });
+silent.start();
+socket.fire('message', { data: JSON.stringify({ type: 'mse', value: 'video/mp4; codecs="avc1.640029"' }) });
+assert.equal(audio.at(-1).available, false, 'video-only negotiation must not claim audio success');
+silent.close();
 console.log('passed: MSE pruning resumes appends and FPS uses presented-frame deltas');
