@@ -1,4 +1,4 @@
-{% extends "base.html" %}
+{% extends "_monitor_fragment.html" if monitor_fragment else "base.html" %}
 {% from '_icons.html' import icon %}
 {% block content %}
 <div class="content-heading dashboard-heading"><div><h2>今天的守護概況</h2><span id="service-state" class="status-pill status-unknown" role="status">正在確認監控狀態</span><span id="overview-source-name" class="source-chip">單一來源尚未確認</span></div></div>

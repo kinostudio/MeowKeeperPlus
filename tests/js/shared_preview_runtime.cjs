@@ -8,6 +8,7 @@ class Element {
   constructor(tag) {
     this.tagName = tag; this.children = []; this.dataset = {}; this.attrs = {};
     this.listeners = {}; this.hidden = false; this.naturalWidth = 1920; this.naturalHeight = 1080;
+    this.classList = {contains:()=>false,add(){},remove(){},toggle(){}};
   }
   append(...nodes) { this.children.push(...nodes); }
   setAttribute(key, value) { this.attrs[key] = value; }
@@ -15,6 +16,7 @@ class Element {
   addEventListener(key, fn) { this.listeners[key] = fn; }
   removeEventListener(key) { delete this.listeners[key]; }
   closest() { return this.parentElement; }
+  contains(node) { return this.children.includes(node); }
   pause() {}
   load() {}
   remove() { this.removed = true; }

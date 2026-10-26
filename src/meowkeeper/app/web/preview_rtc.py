@@ -159,7 +159,8 @@ async def serve_rtc(websocket, *, core, sessions, go2rtc, slots, source, viewer_
         if a_track is not None and "m=audio" in sdp:
             peer.addTrack(a_track)
         await peer.setLocalDescription(await peer.createAnswer())
-        await websocket.send_json({"type": "answer", "sdp": peer.localDescription.sdp})
+        await websocket.send_json({"type": "answer", "sdp": peer.localDescription.sdp,
+                                   "audio_available": a_track is not None and "m=audio" in sdp})
 
         async def disconnected():
             while True:

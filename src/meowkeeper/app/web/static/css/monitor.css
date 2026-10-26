@@ -132,6 +132,8 @@
   .telegram-recipient-row .recipient-check,.telegram-recipient-row .recipient-remove-btn{padding-top:0;margin-top:0}
 }
 
+[data-monitor-view][hidden] { display:none !important; }
+
 /* Collapsible Left Navigation Sidebar */
 .layout{transition:grid-template-columns .2s ease;min-height:calc(100dvh - 72px)}
 @media(min-width:761px){

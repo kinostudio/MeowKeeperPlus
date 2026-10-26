@@ -9,9 +9,12 @@
   let viewerPageId = null;
   try { viewerPageId = window.MeowKeeperRequestId?.() || null; } catch (_) { /* viewer stays unidentified */ }
 
-  function mount({ image, empty, note, scope = "live", defaultMode = "energy", onMetadata = () => {}, onFrame = () => {}, onUnavailable = () => {} }) {
-    const stage = image.closest(".preview-stage, .overview-preview") || image.parentElement;
-    const publishPlayback = detail => { if (stage.dispatchEvent && typeof CustomEvent === "function") stage.dispatchEvent(new CustomEvent("meowkeeper:playback", {detail})); };
+  function create(options) {
+    let { image, empty, note, scope = "live", defaultMode = "energy", onMetadata = () => {}, onFrame = () => {}, onUnavailable = () => {} } = options;
+    let stage = image.closest(".preview-stage, .overview-preview") || image.parentElement;
+    let mode = defaultMode;
+    let lastPlayback = {};
+    const publishPlayback = detail => { lastPlayback = {...detail, audioRequested: audioEnabled, audioAvailable: audioEvidence?.available ?? null, audioState: audioButton.dataset.audioState}; if (stage.dispatchEvent && typeof CustomEvent === "function") stage.dispatchEvent(new CustomEvent("meowkeeper:playback", {detail:lastPlayback})); };
     const video = document.createElement("video");
     video.className = "preview-video";
     video.setAttribute("playsinline", "");
@@ -48,7 +51,7 @@
       buttons.set(key, button);
     }
 
-    let audioEnabled = false;
+    let audioEnabled = false, audioEvidence = null, connectedTransport = null;
     const audioButton = document.createElement("button");
     audioButton.type = "button";
     audioButton.className = "preview-mode-button preview-mode-select preview-audio-toggle";
@@ -71,13 +74,15 @@
 
     function updateAudioButton() {
       audioButton.setAttribute("aria-pressed", String(audioEnabled));
+      audioButton.dataset.audioState = !audioEnabled ? "muted" : mode !== "smooth" ? "no-audio-mode" : audioEvidence?.available === false ? "unavailable" : audioEvidence?.available ? "track" : "pending";
       if (audioEnabled) {
-        audioButton.setAttribute("aria-label", "現場收音（已開啟）：點擊切換為靜音");
-        audioTooltip.textContent = "現場收音｜已開啟現場聲音；點擊切換為靜音";
+        const state = mode !== "smooth" ? "目前模式沒有聲音，已記住收音偏好" : audioEvidence?.available === false ? "來源未提供可播放音軌" : audioEvidence?.available ? "已收到音軌，已解除靜音" : "已要求收音，等待音軌";
+        audioButton.setAttribute("aria-label", `現場收音（${state}）：點擊切換為靜音`);
+        audioTooltip.textContent = `現場收音｜${state}；聲音仍需確認裝置音量`;
         audioIcon.innerHTML = soundSvg;
       } else {
-        audioButton.setAttribute("aria-label", "現場收音（已靜音）：點擊開啟拉取現場音訊");
-        audioTooltip.textContent = "現場收音｜目前靜音（預設關閉）；點擊開啟拉取現場音訊";
+        audioButton.setAttribute("aria-label", "現場收音（已靜音）：點擊解除靜音");
+        audioTooltip.textContent = "現場收音｜預設靜音；流暢影片可包含來源音軌，節能 JPEG 沒有聲音";
         audioIcon.innerHTML = mutedSvg;
       }
     }
@@ -85,17 +90,25 @@
     audioButton.append(audioIcon, audioTooltip);
     hud.append(audioButton);
 
-    audioButton.addEventListener("click", () => {
+    audioButton.addEventListener("click", async () => {
       audioEnabled = !audioEnabled;
       video.muted = !audioEnabled;
       if (audioEnabled) video.volume = 1.0;
       updateAudioButton();
+      publishPlayback(lastPlayback);
       if (audioEnabled) {
         if (mode === "smooth") {
-          video.play?.().catch?.(() => {});
-          say("已開啟即時現場收音。");
+          if (connectedTransport === "WebRTC" && audioEvidence?.available === false) {
+            msePlayer?.close(); msePlayer = null;
+            say("WebRTC 沒有可轉送音軌，改試含音訊的 MSE；不另接攝影機。");
+            startSmooth(true);
+          } else {
+            try { await video.play?.(); }
+            catch (_) { audioEnabled = false; video.muted = true; updateAudioButton(); say("瀏覽器阻擋有聲播放；請再次點擊收音並檢查網站音量權限。"); return; }
+            say(audioEvidence?.available === false ? "來源未提供此格式可播放的音軌；解除靜音不代表已收到聲音。" : "已要求收音；請以音軌狀態與實際聲音確認，並檢查系統音量。");
+          }
         } else {
-          say("已開啟現場收音；請切換至「流暢」模式收聽聲音。");
+          say("已記住收音偏好；節能 JPEG 沒有音訊，請切換「流暢」播放。");
         }
       } else {
         video.muted = true;
@@ -172,13 +185,14 @@
     fullscreenButton.addEventListener("click", toggleFullscreen);
     document.addEventListener("fullscreenchange", updateFullscreenButton);
     if ("onwebkitfullscreenchange" in document) document.addEventListener("webkitfullscreenchange", updateFullscreenButton);
-    document.addEventListener("keydown", (e) => {
+    function onFullscreenKeydown(e) {
       if (e.key === "Escape" && stage.classList.contains("is-mobile-fullscreen")) {
         stage.classList.remove("is-mobile-fullscreen");
         document.body.classList.remove("is-mobile-fullscreen-active");
         updateFullscreenButton();
       }
-    });
+    }
+    document.addEventListener("keydown", onFullscreenKeydown);
 
 
 
@@ -189,8 +203,8 @@
     stats.textContent = "節能預覽｜等待來源影格";
     hud.append(stats);
     stage.append(hud);
-    const overlay = window.MeowKeeperOverlay?.mount(stage, hud);
-    const hudVisibility = window.MeowKeeperHud?.mount(stage);
+    let overlay = window.MeowKeeperOverlay?.mount(stage, hud);
+    let hudVisibility = window.MeowKeeperHud?.mount(stage);
 
     const sleepState = document.createElement("div");
     sleepState.className = "preview-sleep-state";
@@ -198,8 +212,7 @@
     sleepState.innerHTML = '<span aria-hidden="true">◉̸</span><strong>預覽已休眠</strong><small>此頁沒有下載影格或連續影片；點選「節能」或「流暢」恢復。</small>';
     stage.append(sleepState);
 
-    const storageKey = `meowkeeper-preview-mode:${scope}`;
-    let mode = defaultMode;
+    let storageKey = `meowkeeper-preview-mode:${scope}`;
     try { mode = localStorage.getItem(storageKey) || defaultMode; } catch (_) { /* storage is optional */ }
     if (!Object.prototype.hasOwnProperty.call(modes, mode)) mode = defaultMode;
     let metadata = null, metaAt = 0, metaBusy = false, frameBusy = false;
@@ -389,11 +402,30 @@
       say(compatibility ? "正在準備共用 H.264 相容影片；只讀取本機 go2rtc，會增加主機負載。" : hevcSource ? "瀏覽器支援 HEVC，直接使用原碼 MSE；不另做 H.264 轉碼。" : "正在連接同一個 go2rtc 串流；不建立第二個攝影機來源。" );
       stats.textContent = "流暢播放｜正在協商媒體格式";
       const useRtc = !useMse && !hevcSource && Boolean(window.MeowKeeperRTC && window.RTCPeerConnection);
+      connectedTransport = useRtc ? "WebRTC" : "MSE";
+      audioEvidence = null;
+      updateAudioButton();
       const player = useRtc ? window.MeowKeeperRTC : window.MeowKeeperMSE;
       let encodingHint = "共用 H.264 相容轉碼";
       msePlayer = player.create({
         video,
         compatibility,
+        onAudio: evidence => {
+          if (cycle !== generation || disposed || mode !== "smooth") return;
+          audioEvidence = { ...audioEvidence, ...evidence };
+          if (evidence.blocked) {
+            audioEnabled = false; video.muted = true;
+            say("瀏覽器阻擋有聲播放；已維持靜音，請再次點擊收音並確認網站音量權限。");
+          } else if (audioEnabled && evidence.available === false && useRtc) {
+            msePlayer?.close(); msePlayer = null;
+            startSmooth(true);
+            return;
+          } else if (audioEnabled && evidence.available === false) {
+            say("已連接影片，但來源未提供可播放音軌；請確認攝影機收音及來源音訊格式。");
+          }
+          updateAudioButton();
+          publishPlayback(lastPlayback);
+        },
         onStatus: (state, encoding) => {
           if (cycle !== generation || mode !== "smooth") return;
           if (state === "connecting") { stats.textContent = "流暢播放｜連接同源串流"; }
@@ -443,6 +475,9 @@
       stopDisplay();
       const cycle = generation;
       mode = next;
+      audioEvidence = null;
+      connectedTransport = null;
+      updateAudioButton();
       publishPlayback({mode,reason:null});
       connectedStream = null;
       if (persist) fallbackReason = null;
@@ -471,16 +506,59 @@
       if (mode !== "sleep") setMode(mode, { persist: false });
     }
     function close() {
+      if (disposed) return;
       disposed = true;
       hudVisibility?.close();
       stopDisplay();
       document.removeEventListener("visibilitychange", onVisibility);
       window.removeEventListener("pagehide", close);
       document.removeEventListener("fullscreenchange", updateFullscreenButton);
+      document.removeEventListener("keydown", onFullscreenKeydown);
       if ("onwebkitfullscreenchange" in document) document.removeEventListener("webkitfullscreenchange", updateFullscreenButton);
       fullscreenButton.remove();
       hud.remove(); sleepState.remove(); video.remove();
       overlay?.close();
+    }
+    function attach(options) {
+      if (disposed) return;
+      // Keep video/srcObject/MediaSource and its transport alive. No setMode,
+      // stopDisplay, URL revocation or media negotiation on a view change.
+      const nextStage = options.image.closest(".preview-stage, .overview-preview") || options.image.parentElement;
+      onMetadata = options.onMetadata || (() => {});
+      onFrame = options.onFrame || (() => {});
+      onUnavailable = options.onUnavailable || (() => {});
+      if (nextStage === stage) return;
+      if (stage.classList.contains("is-mobile-fullscreen")) {
+        stage.classList.remove("is-mobile-fullscreen");
+        document.body.classList.remove("is-mobile-fullscreen-active");
+      }
+      if (document.fullscreenElement === stage) document.exitFullscreen?.().catch?.(() => {});
+      else if (document.webkitFullscreenElement === stage) document.webkitExitFullscreen?.();
+      overlay?.close();
+      hudVisibility?.close();
+      image.hidden = true;
+      image.removeAttribute("src");
+      image = options.image; empty = options.empty; note = options.note;
+      scope = options.scope || "live";
+      storageKey = `meowkeeper-preview-mode:${scope}`;
+      stage = nextStage;
+      for (const node of [video, hud, sleepState]) {
+        if (stage.moveBefore && node.isConnected && stage.isConnected) stage.moveBefore(node, null);
+        else stage.append(node);
+      }
+      if (objectUrl && mode === "energy") { image.src = objectUrl; image.hidden = false; }
+      else image.hidden = true;
+      overlay = window.MeowKeeperOverlay?.mount(stage, hud);
+      hudVisibility = window.MeowKeeperHud?.mount(stage);
+      if (metadata) onMetadata(metadata);
+      if (empty) empty.hidden = mode === "sleep" || !image.hidden || !video.hidden;
+      publishPlayback(lastPlayback);
+      overlay?.update(metadata?.overlay, mode === "smooth" ? video : image);
+      if (mode === "smooth" && visible && !video.hidden) video.play?.().catch?.(() => {
+        audioEnabled = false; video.muted = true; updateAudioButton();
+        say("瀏覽器阻擋有聲播放；影片連線仍保留，請再次點擊收音。");
+      });
+      if (mode === "sleep") setSleepState();
     }
     for (const button of buttons.values()) button.addEventListener("click", () => setMode(button.dataset.previewMode));
     document.addEventListener("visibilitychange", onVisibility);
@@ -490,7 +568,9 @@
     if (visible) setMode(mode, { persist: false });
     return {
       refresh: async () => { await readMetadata(true); if (mode === "energy") await readJpeg(); },
+      reconnect: () => setMode(mode, { persist: false }),
       close,
+      attach,
       isDisplaying: () => !image.hidden || !video.hidden,
       mode: () => mode,
       isAudioEnabled: () => audioEnabled,
@@ -503,5 +583,37 @@
       toggleFullscreen
     };
   }
+  let shared = null;
+  const views = new Map();
+  function activate(scope) {
+    const options = views.get(scope);
+    if (!options) return;
+    if (shared) shared.attach(options);
+    else shared = create(options);
+  }
+  function mount(options) {
+    const view = options.image.closest("[data-monitor-view]");
+    if (!view?.dataset?.monitorView) return create(options);
+    const scope = view.dataset.monitorView;
+    views.set(scope, options);
+    if (!view.hidden) activate(scope);
+    return {
+      refresh: () => view.hidden ? Promise.resolve() : shared?.refresh(),
+      reconnect: () => shared?.reconnect(),
+      close: () => shared?.close(),
+      mode: () => shared?.mode() || options.defaultMode || "energy",
+      isDisplaying: () => !view.hidden && Boolean(shared?.isDisplaying()),
+      isAudioEnabled: () => Boolean(shared?.isAudioEnabled()),
+      setAudioEnabled: value => shared?.setAudioEnabled(value),
+      isFullscreen: () => !view.hidden && Boolean(shared?.isFullscreen()),
+      toggleFullscreen: () => { if (!view.hidden) return shared?.toggleFullscreen(); }
+    };
+  }
+  document.addEventListener("meowkeeper:monitor-view", event => activate(event.detail?.scope));
+  window.addEventListener("pageshow", event => {
+    if (!event.persisted) return;
+    shared = null;
+    activate(window.MeowKeeperMonitorNavigation?.activeScope());
+  });
   window.MeowKeeperPreview = { mount };
 })();

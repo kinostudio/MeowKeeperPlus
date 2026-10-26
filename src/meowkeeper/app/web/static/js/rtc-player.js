@@ -1,7 +1,7 @@
 /* Session-owned WebRTC, packet forwarding only; no external STUN/TURN. */
 (() => {
   "use strict";
-  function create({video, onStatus = () => {}, onStats = () => {}, onError = () => {}}) {
+  function create({video, onStatus = () => {}, onStats = () => {}, onAudio = () => {}, onError = () => {}}) {
     let pc = null, socket = null, timer = null, deadline = null, closed = false;
     let previous = null, totalBytes = 0;
     function close() {
@@ -26,7 +26,8 @@
         pc.ontrack = event => {
           if (closed) return;
           remoteStream.addTrack(event.track);
-          video.play().catch(() => {});
+          if (event.track.kind === "audio") onAudio({ available: true, state: "track" });
+          video.play().catch(() => { if (!video.muted) onAudio({ blocked: true }); });
         };
         await pc.setLocalDescription(await pc.createOffer());
         await new Promise((resolve, reject) => {
@@ -50,6 +51,7 @@
             const data = JSON.parse(event.data);
             if (data.type !== "answer" || typeof data.sdp !== "string") { fail("WebRTC來源格式不支援；改用MSE。"); return; }
             await pc.setRemoteDescription({type: "answer", sdp: data.sdp});
+            if (data.audio_available === false) onAudio({ available: false, state: "negotiated" });
           } catch (_) { fail("WebRTC協商失敗；改用MSE。"); }
         };
         socket.onerror = () => fail("WebRTC連線失敗；改用MSE。");
@@ -61,6 +63,9 @@
             const report = await pc.getStats();
             if (closed) return;
             report.forEach(item => {
+              if (item.type === "inbound-rtp" && item.kind === "audio" && item.bytesReceived > 0) {
+                onAudio({ available: true, state: "receiving", bytes: item.bytesReceived });
+              }
               if (item.type !== "inbound-rtp" || item.kind !== "video") return;
               const elapsed = previous ? (item.timestamp - previous.time) / 1000 : 0;
               const frames = Number(item.framesDecoded || 0);

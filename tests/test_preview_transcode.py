@@ -54,26 +54,28 @@ class TranscodeTests(unittest.IsolatedAsyncioTestCase):
              "frame_age_seconds":0,"source_connections":1,"stream_name":"xiaomi_camera_test","source_epoch":1})
         sessions=SimpleNamespace(authenticate=lambda c:SimpleNamespace(session_id="test") if c else None)
         upstream=_FakeUpstream();upstream.messages[0]=json.dumps({"type":"mse","value":'video/mp4; codecs="avc1.42C01F"'})
-        socket=_FakeWebSocket({"type":"mse","value":"avc1.42E01E","compatibility":True})
+        socket=_FakeWebSocket({"type":"mse","value":"avc1.42E01E,mp4a.40.2,opus","compatibility":True})
         async def connect(url,**_kwargs):
             self.assertIn("xiaomi_camera_compat_test",url);return upstream
         with patch("websockets.asyncio.client.connect",side_effect=connect):
             await proxy_mse_preview(socket,core=core,sessions=sessions,go2rtc=SimpleNamespace(api_url="http://127.0.0.1:1984",rtsp_port=8554),slots=PreviewMseSlots(),transcode=pool)
         self.assertEqual(pool.release_count,1)
+        self.assertEqual(upstream.sent[0]["value"], "avc1.42E01E,mp4a.40.2")
         self.assertEqual(json.loads(socket.texts[0])["transcode"]["encoder"],"libx264")
         self.assertEqual(socket.binary,[b"fragment"])
         socket=_FakeWebSocket();socket.cookies={}
         await proxy_mse_preview(socket,core=core,sessions=sessions,go2rtc=None,slots=PreviewMseSlots(),transcode=pool)
         self.assertFalse(socket.accepted);self.assertEqual(pool.release_count,1)
 
-    def test_encoder_probe_falls_back_and_command_is_local_bounded_video_only(self):
+    def test_encoder_probe_falls_back_and_command_has_optional_bounded_aac_audio(self):
         with patch("subprocess.run",return_value=SimpleNamespace(returncode=1)) as run:
             self.assertEqual(select_encoder(FFMPEG),"libx264")
             self.assertEqual(run.call_count,2)
             self.assertFalse(run.call_args.kwargs["shell"])
         command=" ".join(transcode_command(FFMPEG,8554,"xiaomi_camera_test","libx264"))
-        for required in ("rtsp://127.0.0.1:8554/xiaomi_camera_test","-an","yuv420p","mpegts","ultrafast","fps=15"):
+        for required in ("rtsp://127.0.0.1:8554/xiaomi_camera_test","0:a:0?","aac","64k","yuv420p","mpegts","ultrafast","fps=15"):
             self.assertIn(required,command)
+        self.assertNotIn("-an", command)
         for stream in ("../api/config","rtsp://camera/private","xiaomi_camera_a&other"):
             with self.assertRaises(ValueError):transcode_command(FFMPEG,8554,stream,"libx264")
 
@@ -85,10 +87,12 @@ class RealTranscodeTests(unittest.TestCase):
             root=Path(directory);api_port,rtsp_port=port(),port()
             sample=root/"synthetic-hevc.mp4"
             built=subprocess.run([FFMPEG,"-nostdin","-v","error","-f","lavfi","-i","testsrc2=size=320x180:rate=20",
-                "-t","3","-c:v","libx265","-x265-params","pools=1:frame-threads=1:log-level=error","-y",str(sample)],
+                "-f","lavfi","-i","sine=frequency=440:sample_rate=48000",
+                "-t","3","-c:v","libx265","-x265-params","pools=1:frame-threads=1:log-level=error",
+                "-c:a","aac","-ac","1","-y",str(sample)],
                 capture_output=True,timeout=20,shell=False,check=False)
             self.assertEqual(built.returncode,0)
-            command=f'"{FFMPEG}" -nostdin -v error -stream_loop -1 -re -i "{sample}" -c:v copy -an -f mpegts -'
+            command=f'"{FFMPEG}" -nostdin -v error -stream_loop -1 -re -i "{sample}" -c copy -f mpegts -'
             config=root/"go2rtc.yaml"
             config.write_text(f'api:\n  listen: "127.0.0.1:{api_port}"\nrtsp:\n  listen: "127.0.0.1:{rtsp_port}"\nwebrtc:\n  listen: ""\nstreams:\n  xiaomi_camera_test: {json.dumps("exec:"+command)}\n',encoding="utf-8")
             log=(root/"go.log").open("wb")
@@ -107,18 +111,23 @@ class RealTranscodeTests(unittest.TestCase):
                     url,origin=websocket_target(client.base_url,first)
                     async def begin():
                         ws=await connect(url,origin=origin,proxy=None)
-                        await ws.send(json.dumps({"type":"mse","value":"avc1.640029,avc1.42E01E"}))
+                        await ws.send(json.dumps({"type":"mse","value":"avc1.640029,avc1.42E01E,mp4a.40.2"}))
                         response=json.loads(await asyncio.wait_for(ws.recv(),10))
                         self.assertEqual(response.get("type"),"mse",(response,pool.producer.diagnostic.decode(errors="replace"),(root/"go.log").read_text(errors="replace")))
                         self.assertIn("avc1.",response["value"])
+                        self.assertIn("mp4a.40.2",response["value"], "compatibility stream must retain AAC audio")
                         return ws
                     a=b=None
                     try:
                         a=await begin()
                         payload=bytearray()
-                        while len(payload)<10000:
+                        # Init/video fragments can precede the first AAC chunk.
+                        # Collect a bounded real-time window, not just an init header.
+                        sample_until=asyncio.get_running_loop().time()+1.2
+                        while len(payload)<10000 or asyncio.get_running_loop().time()<sample_until:
                             fragment=await asyncio.wait_for(a.recv(),5)
                             if isinstance(fragment,bytes):payload.extend(fragment)
+                            self.assertLess(len(payload),4*1024*1024)
                         second=await pool.acquire(client.base_url,rtsp_port,"xiaomi_camera_test",1)
                         self.assertEqual(first,second)
                         b=await begin();self.assertIsInstance(await asyncio.wait_for(b.recv(),5),bytes)
@@ -127,6 +136,10 @@ class RealTranscodeTests(unittest.TestCase):
                         self.assertEqual(len(streams[first]["producers"]),1)
                         decoded=await asyncio.to_thread(subprocess.run,[FFMPEG,"-nostdin","-v","error","-i","pipe:0","-frames:v","1","-f","image2pipe","-c:v","mjpeg","pipe:1"],input=bytes(payload),capture_output=True,timeout=10,shell=False,check=False)
                         self.assertEqual(decoded.returncode,0,decoded.stderr.decode(errors="replace"));self.assertTrue(decoded.stdout.startswith(b"\xff\xd8"))
+                        audio=await asyncio.to_thread(subprocess.run,[FFMPEG,"-nostdin","-v","error","-i","pipe:0","-map","0:a:0","-t","0.1","-f","s16le","-c:a","pcm_s16le","pipe:1"],input=bytes(payload),capture_output=True,timeout=10,shell=False,check=False)
+                        self.assertEqual(audio.returncode,0,audio.stderr.decode(errors="replace"))
+                        self.assertGreater(len(audio.stdout),1000)
+                        self.assertTrue(any(audio.stdout), "decoded synthetic tone must contain non-silent PCM samples")
                         await a.close();await pool.release();self.assertTrue(pool.snapshot()["active"])
                         await b.close();await pool.release();self.assertFalse(pool.snapshot()["active"])
                         self.assertNotIn(first,await asyncio.to_thread(client.streams))
@@ -146,8 +159,9 @@ class RealTranscodeTests(unittest.TestCase):
                     sessions=SessionManager();sessions.configure_admin("fixture-admin","fixture-password-only")
                     facade=CoreStateFacade()
                     facade.preview_status=Mock(return_value={"source_is_xiaomi":True,"source_status":"running",
-                        "frame_age_seconds":0,"source_connections":1,"stream_name":"xiaomi_camera_test","source_epoch":1})
-                    integration=SimpleNamespace(go2rtc=SimpleNamespace(api_url=client.base_url,rtsp_port=rtsp_port))
+                        "frame_age_seconds":0,"source_connections":1,"stream_name":"xiaomi_camera_test","source_epoch":1,
+                        "original_source":{"video_codec":"hevc"}})
+                    integration=SimpleNamespace(go2rtc=SimpleNamespace(api_url=client.base_url,rtsp_port=rtsp_port),devices=list)
                     app=create_app(facade=facade,session_manager=sessions,integrations=integration)
                     if app.state.resource_recorder is not None:
                         app.state.resource_recorder.start=lambda:None
@@ -167,9 +181,14 @@ class RealTranscodeTests(unittest.TestCase):
                         while not server.started and time.monotonic()<end:time.sleep(.05)
                         self.assertTrue(server.started)
                         artifact=ROOT/"reports/camera-ui-redesign-2026-10-18/h264-browser.json"
+                        artifact.parent.mkdir(parents=True, exist_ok=True)
                         browser=subprocess.run([str(ROOT/"vendor/javascript/node.exe"),str(ROOT/"tests/browser/transcode_browser.cjs"),
                             f"http://127.0.0.1:{browser_port}",str(artifact)],capture_output=True,timeout=65,shell=False,check=False)
                         self.assertEqual(browser.returncode,0,browser.stderr.decode(errors="replace"))
+                        navigation=subprocess.run([str(ROOT/"vendor/javascript/node.exe"),str(ROOT/"tests/browser/monitor_navigation.cjs"),
+                            f"http://127.0.0.1:{browser_port}"],capture_output=True,timeout=75,shell=False,check=False)
+                        self.assertEqual(navigation.returncode,0,navigation.stderr.decode(errors="replace"))
+                        print(navigation.stdout.decode(errors="replace"))
                         end=time.monotonic()+3
                         while app.state.preview_transcode.viewers and time.monotonic()<end:time.sleep(.1)
                         self.assertEqual(app.state.preview_transcode.viewers,0)

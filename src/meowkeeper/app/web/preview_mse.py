@@ -18,6 +18,10 @@ ALLOWED_CODECS = frozenset(
         "avc1.4D401F",
         "avc1.42E01E",
         "hvc1.1.6.L153.B0",
+        "mp4a.40.2",
+        "mp4a.40.5",
+        "opus",
+        "flac",
     }
 )
 STREAM_NAME = re.compile(r"^xiaomi_camera_[A-Za-z0-9_-]{1,64}$")
@@ -219,8 +223,8 @@ async def proxy_mse_preview(
             if type(compatibility) is not bool:
                 raise PreviewMseError("相容播放選項無效。")
             if compatibility:
-                codecs = ",".join(c for c in codecs.split(",") if c.startswith("avc1."))
-                if transcode is None or not codecs:
+                codecs = ",".join(c for c in codecs.split(",") if c.startswith(("avc1.", "mp4a.")))
+                if transcode is None or not any(c.startswith("avc1.") for c in codecs.split(",")):
                     raise PreviewMseError("此環境沒有可用的 H.264 相容播放。")
                 compat_stream = await transcode.acquire(api_url, getattr(go2rtc, "rtsp_port", None), stream, metadata.get("source_epoch"))
                 compatibility_acquired = True

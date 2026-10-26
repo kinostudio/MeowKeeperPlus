@@ -71,11 +71,12 @@
       e.stopPropagation();
       aiDropdown.classList.toggle("is-open");
     });
-    document.addEventListener("click", (e) => {
+    const dismiss = (e) => {
       if (!aiDropdown.contains(e.target)) {
         aiDropdown.classList.remove("is-open");
       }
-    });
+    };
+    document.addEventListener("click", dismiss);
 
     aiDropdown.append(aiButton, aiMenu);
     hud.append(aiDropdown);
@@ -153,7 +154,7 @@
       }
       if (!timer) timer = setInterval(draw, 150);
       draw();
-    }, clear, close: () => { clear(); layer.remove(); help.remove(); } };
+    }, clear, close: () => { clear(); document.removeEventListener("click", dismiss); aiDropdown.remove(); layer.remove(); help.remove(); } };
   }
   window.MeowKeeperOverlay = { mount };
 })();

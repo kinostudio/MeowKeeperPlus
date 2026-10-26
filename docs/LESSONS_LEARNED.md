@@ -1,5 +1,9 @@
 # MeowKeeper+ 防重犯手冊：錯誤、證據與處理方法
 
+## 共享播放／收音防退化
+
+一般整頁導覽會銷毀 video 與媒體連線；只共用 go2rtc producer 不代表瀏覽器不重接。總覽／即時頁需同文件共享播放器，驗證同一 video、session 與實際前進影格。來源 `audio=0`、播放協商漏音軌及瀏覽器阻擋聲音是三種不同問題；取消靜音不能當成功。明確來源收音改動需短暫停管線，先備份、保留單一 producer、失敗恢復；不直接 DELETE 串流冒充已停止舊連線。回歸入口：`MONITOR-NAVIGATION-SESSION`、`SOURCE-AUDIO-SAFE-OPT-IN`，詳見 [契約](MONITOR_PLAYBACK_SESSION.md)。
+
 整理日期：2026-10-12。涵蓋目前可取得的對話、repository 文件與驗收紀錄；未取得的原始資料不得補造。本文件不是功能完成清單，也不保證所有歷史問題已修復。
 
 ## 如何使用與判斷證據

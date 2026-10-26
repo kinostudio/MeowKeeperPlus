@@ -3505,6 +3505,10 @@ def create_app(
         if not callable(switch_profile):
             raise HTTPException(status_code=503, detail="目前版本尚未提供 Xiaomi 即時畫質切換。")
         payload = json_body(body)
+        if "audio_enabled" in payload:
+            if type(payload["audio_enabled"]) is not bool or payload.get("confirm_reconnect") is not True:
+                raise HTTPException(status_code=422, detail="變更來源音訊需要明確確認短暫重新連線。")
+            return dict(switch_profile(device_id, str(payload.get("profile") or ""), audio_enabled=payload["audio_enabled"]))
         return dict(switch_profile(device_id, str(payload.get("profile") or "")))
 
     @app.get("/api/v1/cameras/xiaomi/control/diagnostics")
@@ -3678,6 +3682,8 @@ def create_app(
             "/settings/advanced": "settings.html",
         }
         template_name = template_map.get(path, "dashboard.html")
+        if path in {"/", "/dashboard", "/live"}:
+            template_name = "monitor.html"
         template_file = templates_path / template_name
         if not template_file.is_file():
             template_name = "dashboard.html"

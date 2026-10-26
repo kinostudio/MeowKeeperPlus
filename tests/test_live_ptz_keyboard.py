@@ -14,7 +14,7 @@ class LivePtzKeyboardTests(unittest.TestCase):
         program = r'''
 const fs = require("fs"), vm = require("vm"), assert = require("assert");
 const text = fs.readFileSync(process.argv[1], "utf8");
-const down = text.slice(text.indexOf('  document.addEventListener("keydown"'), text.indexOf('  async function emergencyStop'));
+const down = text.slice(text.indexOf('  document.addEventListener("keydown"', text.indexOf('// PTZ keyboard controls')), text.indexOf('  async function emergencyStop'));
 const up = text.slice(text.indexOf('  document.addEventListener("keyup"'), text.indexOf('  qualityApply?.addEventListener'));
 const listeners = {}, windowListeners = {}, clicks = [];
 let stops = 0;

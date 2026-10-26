@@ -3,8 +3,10 @@ const fs=require('node:fs');
 const path=require('node:path');
 const vm=require('node:vm');
 class Element {
-  constructor(){this.children=[];this.style={};this.attrs={};this.listeners={};this.hidden=false;}
+  constructor(){this.children=[];this.style={};this.attrs={};this.listeners={};this.hidden=false;this.classList={toggle(){},remove(){}};}
   append(...nodes){this.children.push(...nodes);}
+  appendChild(node){this.append(node);}
+  contains(node){return this.children.includes(node);}
   after(node){this.afterNode=node;}
   replaceChildren(...nodes){this.children=nodes;}
   setAttribute(k,v){this.attrs[k]=v;}
@@ -13,7 +15,7 @@ class Element {
   getBoundingClientRect(){return {left:10,top:20,width:960,height:540};}
 }
 const stage=new Element(),hud=new Element(),timers=new Map();let serial=0,now=10000;
-const context={window:{},document:{createElement:()=>new Element()},localStorage:{getItem:()=>null,setItem(){}},
+const context={window:{},document:{createElement:()=>new Element(),addEventListener(){},removeEventListener(){}},localStorage:{getItem:()=>null,setItem(){}},
   Date:{now:()=>now,parse:Date.parse},setInterval(fn){timers.set(++serial,fn);return serial;},clearInterval(id){timers.delete(id);}};
 vm.runInNewContext(fs.readFileSync(path.join(__dirname,'../../src/meowkeeper/app/web/static/js/ai-overlay.js'),'utf8'),context);
 const overlay=context.window.MeowKeeperOverlay.mount(stage,hud),layer=stage.children[0];
@@ -23,7 +25,10 @@ overlay.update({captured_at:new Date(now).toISOString(),detections:[{bbox:[.1,.2
 assert.equal(layer.children.length,1);
 assert.equal(layer.children[0].style.left,'96px');
 assert.equal(layer.children[0].style.top,'108px');
-hud.children.find(x=>x.textContent==='身分候選').listeners.click();
+const identityCheck=hud.children[0].children[1].children[1].children[0];
+identityCheck.checked=false;identityCheck.listeners.change();
+assert.doesNotMatch(layer.children[0].children[0].textContent,/<img src=x>/,'identity checkbox hides the label');
+identityCheck.checked=true;identityCheck.listeners.change();
 assert.match(layer.children[0].children[0].textContent,/<img src=x>/,'text remains literal, not HTML');
 assert.equal(timers.size,1);
 now=10500;
