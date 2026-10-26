@@ -215,6 +215,10 @@ class TelegramCredentialStore:
         default_path = Path(os.getenv("LOCALAPPDATA", Path.home())) / "MeowKeeperPlus" / "secrets" / "telegram.dpapi"
         self._fallback_path = Path(fallback_path or default_path).resolve()
         self._use_dpapi = False
+        program_data = Path(os.environ.get("PROGRAMDATA", r"C:\ProgramData"))
+        self._shared_secrets_dir = program_data / "MeowKeeperPlus" / "Data" / "secrets"
+        self._shared_secrets_path = self._shared_secrets_dir / "telegram.json"
+        self._shared_vision_path = self._shared_secrets_dir / "vision.json"
         try:
             self._api = api or ctypes.WinDLL("Advapi32.dll", use_last_error=True)
         except OSError:
@@ -321,14 +325,24 @@ class TelegramCredentialStore:
         return f"{cls._VISION_TARGET_PREFIX}{reference}"
 
     def read_vision_key(self, profile_reference: str) -> str:
-        """Read one provider/model key from Windows Credential Manager.
-
-        Vision keys deliberately do not use the Telegram DPAPI-file fallback:
-        if Credential Manager is unavailable, callers must fail closed.
-        """
+        """Read one provider/model key from Windows Credential Manager or shared secrets."""
+        if not self._use_dpapi:
+            try:
+                key = self._read(self._vision_target(profile_reference))
+                if key:
+                    return key
+            except Exception:
+                pass
+        if getattr(self, "_shared_vision_path", None) and self._shared_vision_path.is_file():
+            try:
+                data = json.loads(self._shared_vision_path.read_text(encoding="utf-8"))
+                if isinstance(data, dict):
+                    return str(data.get(profile_reference) or "")
+            except Exception:
+                pass
         if self._use_dpapi:
             raise CredentialStoreError("Windows Credential Manager 不可用，視覺服務金鑰未讀取。")
-        return self._read(self._vision_target(profile_reference))
+        return ""
 
     def save_vision_key(self, profile_reference: str, value: str) -> None:
         if self._use_dpapi:
@@ -411,19 +425,33 @@ class TelegramCredentialStore:
             raise CredentialStoreError("Windows DPAPI 憑證無法清除。") from exc
 
     def read_telegram(self) -> TelegramCredentials:
+        creds = TelegramCredentials()
         if self._use_dpapi:
-            return self._read_dpapi()
-        try:
-            return TelegramCredentials(
-                bot_token=self._read(self._TOKEN_TARGET),
-                chat_ids=self._read(self._CHAT_IDS_TARGET),
-                recipients_json=self._read(self._RECIPIENTS_TARGET),
-            )
-        except CredentialStoreError as exc:
-            if exc.code != 1312:
-                raise
-            self._use_dpapi = True
-            return self._read_dpapi()
+            creds = self._read_dpapi()
+        else:
+            try:
+                creds = TelegramCredentials(
+                    bot_token=self._read(self._TOKEN_TARGET),
+                    chat_ids=self._read(self._CHAT_IDS_TARGET),
+                    recipients_json=self._read(self._RECIPIENTS_TARGET),
+                )
+            except CredentialStoreError as exc:
+                if exc.code != 1312:
+                    raise
+                self._use_dpapi = True
+                creds = self._read_dpapi()
+        if not creds.bot_token and getattr(self, "_shared_secrets_path", None) and self._shared_secrets_path.is_file():
+            try:
+                data = json.loads(self._shared_secrets_path.read_text(encoding="utf-8"))
+                if isinstance(data, dict) and data.get("bot_token"):
+                    return TelegramCredentials(
+                        bot_token=str(data.get("bot_token") or ""),
+                        chat_ids=str(data.get("chat_ids") or ""),
+                        recipients_json=str(data.get("recipients_json") or ""),
+                    )
+            except Exception:
+                pass
+        return creds
 
     def status(self) -> dict[str, Any]:
         values = self.read_telegram()
@@ -455,6 +483,19 @@ class TelegramCredentialStore:
             recipients_json, normalized_chat_ids = _validate_recipients(recipients)
         else:
             _, normalized_chat_ids = _validate_telegram_credentials(token, chat_ids)
+        if getattr(self, "_shared_secrets_path", None):
+            try:
+                self._shared_secrets_dir.mkdir(parents=True, exist_ok=True)
+                self._shared_secrets_path.write_text(
+                    json.dumps({
+                        "bot_token": token,
+                        "chat_ids": normalized_chat_ids,
+                        "recipients_json": recipients_json or "",
+                    }, ensure_ascii=False, indent=2),
+                    encoding="utf-8"
+                )
+            except Exception:
+                pass
         if self._use_dpapi:
             self._write_dpapi(token, normalized_chat_ids, recipients_json)
             return
@@ -512,6 +553,11 @@ class TelegramCredentialStore:
         self.save_telegram(previous.bot_token, "", recipients=merged)
 
     def clear_telegram(self) -> None:
+        if getattr(self, "_shared_secrets_path", None):
+            try:
+                self._shared_secrets_path.unlink(missing_ok=True)
+            except OSError:
+                pass
         if self._use_dpapi:
             self._delete_dpapi()
             return
