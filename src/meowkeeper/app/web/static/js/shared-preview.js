@@ -108,6 +108,7 @@
 
     const fullscreenButton = document.createElement("button");
     fullscreenButton.type = "button";
+    fullscreenButton.id = "preview-fullscreen";
     fullscreenButton.className = "preview-mode-button preview-mode-select preview-fullscreen-toggle";
     fullscreenButton.dataset.previewControl = "fullscreen";
     fullscreenButton.setAttribute("aria-pressed", "false");

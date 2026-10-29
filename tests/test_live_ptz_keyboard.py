@@ -18,9 +18,10 @@ const down = text.slice(text.indexOf('  document.addEventListener("keydown"'), t
 const up = text.slice(text.indexOf('  document.addEventListener("keyup"'), text.indexOf('  qualityApply?.addEventListener'));
 const listeners = {}, windowListeners = {}, clicks = [];
 let stops = 0;
-const context = { document: {hidden: false, addEventListener: (key, fn) => listeners[key] = fn},
+const context = { document: {hidden: false, addEventListener: (key, fn) => listeners[key] = fn, querySelectorAll: () => []},
   window: {addEventListener: (key, fn) => windowListeners[key] = fn},
-  directionControls: {hidden: false, querySelector: s => ({disabled: false, click: () => clicks.push(s)})},
+  directionControls: {hidden: false, querySelector: s => ({disabled: false, click: () => clicks.push(s)}), querySelectorAll: () => []},
+  ptzControls: {querySelectorAll: () => []},
   activePtzDeviceId: "test-camera", ptzRequestInFlight: false, ptzMoveStarted: true, emergencyStop: () => stops++ };
 vm.createContext(context); vm.runInContext(down + up, context);
 function event(key, extra={}) { return {key, repeat:false, target:{closest:()=>null}, preventDefault(){this.prevented=true;}, ...extra}; }

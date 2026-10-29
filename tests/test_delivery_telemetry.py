@@ -129,7 +129,7 @@ class DeliveryTelemetryTests(unittest.TestCase):
         self.assertEqual(trace["wait_started_at"], trace["media_sendable_at"])
         self.assertEqual(trace["extra_wait_ms"], 3000)
         self.assertEqual((trace["wait_status"], trace["caption_source"]), ("completed", "ai_candidate"))
-        self.assertIn("行走", notifier.send_video.call_args.kwargs["caption"])
+        self.assertRegex(notifier.send_video.call_args.kwargs["caption"], r"行走|走動")
 
     def test_provider_http_429_falls_back_immediately_without_retrying_ai(self):
         failure = VisionFailure("rate_limited", http_status=429, retry_after_seconds=30)

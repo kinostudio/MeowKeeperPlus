@@ -46,6 +46,37 @@ class SegmentTimingTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             self.assertIsNone(DiskSegmentRingBuffer._segment_durations(Path(temporary)))
 
+    def test_extreme_and_nonfinite_segment_durations_are_ignored(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            manifest = root / "segments.csv"
+            manifest.write_text(
+                "segment_00000000.ts,0,86401\n"
+                "segment_00000001.ts,0,1e309\n"
+                "segment_00000002.ts,0,nan\n"
+                "segment_00000003.ts,0,3\n",
+                encoding="utf-8",
+            )
+            self.assertEqual(
+                DiskSegmentRingBuffer._segment_durations(root),
+                {"segment_00000003.ts": 3},
+            )
+
+    def test_registration_rejects_extreme_duration_and_timestamp_overflow(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            ring = DiskSegmentRingBuffer(root / "ring")
+            copied = ring.directory / "segment.ts"
+            copied.write_bytes(b"segment")
+            self.assertIsNone(ring.register_file(copied, duration_seconds=86401))
+            self.assertIsNone(ring.register_file(copied, duration_seconds=float("inf")))
+            self.assertIsNone(ring.register_file(
+                copied,
+                captured_at=datetime.max.replace(tzinfo=timezone.utc),
+                duration_seconds=1,
+            ))
+            self.assertEqual(ring.index.all(), ())
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -8,7 +8,20 @@ class Element {
   constructor(tag) {
     this.tagName = tag; this.children = []; this.dataset = {}; this.attrs = {};
     this.listeners = {}; this.hidden = false; this.naturalWidth = 1920; this.naturalHeight = 1080;
+    this.classes = new Set();
+    this.classList = {
+      contains: name => this.classes.has(name),
+      add: name => this.classes.add(name),
+      remove: name => this.classes.delete(name),
+      toggle: (name, force) => {
+        const enabled = force === undefined ? !this.classes.has(name) : Boolean(force);
+        if (enabled) this.classes.add(name); else this.classes.delete(name);
+        return enabled;
+      },
+    };
   }
+  contains(node) { return this.children.includes(node); }
+  appendChild(node) { this.children.push(node); return node; }
   append(...nodes) { this.children.push(...nodes); }
   setAttribute(key, value) { this.attrs[key] = value; }
   removeAttribute(key) { delete this.attrs[key]; if (key === 'src') delete this.src; }
@@ -33,6 +46,7 @@ async function main() {
   image.hidden = true;
   const document = new Element('document'), decodedImages = [], revokedUrls = [];
   document.hidden = false;
+  document.body = new Element('body');
   let nextDecode = null;
   document.createElement = tag => {
     const node = new Element(tag);

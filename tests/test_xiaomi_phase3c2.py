@@ -138,11 +138,11 @@ class XiaomiPhase3C2Tests(unittest.TestCase):
             self.assertFalse(blocked["success"])
             self.assertEqual(client.put_names, ["xiaomi_camera_2"])
 
-    def test_video_profile_does_not_wait_for_missing_audio(self) -> None:
+    def test_video_profile_preserves_audio_by_default_and_explicit_setting(self) -> None:
         source = "xiaomi://session:sg@192.0.2.20?did=private-did&model=isa.camera.hlc7"
         video_only = Go2RtcXiaomiDiscovery._with_profile(source, "subtype=sd")
         query = parse_qs(urlsplit(video_only).query)
-        self.assertEqual(query["audio"], ["0"])
+        self.assertEqual(query["audio"], ["1"])
         self.assertEqual(query["subtype"], ["sd"])
 
         explicit_audio = Go2RtcXiaomiDiscovery._with_profile(source + "&audio=1", "subtype=hd")

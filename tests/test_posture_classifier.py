@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sqlite3
+import os
 import unittest
 from pathlib import Path
 from unittest.mock import MagicMock
@@ -131,7 +132,10 @@ class TestPostureClassifier(unittest.TestCase):
         mock_posture.predict_vector.assert_called_once()
 
     def test_model_registry_db_record(self):
-        db_path = Path(r"C:\ProgramData\MeowKeeperPlus\Data\meowkeeper.db")
+        configured_path = os.environ.get("MEOWKEEPER_TEST_INTEGRATION_DB")
+        if not configured_path:
+            self.skipTest("需明確指定隔離整合測試資料庫；不讀取正式 ProgramData 資料。")
+        db_path = Path(configured_path)
         if not db_path.is_file():
             self.skipTest("Database not found")
 

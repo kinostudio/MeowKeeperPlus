@@ -37,6 +37,10 @@ class DiskSegmentRingBuffer:
     """
 
     ALLOWED_SUFFIXES = frozenset({".ts", ".m4s", ".mp4", ".mkv"})
+    # The configured retention is at most two minutes. A single segment may be
+    # longer (for a long GOP), but a day-long segment is corrupt metadata, not
+    # useful cache history; bounding it also keeps datetime arithmetic safe.
+    MAX_SEGMENT_DURATION_SECONDS = 24 * 60 * 60
 
     def __init__(
         self,
@@ -148,13 +152,27 @@ class DiskSegmentRingBuffer:
             raise ValueError("環形快取分段必須位於設定的快取目錄內。") from exc
         if not self.enabled or not candidate.is_file() or candidate.suffix.lower() not in self.ALLOWED_SUFFIXES:
             return None
-        size = candidate.stat().st_size
+        try:
+            stat = candidate.stat()
+            size = stat.st_size
+        except OSError:
+            return None
         if size <= 0:
             return None
-        length = float(duration_seconds or self.segment_seconds)
+        try:
+            length = float(duration_seconds or self.segment_seconds)
+        except (TypeError, ValueError, OverflowError):
+            return None
+        if not math.isfinite(length) or not 0 < length <= self.MAX_SEGMENT_DURATION_SECONDS:
+            return None
         if captured_at is None:
-            modified = datetime.fromtimestamp(candidate.stat().st_mtime, tz=timezone.utc)
-            captured_at = modified - timedelta(seconds=length)
+            captured_at = self._captured_at_from_mtime(stat.st_mtime, length)
+            if captured_at is None:
+                return None
+        try:
+            end_at = captured_at + timedelta(seconds=length)
+        except (OverflowError, TypeError, ValueError):
+            return None
         record = self.index.register(
             candidate,
             start_at=captured_at,
@@ -162,8 +180,18 @@ class DiskSegmentRingBuffer:
             size_bytes=size,
             keyframe=keyframe,
         )
-        self.rotate(now=captured_at + timedelta(seconds=length))
+        self.rotate(now=end_at)
         return record
+
+    @staticmethod
+    def _captured_at_from_mtime(mtime: float, duration_seconds: float) -> datetime | None:
+        """Convert an untrusted filesystem timestamp without failing the monitor."""
+
+        try:
+            modified = datetime.fromtimestamp(mtime, tz=timezone.utc)
+            return modified - timedelta(seconds=duration_seconds)
+        except (OverflowError, OSError, TypeError, ValueError):
+            return None
 
     def scan(self) -> tuple[SegmentRecord, ...]:
         """掃描快取目錄（含 FFmpeg session 子目錄）並加入新分段。"""
@@ -215,8 +243,13 @@ class DiskSegmentRingBuffer:
                 captured_at = next_start
                 duration_seconds = durations[candidate.name] if durations is not None else self.segment_seconds
                 if session in realtime_sessions:
-                    modified = datetime.fromtimestamp(candidate.stat().st_mtime, tz=timezone.utc)
-                    captured_at = modified - timedelta(seconds=duration_seconds)
+                    try:
+                        modified_at = candidate.stat().st_mtime
+                    except OSError:
+                        continue
+                    captured_at = self._captured_at_from_mtime(modified_at, duration_seconds)
+                    if captured_at is None:
+                        continue
                 elif durations is None and session in session_started_at and session not in writing_sessions and index == len(candidates) - 1:
                     # Stream-copy segmentation can leave one TS file open for
                     # an entire long GOP.  When the writer exits, span the
@@ -269,7 +302,8 @@ class DiskSegmentRingBuffer:
                     continue
                 start_value, end_value = float(start), float(end)
                 duration = end_value - start_value
-                if not all(math.isfinite(v) for v in (start_value, end_value, duration)) or duration <= 0:
+                if (not all(math.isfinite(v) for v in (start_value, end_value, duration))
+                        or not 0 < duration <= DiskSegmentRingBuffer.MAX_SEGMENT_DURATION_SECONDS):
                     continue
                 durations[name] = duration
             except (ValueError, csv.Error, StopIteration):

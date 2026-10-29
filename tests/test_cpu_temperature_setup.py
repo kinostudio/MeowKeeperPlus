@@ -60,7 +60,7 @@ class CpuTemperatureSetupTests(unittest.TestCase):
         headers = {"Authorization": "Bearer " + token, "X-MeowKeeper-CSRF": hashlib.sha256((token + ":csrf").encode()).hexdigest()}
         url = "/api/v1/telemetry/cpu-temperature/setup"
         with patch.object(CpuTemperatureSetup, "launch", return_value={"state": "running"}) as launch:
-            with TestClient(create_app(token=token)) as client:
+            with TestClient(create_app(token=token), client=("127.0.0.1", 12345)) as client:
                 self.assertEqual(client.post(url, json={"confirm": True}).status_code, 401)
                 self.assertEqual(client.post(url, headers={"Authorization": "Bearer " + token}, json={"confirm": True}).status_code, 403)
                 self.assertEqual(client.post(url, headers=headers, json={}).status_code, 428)
@@ -77,5 +77,6 @@ class CpuTemperatureSetupTests(unittest.TestCase):
             with TestClient(create_app(token=token), client=("100.64.0.2", 12345)) as client:
                 remote_headers = {**headers, "X-Forwarded-For": "127.0.0.1"}
                 self.assertFalse(client.get(url, headers=remote_headers).json()["local_request"])
+                self.assertEqual(client.post(url, headers=remote_headers, json={}).status_code, 428)
                 self.assertEqual(client.post(url, headers=remote_headers, json={"confirm": True}).status_code, 403)
                 launch.assert_called_once()

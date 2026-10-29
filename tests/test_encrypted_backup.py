@@ -55,7 +55,7 @@ class EncryptedBackupTests(unittest.TestCase):
             store = FakeStore()
             app = create_app(token="a" * 32, source_config=SimpleNamespace(path=path), telegram_credentials=store)
             headers = {"Authorization": "Bearer " + "a" * 32, "X-MeowKeeper-CSRF": app.state.authenticator.csrf_token}
-            with TestClient(app) as client:
+            with TestClient(app, client=("127.0.0.1", 12345)) as client:
                 self.assertEqual(client.post("/api/v1/settings/backup/export", json={"password": "a-long-backup-password"}).status_code, 401)
                 response = client.post("/api/v1/settings/backup/export", headers=headers, json={"password": "a-long-backup-password"})
                 self.assertEqual(response.status_code, 200)

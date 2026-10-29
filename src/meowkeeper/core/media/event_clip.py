@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import builtins
 import hashlib
+import re
 import sqlite3
 import threading
 import time
@@ -843,7 +844,7 @@ class EventClipService:
                     pet_name = profile.display_name
             except (OSError, ValueError, TypeError):
                 pass
-        pet = pet_name or "貓咪"
+        pet = f"{pet_name}（候選）" if pet_name else "貓咪"
         source_suffix = " DINOv2辨識" if pet_name else ""
         headline_text = f"{pet}剛剛出現在畫面。" if request.event_type == "cat_detected" else "事件影片已就緒。"
 

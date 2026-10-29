@@ -97,7 +97,9 @@ class DashboardExperienceTests(unittest.TestCase):
 
     def test_fullscreen_preview_is_not_limited_to_normal_page_height(self):
         html, parsed = self.render("live.html", "/live")
-        self.assertIn("preview-fullscreen", parsed.ids)
+        self.assertIn('shared-preview.js', html)
+        preview = (ROOT / "src/meowkeeper/app/web/static/js/shared-preview.js").read_text(encoding="utf-8")
+        self.assertIn('fullscreenButton.id = "preview-fullscreen"', preview)
         self.assertIn("requestFullscreen", html)
         css = (ROOT / "src/meowkeeper/app/web/static/css/experience.css").read_text(encoding="utf-8")
         self.assertIn(".preview-stage:fullscreen", css)

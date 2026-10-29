@@ -218,11 +218,13 @@ class MissPrivacyAdapter:
 
             if config.get("mode", "position") == "standby":
                 pose = config.get("standby_pose")
+                if config.get("standby_restore") is not None and not isinstance(pose, dict):
+                    return {"success": False}
                 if isinstance(pose, dict):
                     try:
                         self._restore_pose(device, pose)
                     except Exception:
-                        pass
+                        return {"success": False}
                 config["standby_restore"] = None
                 config.pop("standby_pose", None)
                 self._save(config)

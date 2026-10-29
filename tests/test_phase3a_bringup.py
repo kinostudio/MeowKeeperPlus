@@ -24,7 +24,7 @@ from meowkeeper.storage.database import SQLiteStore
 class Phase3ABringupTests(unittest.TestCase):
     def test_dashboard_html_and_health_are_real_routes(self) -> None:
         app = create_app(token="a" * 32)
-        with TestClient(app) as client:
+        with TestClient(app, client=("127.0.0.1", 12345)) as client:
             self.assertEqual(client.get("/healthz").status_code, 200)
             page = client.get("/")
             self.assertEqual(page.status_code, 200)
@@ -46,7 +46,7 @@ class Phase3ABringupTests(unittest.TestCase):
     def test_setup_is_local_and_single_use(self) -> None:
         sessions = SessionManager()
         app = create_app(token="b" * 32, session_manager=sessions)
-        with TestClient(app) as client:
+        with TestClient(app, client=("127.0.0.1", 12345)) as client:
             setup = client.get("/setup")
             self.assertEqual(setup.status_code, 200)
             match = re.search(r"const setupToken = (.+?);", setup.text)
@@ -67,7 +67,7 @@ class Phase3ABringupTests(unittest.TestCase):
 
     def test_setup_page_explains_safe_onboarding_and_accessible_recovery(self) -> None:
         app = create_app(session_manager=SessionManager())
-        with TestClient(app) as client:
+        with TestClient(app, client=("127.0.0.1", 12345)) as client:
             response = client.get("/setup")
             self.assertEqual(response.status_code, 200)
             for guidance in (
@@ -88,7 +88,7 @@ class Phase3ABringupTests(unittest.TestCase):
     def test_unconfigured_protected_pages_redirect_to_local_setup(self) -> None:
         sessions = SessionManager()
         app = create_app(session_manager=sessions)
-        with TestClient(app) as client:
+        with TestClient(app, client=("127.0.0.1", 12345)) as client:
             self.assertEqual(client.get("/setup").status_code, 200)
             for path in ("/", "/dashboard", "/live", "/events", "/settings/source", "/settings/telegram"):
                 with self.subTest(path=path):

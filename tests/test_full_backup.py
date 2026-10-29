@@ -60,7 +60,7 @@ class FullBackupTests(unittest.TestCase):
                 "Authorization": "Bearer " + "a" * 32,
                 "X-MeowKeeper-CSRF": app.state.authenticator.csrf_token,
             }
-            with TestClient(app) as client:
+            with TestClient(app, client=("127.0.0.1", 12345)) as client:
                 page = client.get("/settings/advanced", headers=headers)
                 self.assertEqual(page.status_code, 200)
                 self.assertIn('id="full-backup-progress-region"', page.text)

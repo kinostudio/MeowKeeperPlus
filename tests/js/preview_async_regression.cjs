@@ -4,7 +4,14 @@ const path = require('node:path');
 const vm = require('node:vm');
 
 class Element {
-  constructor(tag) { this.tagName=tag; this.children=[]; this.attrs={}; this.dataset={}; this.listeners={}; this.hidden=false; this.naturalWidth=640; this.naturalHeight=360; }
+  constructor(tag) {
+    this.tagName=tag; this.children=[]; this.attrs={}; this.dataset={}; this.listeners={};
+    this.hidden=false; this.naturalWidth=640; this.naturalHeight=360; this.classes=new Set();
+    this.classList={contains:name=>this.classes.has(name),add:name=>this.classes.add(name),remove:name=>this.classes.delete(name),
+      toggle:(name,force)=>{const enabled=force===undefined?!this.classes.has(name):Boolean(force);if(enabled)this.classes.add(name);else this.classes.delete(name);return enabled;}};
+  }
+  contains(node) { return this.children.includes(node); }
+  appendChild(node) { this.children.push(node); return node; }
   append(...nodes) { this.children.push(...nodes); }
   setAttribute(k,v) { this.attrs[k]=v; }
   removeAttribute(k) { delete this.attrs[k]; if(k==='src') delete this.src; }
@@ -17,7 +24,7 @@ function deferred() { let resolve; const promise=new Promise(r=>{resolve=r;}); r
 const settle=()=>new Promise(resolve=>setImmediate(resolve));
 function setup(fetcher) {
   const stage=new Element('div'), image=new Element('img'); image.parentElement=stage;
-  const document=new Element('document'); document.hidden=false; document.createElement=tag=>new Element(tag);
+  const document=new Element('document'); document.hidden=false; document.createElement=tag=>new Element(tag); document.querySelectorAll=()=>[]; document.body=new Element('body');
   const window=new Element('window'), timers=new Map(), requests=[], callbacks=[];
   let id=0;
   const context={window,document,performance:{now:()=>1000},AbortController,

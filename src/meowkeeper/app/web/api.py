@@ -807,10 +807,10 @@ def create_app(
     @app.post("/api/v1/telemetry/cpu-temperature/setup")
     def cpu_temperature_setup_launch(request: Request, body: Any = Body(default=None)) -> dict[str, Any]:  # noqa: B008
         require_mutation(request)
-        if not is_local_request(request):
-            raise HTTPException(status_code=403, detail="請在監控主機本機開啟儀表板，才能啟動驅動授權視窗；遠端仍可閱讀指引。")
         if json_body(body).get("confirm") is not True:
             raise HTTPException(status_code=428, detail="請先確認此操作會開啟驅動安裝與管理員授權視窗。")
+        if not is_local_request(request):
+            raise HTTPException(status_code=403, detail="請在監控主機本機開啟儀表板，才能啟動驅動授權視窗；遠端仍可閱讀指引。")
         try:
             return cpu_setup.launch()
         except ValueError as error:

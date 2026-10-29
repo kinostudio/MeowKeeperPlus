@@ -3,8 +3,12 @@ const fs=require('node:fs');
 const path=require('node:path');
 const vm=require('node:vm');
 class Element {
-  constructor(){this.children=[];this.style={};this.attrs={};this.listeners={};this.hidden=false;}
+  constructor(){this.children=[];this.style={};this.attrs={};this.listeners={};this.hidden=false;this.classes=new Set();
+    this.classList={contains:name=>this.classes.has(name),add:name=>this.classes.add(name),remove:name=>this.classes.delete(name),
+      toggle:(name,force)=>{const enabled=force===undefined?!this.classes.has(name):Boolean(force);if(enabled)this.classes.add(name);else this.classes.delete(name);return enabled;}};}
   append(...nodes){this.children.push(...nodes);}
+  appendChild(node){this.children.push(node);return node;}
+  contains(node){return this.children.includes(node);}
   after(node){this.afterNode=node;}
   replaceChildren(...nodes){this.children=nodes;}
   setAttribute(k,v){this.attrs[k]=v;}
@@ -13,7 +17,7 @@ class Element {
   getBoundingClientRect(){return {left:10,top:20,width:960,height:540};}
 }
 const stage=new Element(),hud=new Element(),timers=new Map();let serial=0,now=10000;
-const context={window:{},document:{createElement:()=>new Element()},localStorage:{getItem:()=>null,setItem(){}},
+const context={window:{},document:{createElement:()=>new Element(),addEventListener(){}},localStorage:{getItem:()=>null,setItem(){}},
   Date:{now:()=>now,parse:Date.parse},setInterval(fn){timers.set(++serial,fn);return serial;},clearInterval(id){timers.delete(id);}};
 vm.runInNewContext(fs.readFileSync(path.join(__dirname,'../../src/meowkeeper/app/web/static/js/ai-overlay.js'),'utf8'),context);
 const overlay=context.window.MeowKeeperOverlay.mount(stage,hud),layer=stage.children[0];
@@ -23,8 +27,12 @@ overlay.update({captured_at:new Date(now).toISOString(),detections:[{bbox:[.1,.2
 assert.equal(layer.children.length,1);
 assert.equal(layer.children[0].style.left,'96px');
 assert.equal(layer.children[0].style.top,'108px');
-hud.children.find(x=>x.textContent==='身分候選').listeners.click();
+const identityToggle=hud.children[0].children[1].children.find(x=>x.children[1].textContent.startsWith('身分偵測顯示')).children[0];
+identityToggle.checked=false;identityToggle.listeners.change();
+assert.doesNotMatch(layer.children[0].children[0].textContent,/身分偵測：/);
+identityToggle.checked=true;identityToggle.listeners.change();
 assert.match(layer.children[0].children[0].textContent,/<img src=x>/,'text remains literal, not HTML');
+assert.match(layer.children[0].children[0].textContent,/身分偵測：/,'identity is independently toggleable');
 assert.equal(timers.size,1);
 now=10500;
 overlay.update({captured_at:new Date(now).toISOString(),detections:[]},media);

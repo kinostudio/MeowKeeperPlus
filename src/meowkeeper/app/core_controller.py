@@ -10,6 +10,7 @@ import hashlib
 import shutil
 import threading
 import time
+import traceback
 import uuid
 from collections.abc import Callable
 from dataclasses import asdict
@@ -182,6 +183,12 @@ class RepositoryCoreController(CoreController):
         self._lock = threading.RLock()
         self._stop_event = threading.Event()
         self._thread: threading.Thread | None = None
+        self._lifecycle_generation = 0
+        self._closing = False
+        self._failure_restart_attempt = 0
+        self._restart_timer: threading.Timer | None = None
+        self._restart_due_monotonic: float | None = None
+        self._restart_delays_seconds = (30, 60, 120, 300, 300)
         self._ingest: FfmpegMediaIngest | None = None
         self._adaptive_analyzer: AdaptiveAnalyzer | None = None
         self._semantic_service: EventSemanticService | None = None
@@ -229,6 +236,13 @@ class RepositoryCoreController(CoreController):
             },
             "sqlite": {"status": "ok", "schema_version": store.schema_version, "journal_mode": store.journal_mode},
             "snapshot": {"status": "not_checked", "source": None, "width": None, "height": None},
+            "monitor_recovery": {
+                "status": "idle",
+                "retry_attempt": 0,
+                "maximum_attempts": len(self._restart_delays_seconds),
+                "next_retry_seconds": None,
+                "last_exception_location": None,
+            },
         }
 
     @property
@@ -382,6 +396,9 @@ class RepositoryCoreController(CoreController):
                 key: dict(value) if isinstance(value, dict) else value
                 for key, value in self._metrics.items()
             }
+            if self._restart_due_monotonic is not None:
+                remaining = max(0.0, self._restart_due_monotonic - time.monotonic())
+                metrics["monitor_recovery"]["next_retry_seconds"] = int(remaining + 0.999)
             metrics["telegram"]["recipient_count"] = len(self.telegram_chat_ids)
             metrics["telegram"]["queue_pending"] = self.telegram_dispatcher.pending_count if self.telegram_dispatcher else 0
             return {
@@ -399,41 +416,139 @@ class RepositoryCoreController(CoreController):
 
     def start_monitor(self) -> dict[str, Any]:
         with self._lock:
+            if self._closing:
+                return {"action": "start", "status": self._state,
+                        "message_zh_tw": "核心正在關閉，請重新開啟 MeowKeeper+。"}
             if self._thread is not None and self._thread.is_alive():
-                return {"action": "start", "status": self._state, "message_zh_tw": "監控已在執行中，沒有建立第二個來源連線。"}
-            # A previous session's JPEG must never appear as a live frame.
-            self._latest_jpeg = None
-            self._preview_epoch = uuid.uuid4().hex
-            self._metrics["ai"]["overlay"] = None
-            self._frames_since_tick = 0
-            self._last_tick = time.monotonic()
-            self._metrics["source"] = {
-                **self._metrics["source"],
-                "resolution": None,
-                "width": None,
-                "height": None,
-                "fps": None,
-                "stream_name": None,
-                "last_frame_at": None,
-                "preview_saved_at": None,
-                "preview_epoch": self._preview_epoch,
+                message = ("核心正在結束前一次失敗工作，請稍候再手動啟動。"
+                           if self._state == "error" else "監控已在執行中，沒有建立第二個來源連線。")
+                return {"action": "start", "status": self._state, "message_zh_tw": message}
+            self._cancel_monitor_restart_locked()
+            self._lifecycle_generation += 1
+            self._failure_restart_attempt = 0
+            self._metrics["monitor_recovery"] = {
+                **self._metrics["monitor_recovery"], "status": "idle",
+                "retry_attempt": 0, "next_retry_seconds": None,
             }
-            if not self.source_url:
-                self._state = "waiting_for_source"
-                self._metrics["source"] = {**self._metrics["source"], "status": "not_configured", "connections": 0}
-                return {"action": "start", "status": self._state, "message_zh_tw": "尚未設定來源；Dashboard 已啟動，請先設定 RTSP、YouTube 或本地影片。"}
-            self._stop_event.clear()
-            self._state = "starting"
-            self._started_at = datetime.now(timezone.utc).isoformat()
-            self._last_error = None
-            self._thread = threading.Thread(target=self._run_monitor, name="meowkeeper-monitor", daemon=True)
-            self._thread.start()
-            return {"action": "start", "status": "starting", "message_zh_tw": "監控核心正在啟動。"}
+            return self._start_monitor_locked(self._lifecycle_generation)
+
+    def _start_monitor_locked(self, generation: int) -> dict[str, Any]:
+        """Start one monitor worker; caller must hold ``_lock``."""
+        if self._thread is not None and self._thread.is_alive():
+            return {"action": "start", "status": self._state,
+                    "message_zh_tw": "監控已在執行中，沒有建立第二個來源連線。"}
+        if self._closing or generation != self._lifecycle_generation:
+            return {"action": "start", "status": self._state,
+                    "message_zh_tw": "核心狀態已變更，未啟動新的來源連線。"}
+        # A previous session's JPEG must never appear as a live frame.
+        self._latest_jpeg = None
+        self._preview_epoch = uuid.uuid4().hex
+        self._metrics["ai"]["overlay"] = None
+        self._frames_since_tick = 0
+        self._last_tick = time.monotonic()
+        self._metrics["source"] = {
+            **self._metrics["source"],
+            "resolution": None,
+            "width": None,
+            "height": None,
+            "fps": None,
+            "stream_name": None,
+            "last_frame_at": None,
+            "preview_saved_at": None,
+            "preview_epoch": self._preview_epoch,
+        }
+        if not self.source_url:
+            self._state = "waiting_for_source"
+            self._metrics["source"] = {**self._metrics["source"], "status": "not_configured", "connections": 0}
+            return {"action": "start", "status": self._state, "message_zh_tw": "尚未設定來源；Dashboard 已啟動，請先設定 RTSP、YouTube 或本地影片。"}
+        self._stop_event.clear()
+        self._state = "starting"
+        self._started_at = datetime.now(timezone.utc).isoformat()
+        self._last_error = None
+        self._thread = threading.Thread(
+            target=self._run_monitor, args=(generation,), name="meowkeeper-monitor", daemon=True,
+        )
+        self._thread.start()
+        return {"action": "start", "status": "starting", "message_zh_tw": "監控核心正在啟動。"}
+
+    def _cancel_monitor_restart_locked(self) -> None:
+        timer = self._restart_timer
+        self._restart_timer = None
+        self._restart_due_monotonic = None
+        if timer is not None:
+            timer.cancel()
+
+    def _schedule_monitor_restart_locked(self, generation: int) -> str | None:
+        if (self._closing or self._stop_event.is_set() or not self.source_url
+                or generation != self._lifecycle_generation or self._state != "error"):
+            return None
+        if self._restart_timer is not None:
+            return None
+        if self._failure_restart_attempt >= len(self._restart_delays_seconds):
+            self._metrics["monitor_recovery"] = {
+                **self._metrics["monitor_recovery"], "status": "exhausted",
+                "retry_attempt": self._failure_restart_attempt, "next_retry_seconds": None,
+            }
+            return "🛑 核心自動復原已達重試上限；請檢查診斷後手動啟動監控。"
+        delay = self._restart_delays_seconds[self._failure_restart_attempt]
+        self._failure_restart_attempt += 1
+        self._restart_due_monotonic = time.monotonic() + delay
+        self._restart_timer = threading.Timer(delay, self._auto_restart_monitor, args=(generation,))
+        self._restart_timer.daemon = True
+        self._metrics["monitor_recovery"] = {
+            **self._metrics["monitor_recovery"], "status": "retry_wait",
+            "retry_attempt": self._failure_restart_attempt, "next_retry_seconds": delay,
+        }
+        try:
+            self._restart_timer.start()
+        except Exception as exc:  # noqa: BLE001 - recovery timer failure must remain bounded
+            self._restart_timer = None
+            self._restart_due_monotonic = None
+            self._metrics["monitor_recovery"] = {
+                **self._metrics["monitor_recovery"], "status": "retry_schedule_failed",
+                "next_retry_seconds": None,
+            }
+            return f"⚠️ 核心復原計時器無法啟動：{type(exc).__name__}；請檢查診斷後手動啟動監控。"
+        return (f"🔄 核心異常後將於 {delay} 秒後重試監控"
+                f"（第 {self._failure_restart_attempt}/{len(self._restart_delays_seconds)} 次）；不會重啟整個 Host。")
+
+    def _auto_restart_monitor(self, generation: int) -> None:
+        message = None
+        with self._lock:
+            self._restart_timer = None
+            self._restart_due_monotonic = None
+            if (self._closing or self._stop_event.is_set() or not self.source_url
+                    or generation != self._lifecycle_generation or self._state != "error"):
+                return
+            if self._thread is not None and self._thread.is_alive():
+                # A stale timer must never create a second camera producer.
+                self._metrics["monitor_recovery"] = {
+                    **self._metrics["monitor_recovery"], "status": "blocked_worker_still_running",
+                    "next_retry_seconds": None,
+                }
+                message = "⚠️ 核心復原重試取消：舊監控程序仍在結束，避免建立第二條攝影機連線。"
+            else:
+                self._metrics["monitor_recovery"] = {
+                    **self._metrics["monitor_recovery"], "status": "retrying",
+                    "next_retry_seconds": None,
+                }
+                attempt = self._failure_restart_attempt
+                self._start_monitor_locked(generation)
+                message = f"🔄 正在進行核心復原重試（第 {attempt}/{len(self._restart_delays_seconds)} 次）。"
+        if message:
+            self._log(message)
 
     def stop_monitor(self, *, confirm: bool = False) -> dict[str, Any]:
         if not confirm:
             raise ValueError("停止背景核心需要 confirm=true。")
         with self._lock:
+            self._lifecycle_generation += 1
+            self._cancel_monitor_restart_locked()
+            self._failure_restart_attempt = 0
+            self._metrics["monitor_recovery"] = {
+                **self._metrics["monitor_recovery"], "status": "idle",
+                "retry_attempt": 0, "next_retry_seconds": None,
+            }
             thread = self._thread
             ingest = self._ingest
             analyzer = self._adaptive_analyzer
@@ -651,8 +766,15 @@ class RepositoryCoreController(CoreController):
 
     def set_source(self, source_url: str | None) -> None:
         with self._lock:
-            if self.is_running:
+            if self.is_running or (self._thread is not None and self._thread.is_alive()):
                 raise RuntimeError("監控執行期間不可直接更換來源，請先停止監控。")
+            self._lifecycle_generation += 1
+            self._cancel_monitor_restart_locked()
+            self._failure_restart_attempt = 0
+            self._metrics["monitor_recovery"] = {
+                **self._metrics["monitor_recovery"], "status": "idle",
+                "retry_attempt": 0, "next_retry_seconds": None,
+            }
             self.source_url = source_url.strip() if source_url and source_url.strip() else None
             self._latest_jpeg = None
             self._frames_since_tick = 0
@@ -747,7 +869,12 @@ class RepositoryCoreController(CoreController):
         return {"status": "sent", "sent": sent, "message_zh_tw": f"Telegram 測試通知已傳送至 {sent} 位使用者。"}
 
     def close(self) -> None:
-        if self.is_running or self._thread is not None:
+        with self._lock:
+            self._closing = True
+            self._lifecycle_generation += 1
+            self._cancel_monitor_restart_locked()
+            thread = self._thread
+        if self.is_running or thread is not None:
             try:
                 self.stop_monitor(confirm=True)
             except Exception as exc:  # noqa: BLE001 - shutdown must continue
@@ -756,12 +883,14 @@ class RepositoryCoreController(CoreController):
             self._daily_monitoring.close()
             self._daily_monitoring = None
 
-    def _run_monitor(self) -> None:
+    def _run_monitor(self, generation: int) -> None:
         ingest: FfmpegMediaIngest | None = None
         reader: LatestFrameReader | None = None
         clip_service: EventClipService | None = None
         semantic_service: EventSemanticService | None = None
         analyzer = None
+        unexpected_error = False
+        restart_log: str | None = None
         try:
             youtube_adapter = (
                 YouTubeSourceAdapter(
@@ -874,13 +1003,23 @@ class RepositoryCoreController(CoreController):
                 self._save_latest_jpeg(frame)
                 now = time.monotonic()
                 received_count += 1
+                recovered = False
                 with self._lock:
                     self._last_frame_at = frame.captured_at.timestamp()
                     self._metrics["source"]["last_frame_at"] = frame.captured_at.isoformat()
+                    if self._failure_restart_attempt:
+                        self._failure_restart_attempt = 0
+                        self._metrics["monitor_recovery"] = {
+                            **self._metrics["monitor_recovery"], "status": "recovered",
+                            "retry_attempt": 0, "next_retry_seconds": None,
+                        }
+                        recovered = True
                     if now - received_since >= 1:
                         self._metrics["source"]["fps"] = round(received_count / (now - received_since), 2)
                         received_count = 0
                         received_since = now
+                if recovered:
+                    self._log("✅ 核心復原完成，已重新收到攝影機影格。")
 
             reader = LatestFrameReader(ingest.iter_frames(resolved=resolved),
                                        on_frame=receive_frame, close_source=ingest.close)
@@ -967,8 +1106,24 @@ class RepositoryCoreController(CoreController):
                 self._metrics["ffmpeg"] = {**self._metrics["ffmpeg"], "status": "error", "last_error": type(exc).__name__}
             self._log(f"❌ 監控核心停止：{type(exc).__name__}。")
         except Exception as exc:  # noqa: BLE001 - worker must not kill Host
+            unexpected_error = True
+            extracted = traceback.extract_tb(exc.__traceback__)
+            package_root = Path(__file__).resolve().parents[1]
+            source_frames = []
+            for candidate_frame in extracted:
+                try:
+                    if Path(candidate_frame.filename).resolve().is_relative_to(package_root):
+                        source_frames.append(candidate_frame)
+                except (OSError, RuntimeError, ValueError):
+                    continue
+            frame = source_frames[-1] if source_frames else (extracted[-1] if extracted else None)
+            location = (f"{Path(frame.filename).name}:{frame.lineno} ({frame.name})" if frame else "位置未取得")
             with self._lock:
-                self._last_error = type(exc).__name__
+                self._last_error = f"{type(exc).__name__} @ {location}"[:120]
+                self._metrics["monitor_recovery"] = {
+                    **self._metrics["monitor_recovery"], "status": "failed",
+                    "last_exception_location": location,
+                }
                 self._state = "error"
                 self._metrics["source"] = {
                     **self._metrics["source"],
@@ -980,27 +1135,31 @@ class RepositoryCoreController(CoreController):
                     "fps": None,
                     "last_frame_at": None,
                 }
-            self._log(f"❌ 監控核心發生未預期錯誤：{type(exc).__name__}。")
+            self._log(f"❌ 監控核心發生未預期錯誤：{type(exc).__name__}；位置 {location}。")
         finally:
             with self._lock:
                 self._adaptive_analyzer = None
                 self._semantic_service = None
-            if reader is not None:
-                reader.close()
-            if self._daily_monitoring is not None:
-                self._daily_monitoring.end_session()
-            if ingest is not None:
-                ingest.close()
-            if analyzer is not None and hasattr(analyzer, "close"):
+
+            def cleanup_safely(label: str, action: Callable[[], Any]) -> None:
                 try:
-                    analyzer.close()
-                except (OSError, RuntimeError, ValueError):
-                    self._log("⚠️ 實驗性分析器結束時有未完成資料，請查看診斷。")
+                    action()
+                except Exception as exc:  # noqa: BLE001 - continue releasing independent resources
+                    self._log(f"⚠️ {label}清理失敗：{type(exc).__name__}。")
+
+            if reader is not None:
+                cleanup_safely("影格讀取器", reader.close)
+            if self._daily_monitoring is not None:
+                cleanup_safely("日常統計", self._daily_monitoring.end_session)
+            if ingest is not None:
+                cleanup_safely("影音來源", ingest.close)
+            if analyzer is not None and hasattr(analyzer, "close"):
+                cleanup_safely("實驗性分析器", analyzer.close)
             if clip_service is not None:
-                clip_service.wait_for_idle(5.0)
-                clip_service.close(wait=True)
+                cleanup_safely("事件影片服務", lambda: clip_service.wait_for_idle(5.0))
+                cleanup_safely("事件影片服務", lambda: clip_service.close(wait=True))
             if semantic_service is not None:
-                semantic_service.close(wait=True)
+                cleanup_safely("背景分析服務", lambda: semantic_service.close(wait=True))
             with self._lock:
                 self._ingest = None
                 self._ring = None
@@ -1025,6 +1184,10 @@ class RepositoryCoreController(CoreController):
                 }
                 if self._state == "stopped":
                     self._metrics["ffmpeg"] = {**self._metrics["ffmpeg"], "status": "stopped"}
+                if unexpected_error:
+                    restart_log = self._schedule_monitor_restart_locked(generation)
+            if restart_log:
+                self._log(restart_log)
 
     def _create_analyzer(self) -> Any:
         if self.analyzer_mode.lower() not in {"yolo", "v02"}:
