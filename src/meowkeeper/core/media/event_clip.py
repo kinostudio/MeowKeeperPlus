@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import builtins
 import hashlib
+import json
 import re
 import sqlite3
 import threading
 import time
 import uuid
+from collections import OrderedDict
 from collections.abc import Callable, Iterable
 from concurrent.futures import CancelledError, Future, TimeoutError
 from dataclasses import dataclass
@@ -27,7 +29,7 @@ from meowkeeper.core.identity.pet_registry import PetRegistry
 from meowkeeper.core.notifications.cat_preferences import CatNotificationPreferences
 from meowkeeper.core.notifications.dispatcher import NotificationDispatcher
 from meowkeeper.core.notifications.pet_feedback_wizard import first_round
-from meowkeeper.core.notifications.telegram import TelegramNotifier
+from meowkeeper.core.notifications.telegram import TelegramNotificationError, TelegramNotifier
 from meowkeeper.storage.database import SQLiteStore
 
 from .clip_assembler import ClipAssembler, ClipAssemblyResult
@@ -228,6 +230,8 @@ class EventClipService:
         self._sequence = 0
         self._last_by_type: dict[str, datetime] = {}
         self._lock = threading.RLock()
+        self._caption_edit_states: OrderedDict[tuple[str, str, int], dict[str, object]] = OrderedDict()
+        self._caption_edit_state_limit = 1024
         self._active_clip_jobs = 0
         self._stopping = False
         self._clip_worker = threading.Thread(
@@ -986,6 +990,147 @@ class EventClipService:
         except Exception:
             return current_caption
 
+    def _edit_caption_once(
+        self,
+        event_id: str,
+        recipient_ref: str,
+        chat_id: str,
+        message_id: int,
+        caption: str,
+        reply_markup: dict[str, object] | None,
+        *,
+        operation_label: str,
+        success_message: str,
+    ) -> str:
+        """Perform a bounded, idempotent caption edit for one delivered message."""
+
+        markup_fingerprint = json.dumps(
+            reply_markup, sort_keys=True, ensure_ascii=False, separators=(",", ":"),
+        )
+        fingerprint = hashlib.sha256(
+            (caption + "\0" + markup_fingerprint).encode("utf-8")
+        ).hexdigest()
+        key = (str(event_id), str(recipient_ref), int(message_id))
+        now = self._monotonic()
+        max_attempts = 3
+        with self._lock:
+            state = self._caption_edit_states.get(key)
+            if state is None:
+                state = {
+                    "fingerprint": fingerprint,
+                    "attempts": 0,
+                    "next_attempt": 0.0,
+                    "status": "new",
+                    "in_flight": False,
+                }
+            else:
+                self._caption_edit_states.move_to_end(key)
+                if state["in_flight"]:
+                    return "in_flight"
+                status = str(state["status"])
+                if status in {"terminal", "exhausted"}:
+                    return status
+                if str(state["fingerprint"]) == fingerprint and status in {"sent", "unchanged"}:
+                    return "already_done"
+                if now < float(state["next_attempt"]):
+                    return "backoff"
+                if str(state["fingerprint"]) != fingerprint:
+                    if status in {"sent", "unchanged"}:
+                        state["attempts"] = 0
+                    state["fingerprint"] = fingerprint
+
+            attempts = int(state["attempts"]) + 1
+            state["attempts"] = attempts
+            state["status"] = "in_flight"
+            state["in_flight"] = True
+            # Acts as a lease against concurrent calls; the actual retry delay
+            # is installed after the Telegram result is classified.
+            state["next_attempt"] = now + 15.0
+            self._caption_edit_states[key] = state
+            self._caption_edit_states.move_to_end(key)
+            while len(self._caption_edit_states) > self._caption_edit_state_limit:
+                self._caption_edit_states.popitem(last=False)
+
+        try:
+            self.notifier.edit_message_caption(
+                chat_id=chat_id,
+                message_id=message_id,
+                text=caption,
+                reply_markup=reply_markup,
+            )
+        except Exception as exc:
+            if (
+                isinstance(exc, TelegramNotificationError)
+                and exc.reason_code == "message_not_modified"
+            ):
+                state["status"] = "unchanged"
+                state["in_flight"] = False
+                state["next_attempt"] = self._monotonic() + 5.0
+                with self._lock:
+                    self._caption_edit_states[key] = state
+                    self._caption_edit_states.move_to_end(key)
+                return "unchanged"
+
+            retryable = isinstance(exc, TelegramNotificationError) and exc.retryable
+            can_retry = retryable and attempts < max_attempts
+            delay = 0.0
+            if can_retry:
+                if exc.retry_after_seconds is not None:
+                    delay = min(max(float(exc.retry_after_seconds), 1.0), 300.0)
+                else:
+                    delay = (2.0, 10.0)[min(attempts - 1, 1)]
+                state["status"] = "retry"
+                state["next_attempt"] = self._monotonic() + delay
+            else:
+                state["status"] = "exhausted" if retryable else "terminal"
+                state["next_attempt"] = 0.0
+            state["in_flight"] = False
+            with self._lock:
+                self._caption_edit_states[key] = state
+                self._caption_edit_states.move_to_end(key)
+
+            detail = self._safe_caption_error_detail(exc)
+            if can_retry:
+                suffix = f"第 {attempts}/{max_attempts} 次，{delay:g} 秒後再試。"
+            elif retryable:
+                suffix = f"已重試 {attempts} 次，停止重複更新。"
+            else:
+                suffix = "已停止重複嘗試。"
+            self._log(f"⚠️ {operation_label}失敗 (msg {message_id})：{detail}；{suffix}")
+            return str(state["status"])
+
+        state["status"] = "sent"
+        state["in_flight"] = False
+        state["next_attempt"] = self._monotonic() + 5.0
+        with self._lock:
+            self._caption_edit_states[key] = state
+            self._caption_edit_states.move_to_end(key)
+        self._log(success_message)
+        return "sent"
+
+    @staticmethod
+    def _safe_caption_error_detail(exc: Exception) -> str:
+        if not isinstance(exc, TelegramNotificationError):
+            return f"本機更新錯誤（{type(exc).__name__}）"
+        code = exc.api_error_code or exc.status_code
+        code_text = f"Telegram API {code}（" if code is not None else "Telegram API（"
+        labels = {
+            "message_not_found": "訊息已不存在",
+            "message_cannot_be_edited": "訊息目前不可編輯",
+            "bot_blocked": "Bot 已被封鎖",
+            "chat_not_found": "找不到通知對話",
+            "rate_limited": "Telegram 暫時限流",
+            "unauthorized": "Bot 授權失敗",
+            "forbidden": "Bot 權限不足",
+            "server_error": "Telegram 服務暫時異常",
+            "network_error": "網路連線暫時失敗",
+            "bad_request": "Telegram 拒絕此訊息更新",
+            "malformed_response": "Telegram 回應格式不正確",
+            "api_rejected": "Telegram 拒絕此操作",
+            "unknown": "Telegram 拒絕此操作",
+        }
+        return f"{code_text}{labels.get(exc.reason_code, 'Telegram 拒絕此操作')}）"
+
     def elevate_event_caption(
         self,
         event_id: str,
@@ -1092,23 +1237,25 @@ class EventClipService:
             fake_req = EventClipRequest(event_id=event_id, trigger_at=datetime.now(timezone.utc),
                                         event_type="cat_detected", source_id=(media_row["source_id"] if media_row and media_row["source_id"] else "camera"), trigger_origin="detector")
 
+            updated = False
             for ref, msg_id in receipts:
                 chat_id = chat_map.get(ref)
                 if not chat_id:
                     continue
-                try:
-                    markup = self._feedback_markup(chat_id, fake_req)
-                    self.notifier.edit_message_caption(
-                        chat_id=chat_id,
-                        message_id=msg_id,
-                        text=caption_text[:1024],
-                        reply_markup=markup,
-                    )
-                    self._log(f"✨ Telegram 訊息 #{msg_id} 標題已自動平滑升級為：{pet_name}")
-                except Exception as exc:
-                    self._log(f"⚠️ Telegram 標題升級失敗 (msg {msg_id})：{type(exc).__name__}")
+                markup = self._feedback_markup(chat_id, fake_req)
+                result = self._edit_caption_once(
+                    event_id,
+                    str(ref),
+                    chat_id,
+                    int(msg_id),
+                    caption_text[:1024],
+                    markup,
+                    operation_label="Telegram 標題升級",
+                    success_message=f"✨ Telegram 訊息 #{msg_id} 標題已自動平滑升級為：{pet_name}",
+                )
+                updated = updated or result in {"sent", "unchanged", "already_done"}
 
-            return True
+            return updated
         except Exception as exc:
             self._log(f"⚠️ 延遲身分自動平滑升級異常：{type(exc).__name__}")
             return False
@@ -1159,23 +1306,25 @@ class EventClipService:
             fake_req = EventClipRequest(event_id=event_id, trigger_at=datetime.now(timezone.utc),
                                         event_type="cat_detected", source_id=(media_row["source_id"] if media_row and media_row["source_id"] else "camera"), trigger_origin="detector")
 
+            updated = False
             for ref, msg_id in receipts:
                 chat_id = chat_map.get(ref)
                 if not chat_id:
                     continue
-                try:
-                    markup = self._feedback_markup(chat_id, fake_req)
-                    self.notifier.edit_message_caption(
-                        chat_id=chat_id,
-                        message_id=msg_id,
-                        text=elevated[:1024],
-                        reply_markup=markup,
-                    )
-                    self._log(f"✨ Telegram 訊息 #{msg_id} 雲端語意已自動更新")
-                except Exception as exc:
-                    self._log(f"⚠️ Telegram 雲端語意更新失敗 (msg {msg_id})：{type(exc).__name__}")
+                markup = self._feedback_markup(chat_id, fake_req)
+                result = self._edit_caption_once(
+                    event_id,
+                    str(ref),
+                    chat_id,
+                    int(msg_id),
+                    elevated[:1024],
+                    markup,
+                    operation_label="Telegram 雲端語意更新",
+                    success_message=f"✨ Telegram 訊息 #{msg_id} 雲端語意已自動更新",
+                )
+                updated = updated or result in {"sent", "unchanged", "already_done"}
 
-            return True
+            return updated
         except Exception as exc:
             self._log(f"⚠️ 雲端語意平滑升級異常：{type(exc).__name__}")
             return False

@@ -23,9 +23,76 @@ from urllib.request import Request, urlopen
 class TelegramNotificationError(RuntimeError):
     """Telegram API 呼叫失敗。"""
 
-    def __init__(self, message: str, *, status_code: int | None = None) -> None:
+    def __init__(
+        self,
+        message: str,
+        *,
+        status_code: int | None = None,
+        api_error_code: int | None = None,
+        reason_code: str = "unknown",
+        retry_after_seconds: float | None = None,
+    ) -> None:
         super().__init__(message)
         self.status_code = status_code
+        self.api_error_code = api_error_code
+        self.reason_code = reason_code
+        self.retry_after_seconds = retry_after_seconds
+
+    @property
+    def retryable(self) -> bool:
+        return self.reason_code in {"rate_limited", "server_error", "network_error"}
+
+
+def _telegram_error_metadata(
+    payload: Mapping[str, Any], *, status_code: int | None = None,
+) -> tuple[int | None, str, float | None]:
+    """Extract allowlisted Telegram error metadata without retaining raw descriptions."""
+
+    raw_code = payload.get("error_code")
+    api_error_code = raw_code if type(raw_code) is int else None
+    description = payload.get("description")
+    description = description.casefold() if isinstance(description, str) else ""
+
+    parameters = payload.get("parameters")
+    retry_after: float | None = None
+    if isinstance(parameters, Mapping):
+        raw_retry_after = parameters.get("retry_after")
+        try:
+            parsed_retry_after = float(raw_retry_after)
+            if math.isfinite(parsed_retry_after) and parsed_retry_after > 0:
+                retry_after = parsed_retry_after
+        except (TypeError, ValueError, OverflowError):
+            pass
+
+    if "message is not modified" in description:
+        reason_code = "message_not_modified"
+    elif "message to edit not found" in description or "message not found" in description:
+        reason_code = "message_not_found"
+    elif "message can't be edited" in description or "message cannot be edited" in description:
+        reason_code = "message_cannot_be_edited"
+    elif "bot was blocked" in description:
+        reason_code = "bot_blocked"
+    elif "chat not found" in description:
+        reason_code = "chat_not_found"
+    elif api_error_code == 429 or status_code == 429:
+        reason_code = "rate_limited"
+    elif api_error_code == 401 or status_code == 401:
+        reason_code = "unauthorized"
+    elif api_error_code == 403 or status_code == 403:
+        reason_code = "forbidden"
+    elif (
+        (api_error_code is not None and api_error_code >= 500)
+        or (status_code is not None and status_code >= 500)
+    ):
+        reason_code = "server_error"
+    elif (
+        (api_error_code is not None and 400 <= api_error_code < 500)
+        or (status_code is not None and 400 <= status_code < 500)
+    ):
+        reason_code = "bad_request"
+    else:
+        reason_code = "api_rejected"
+    return api_error_code, reason_code, retry_after
 
 
 @dataclass(frozen=True)
@@ -193,14 +260,42 @@ class TelegramNotifier:
             with urlopen(request, timeout=timeout_seconds or self.timeout_seconds) as response:
                 payload = json.loads(response.read().decode("utf-8"))
         except HTTPError as exc:
+            try:
+                error_payload = json.loads(exc.read(4096).decode("utf-8", errors="replace"))
+            except (OSError, UnicodeError, json.JSONDecodeError):
+                error_payload = {}
+            if not isinstance(error_payload, Mapping):
+                error_payload = {}
+            api_error_code, reason_code, retry_after = _telegram_error_metadata(
+                error_payload, status_code=exc.code,
+            )
             raise TelegramNotificationError(
                 f"Telegram API 請求失敗（HTTP {exc.code}）；請檢查 Token、Chat ID 與權限。",
                 status_code=exc.code,
+                api_error_code=api_error_code,
+                reason_code=reason_code,
+                retry_after_seconds=retry_after,
             ) from exc
         except (URLError, TimeoutError, json.JSONDecodeError) as exc:
-            raise TelegramNotificationError("Telegram API 無法連線或回傳格式錯誤。") from exc
+            if isinstance(exc, (URLError, TimeoutError)):
+                reason_code = "network_error"
+            else:
+                reason_code = "malformed_response"
+            raise TelegramNotificationError(
+                "Telegram API 無法連線或回傳格式錯誤。", reason_code=reason_code,
+            ) from exc
+        if not isinstance(payload, Mapping):
+            raise TelegramNotificationError(
+                "Telegram API 回傳格式錯誤。", reason_code="malformed_response",
+            )
         if not payload.get("ok"):
-            raise TelegramNotificationError("Telegram API 拒絕此操作；請檢查 Chat ID 與 Bot 權限。")
+            api_error_code, reason_code, retry_after = _telegram_error_metadata(payload)
+            raise TelegramNotificationError(
+                "Telegram API 拒絕此操作；請檢查 Chat ID 與 Bot 權限。",
+                api_error_code=api_error_code,
+                reason_code=reason_code,
+                retry_after_seconds=retry_after,
+            )
         return payload
 
     def send_message(

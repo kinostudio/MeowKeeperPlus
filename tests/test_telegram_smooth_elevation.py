@@ -1,6 +1,7 @@
 """Unit tests for Telegram delayed identity auto-elevation and track smoothing."""
 from __future__ import annotations
 
+import hashlib
 import io
 import json
 import shutil
@@ -9,6 +10,7 @@ import unittest
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from types import SimpleNamespace
+from urllib.error import HTTPError
 from unittest.mock import MagicMock, patch
 
 from meowkeeper.core.identity.base import IdentityPrediction, IdentityThresholds
@@ -18,6 +20,7 @@ from meowkeeper.core.media.ring_buffer import DiskSegmentRingBuffer
 from meowkeeper.core.media.clip_assembler import ClipAssembler
 from meowkeeper.core.media.media_validation import MediaValidationResult
 from meowkeeper.core.event_semantics import SemanticResult
+from meowkeeper.core.notifications.telegram import TelegramNotificationError, TelegramNotifier
 from meowkeeper.core.tracking.base import BoundingBox, TrackObservation
 from meowkeeper.storage.database import SQLiteStore
 
@@ -189,6 +192,140 @@ class TelegramSmoothElevationTests(unittest.TestCase):
         self.assertIn("嗨啵", edited["caption"])
         self.assertIn("坐著", edited["caption"])
         self.assertIn("DINOv2辨識", edited["caption"])
+        self.assertTrue(self.service.elevate_event_caption(
+            event_id=event_id,
+            pet_id="p_hiball",
+            posture="sitting",
+        ))
+        self.assertEqual(len(self.notifier.edited_captions), 1)
+
+    def _create_caption_receipt(self, event_id: str, track_id: str = "trk-caption") -> None:
+        now = datetime.now(timezone.utc)
+        self.store.create_media_event(
+            event_id=event_id,
+            event_type="cat_detected",
+            trigger_at=now,
+            source_id="cam-01",
+            track_id=track_id,
+            pet_id="unknown",
+            confidence=0.9,
+            requested_pre_seconds=2.0,
+            requested_post_seconds=3.0,
+            trigger_origin="detector",
+        )
+        self.store.record_telegram_receipt(
+            event_id,
+            hashlib.sha256(b"12345678").hexdigest(),
+            "video",
+            3580,
+        )
+
+    def test_repeated_caption_failure_is_throttled_and_safe_diagnostic_is_logged(self) -> None:
+        self._create_caption_receipt("event-caption-failure")
+        logs: list[str] = []
+        self.service.logger = logs.append
+        error = TelegramNotificationError(
+            "safe generic exception",
+            status_code=400,
+            api_error_code=400,
+            reason_code="bad_request",
+        )
+        self.notifier.edit_message_caption = MagicMock(side_effect=error)
+
+        for _ in range(8):
+            self.assertFalse(self.service.elevate_event_caption("event-caption-failure", "p_hiball"))
+
+        self.notifier.edit_message_caption.assert_called_once()
+        self.assertEqual(len(logs), 1)
+        self.assertIn("Telegram API 400", logs[0])
+        self.assertIn("已停止重複嘗試", logs[0])
+        self.assertNotIn("safe generic exception", logs[0])
+
+    def test_message_not_modified_is_idempotent_success(self) -> None:
+        self._create_caption_receipt("event-caption-unchanged")
+        logs: list[str] = []
+        self.service.logger = logs.append
+        self.notifier.edit_message_caption = MagicMock(
+            side_effect=TelegramNotificationError(
+                "safe generic exception",
+                status_code=400,
+                api_error_code=400,
+                reason_code="message_not_modified",
+            )
+        )
+
+        self.assertTrue(self.service.elevate_event_caption("event-caption-unchanged", "p_hiball"))
+        self.assertTrue(self.service.elevate_event_caption("event-caption-unchanged", "p_hiball"))
+
+        self.notifier.edit_message_caption.assert_called_once()
+        self.assertEqual(logs, [])
+
+    def test_retryable_caption_failure_uses_server_backoff_and_three_attempt_cap(self) -> None:
+        self._create_caption_receipt("event-caption-retry")
+        logs: list[str] = []
+        self.service.logger = logs.append
+        current_time = [100.0]
+        self.service._monotonic = lambda: current_time[0]
+        self.notifier.edit_message_caption = MagicMock(side_effect=TelegramNotificationError(
+            "safe generic exception", api_error_code=429,
+            reason_code="rate_limited", retry_after_seconds=5.0,
+        ))
+
+        for expected_attempt in (1, 2, 3):
+            self.service.elevate_event_caption("event-caption-retry", "p_hiball")
+            self.assertEqual(self.notifier.edit_message_caption.call_count, expected_attempt)
+            self.service.elevate_event_caption("event-caption-retry", "p_hiball")
+            self.assertEqual(self.notifier.edit_message_caption.call_count, expected_attempt)
+            current_time[0] += 5.0
+
+        for _ in range(5):
+            self.service.elevate_event_caption("event-caption-retry", "p_hiball")
+        self.assertEqual(self.notifier.edit_message_caption.call_count, 3)
+        self.assertEqual(len(logs), 3)
+        self.assertIn("Telegram API 429", logs[0])
+        self.assertIn("停止重複更新", logs[-1])
+
+    def test_telegram_api_error_metadata_is_classified_without_raw_description(self) -> None:
+        response = MagicMock()
+        response.read.return_value = json.dumps({
+            "ok": False,
+            "error_code": 400,
+            "description": "Bad Request: message is not modified",
+        }).encode("utf-8")
+        response.__enter__.return_value = response
+        response.__exit__.return_value = False
+        with patch("meowkeeper.core.notifications.telegram.urlopen", return_value=response):
+            with self.assertRaises(TelegramNotificationError) as caught:
+                TelegramNotifier("123456:secret-token")._call("editMessageCaption", fields={})
+
+        self.assertEqual(caught.exception.api_error_code, 400)
+        self.assertEqual(caught.exception.reason_code, "message_not_modified")
+        self.assertNotIn("Bad Request", str(caught.exception))
+
+    def test_http_error_extracts_retry_after_without_exposing_body(self) -> None:
+        body = json.dumps({
+            "ok": False,
+            "error_code": 429,
+            "description": "Too Many Requests: retry later",
+            "parameters": {"retry_after": 7},
+        }).encode("utf-8")
+        response_error = HTTPError(
+            "https://api.telegram.org/bot123456:secret-token/editMessageCaption",
+            429,
+            "Too Many Requests",
+            {},
+            io.BytesIO(body),
+        )
+        with patch("meowkeeper.core.notifications.telegram.urlopen", side_effect=response_error):
+            with self.assertRaises(TelegramNotificationError) as caught:
+                TelegramNotifier("123456:secret-token")._call("editMessageCaption", fields={})
+
+        self.assertEqual(caught.exception.status_code, 429)
+        self.assertEqual(caught.exception.api_error_code, 429)
+        self.assertEqual(caught.exception.reason_code, "rate_limited")
+        self.assertEqual(caught.exception.retry_after_seconds, 7.0)
+        self.assertNotIn("secret-token", str(caught.exception))
+        self.assertNotIn("Too Many Requests: retry later", str(caught.exception))
 
     def test_cloud_semantics_post_delivery_elevation(self) -> None:
         """Pillar 2: When cloud Multimodal AI returns after delivery, update caption silently."""
