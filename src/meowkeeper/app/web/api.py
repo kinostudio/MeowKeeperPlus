@@ -2451,6 +2451,8 @@ def create_app(
             "event_post_seconds": 10.0,
             "retention_seconds": 60.0,
             "ring_maximum_size_mb": 512.0,
+            "event_video_max_age_days": 30,
+            "event_video_max_bytes": 3 * 1024 ** 3,
             "dashboard_auto_open": False,
             "telegram_startup_notice": False,
         }

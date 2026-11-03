@@ -121,6 +121,14 @@
       <input id="ai-ring-maximum-size-mb" type="number" min="16" max="4096" step="1" required>
       {{ hint('ai-ring-maximum-size-mb', '暫存影音最多使用多少磁碟空間。建議 512 MB；高畫質來源若先達容量上限，實際可預錄時間可能變短。') }}
     </label>
+    <label>事件影片保留天數（天）
+      <input id="ai-event-video-max-age-days" type="number" min="1" max="3650" step="1" required>
+      {{ hint('ai-event-video-max-age-days', '事件錄影影片（mp4/mkv/ts）保留天數，預設 30 天。逾期影片自動清除。') }}
+    </label>
+    <label>事件影片容量上限（GB）
+      <input id="ai-event-video-max-gb" type="number" min="1" max="200" step="1" required>
+      {{ hint('ai-event-video-max-gb', '事件錄影目錄總容量上限，預設 3 GB。超過上限時自動從最舊影片開始清理。') }}
+    </label>
     </fieldset>
     <div class="actions settings-actions">
       <button class="button" type="submit">保存 AI／行為設定</button>

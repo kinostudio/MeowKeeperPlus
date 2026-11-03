@@ -20,6 +20,7 @@ from typing import Any
 from urllib.parse import urlsplit
 
 from meowkeeper.core.analytics.daily_monitoring import DailyMonitoringRecorder
+from meowkeeper.core.health import cleanup_retained_files
 from meowkeeper.core.detection.frame_analysis import (
     AnalysisConfigurationError,
     NoopFrameAnalyzer,
@@ -104,6 +105,8 @@ class RepositoryCoreController(CoreController):
         event_directory: str | Path = "data/events",
         preview_directory: str | Path = "data/cache/preview",
         retention_seconds: float = 60.0,
+        event_video_max_age_days: int = 30,
+        event_video_max_bytes: int = 3 * 1024 ** 3,
         segment_seconds: float = 1.0,
         maximum_size_mb: int = 512,
         analysis_fps: int = 5,
@@ -142,6 +145,9 @@ class RepositoryCoreController(CoreController):
         self._capture_lock = threading.Lock()
         self.preview_directory = Path(preview_directory).resolve()
         self.retention_seconds = float(retention_seconds)
+        self.event_video_max_age_days = int(event_video_max_age_days)
+        self.event_video_max_bytes = int(event_video_max_bytes)
+        self._last_event_cleanup_at: float = 0.0
         self.segment_seconds = float(segment_seconds)
         self.maximum_size_mb = int(maximum_size_mb)
         self.analysis_fps = int(analysis_fps)
@@ -838,6 +844,14 @@ class RepositoryCoreController(CoreController):
                 self.cooldown_seconds = float(values["cooldown_seconds"])
             if "retention_seconds" in values:
                 self.retention_seconds = float(values["retention_seconds"])
+            if "event_video_max_age_days" in values:
+                self.event_video_max_age_days = int(values["event_video_max_age_days"])
+            elif "max_age_days" in values:
+                self.event_video_max_age_days = int(values["max_age_days"])
+            if "event_video_max_bytes" in values:
+                self.event_video_max_bytes = int(values["event_video_max_bytes"])
+            elif "max_bytes" in values:
+                self.event_video_max_bytes = int(values["max_bytes"])
             if "ring_maximum_size_mb" in values:
                 self.maximum_size_mb = int(values["ring_maximum_size_mb"])
             self._metrics["ring_buffer"] = {
@@ -1035,6 +1049,23 @@ class RepositoryCoreController(CoreController):
                     frame.captured_at, cat_present=count > 0 if type(count) is int and count >= 0 else None,
                 )
                 self._update_runtime_metrics(frame, ingest, ring, analyzer)
+                now_mono = time.monotonic()
+                if now_mono - self._last_event_cleanup_at >= 21600:
+                    self._last_event_cleanup_at = now_mono
+                    try:
+                        p_res = cleanup_retained_files(
+                            self.event_directory,
+                            max_age_days=self.event_video_max_age_days,
+                            suffixes=(".mp4", ".mkv", ".ts"),
+                            max_bytes=self.event_video_max_bytes,
+                        )
+                        if p_res.removed_files:
+                            self._log(
+                                f"[影片清理] 定期清理已刪除 {len(p_res.removed_files)} 個過期影片，"
+                                f"釋放 {p_res.removed_bytes / (1024**2):.1f} MB。"
+                            )
+                    except Exception:
+                        pass
                 with self._lock:
                     self._metrics["ai"]["dropped_frames"] = reader.dropped
                     self._metrics["ai"]["frame_reader"] = reader.snapshot()

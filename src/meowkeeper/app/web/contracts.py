@@ -29,6 +29,11 @@ class SettingsPatch:
 def validate_settings_patch(values: Mapping[str, Any]) -> dict[str, Any]:
     if not isinstance(values, Mapping):
         raise SettingsValidationError("設定內容必須是 JSON object。")
+    normalized = dict(values)
+    if "max_age_days" in normalized and "event_video_max_age_days" not in normalized:
+        normalized["event_video_max_age_days"] = normalized.pop("max_age_days")
+    if "max_bytes" in normalized and "event_video_max_bytes" not in normalized:
+        normalized["event_video_max_bytes"] = normalized.pop("max_bytes")
     cleaned: dict[str, Any] = {}
     ranges: dict[str, tuple[float, float]] = {
         "confidence_threshold": (0.0, 1.0),
@@ -45,6 +50,8 @@ def validate_settings_patch(values: Mapping[str, Any]) -> dict[str, Any]:
         "retention_seconds": (10.0, 120.0),
         "ring_maximum_size_mb": (16.0, 4096.0),
         "dashboard_port": (1024.0, 65535.0),
+        "event_video_max_age_days": (1.0, 3650.0),
+        "event_video_max_bytes": (104857600.0, 214748364800.0),
     }
     allowed = set(ranges) | {
         "analyzer_mode",
@@ -54,7 +61,7 @@ def validate_settings_patch(values: Mapping[str, Any]) -> dict[str, Any]:
         "telegram_startup_notice",
         "lan_access_enabled",
     }
-    for key, value in values.items():
+    for key, value in normalized.items():
         name = str(key)
         if _SECRET_WORDS.search(name) or _FORBIDDEN_COMMAND_WORDS.search(name):
             raise SettingsValidationError(f"設定欄位 {name} 不允許由 Web API 直接修改。")
@@ -70,7 +77,7 @@ def validate_settings_patch(values: Mapping[str, Any]) -> dict[str, Any]:
                 raise SettingsValidationError("影格寬度與分析尺寸必須是整數。")
             if name == "analysis_width" and int(value) not in {640, 960, 1280, 1920}:
                 raise SettingsValidationError("AI 推論尺寸只支援 640、960、1280 或 1920。")
-            if name.endswith("_fps") or name in {"dashboard_port", "identity_frame_width", "preview_frame_width", "analysis_width"}:
+            if name.endswith("_fps") or name in {"dashboard_port", "identity_frame_width", "preview_frame_width", "analysis_width", "event_video_max_age_days", "event_video_max_bytes"}:
                 cleaned[name] = int(value)
             else:
                 cleaned[name] = float(value)
@@ -117,6 +124,10 @@ def validate_settings_with_pydantic(values: Mapping[str, Any]) -> dict[str, Any]
         retention_seconds: float | None = Field(default=None, ge=10.0, le=120.0)
         ring_maximum_size_mb: float | None = Field(default=None, ge=16.0, le=4096.0)
         dashboard_port: int | None = Field(default=None, ge=1024, le=65535)
+        event_video_max_age_days: int | None = Field(default=None, ge=1, le=3650)
+        event_video_max_bytes: int | None = Field(default=None, ge=104857600, le=214748364800)
+        max_age_days: int | None = Field(default=None, ge=1, le=3650)
+        max_bytes: int | None = Field(default=None, ge=104857600, le=214748364800)
         source_profile: str | None = Field(default=None, min_length=1, max_length=120)
         analyzer_mode: str | None = None
         inference_device: str | None = None

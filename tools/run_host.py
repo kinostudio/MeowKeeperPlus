@@ -532,6 +532,8 @@ def _build_runtime(
         event_directory=args.event_directory,
         preview_directory=args.preview_directory,
         retention_seconds=runtime_settings["retention_seconds"],
+        event_video_max_age_days=int(runtime_settings.get("event_video_max_age_days", 30)),
+        event_video_max_bytes=int(runtime_settings.get("event_video_max_bytes", 3 * 1024 ** 3)),
         maximum_size_mb=int(runtime_settings["ring_maximum_size_mb"]),
         analysis_fps=int(runtime_settings["analysis_fps"]),
         analysis_width=int(runtime_settings["analysis_width"]),

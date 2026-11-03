@@ -20,6 +20,7 @@
     event_post_seconds: document.getElementById("ai-event-post-seconds"),
     retention_seconds: document.getElementById("ai-retention-seconds"),
     ring_maximum_size_mb: document.getElementById("ai-ring-maximum-size-mb"),
+      event_video_max_age_days: document.getElementById("ai-event-video-max-age-days"),
   };
   const csrfToken = () => {
     const item = document.cookie.split(";").map((value) => value.trim()).find((value) => value.startsWith("meowkeeper_csrf="));
@@ -42,6 +43,9 @@
     Object.entries(fields).forEach(([name, input]) => {
       if (input && values[name] !== undefined && values[name] !== null) input.value = values[name];
     });
+    const maxBytes = values.event_video_max_bytes ?? (3 * 1024 * 1024 * 1024);
+    const gbInput = document.getElementById("ai-event-video-max-gb");
+    if (gbInput) gbInput.value = Math.max(1, Math.round(maxBytes / (1024 * 1024 * 1024)));
     const restart = data.restart_required ? "；重新啟動 Host 後套用" : "";
     runtime.textContent = `設定已載入${restart}`;
   }
@@ -80,6 +84,8 @@
     payload.inference_device = device.value;
     Object.entries(fields).forEach(([name, input]) => { payload[name] = Number(input.value); });
     if (!analyzer.disabled) payload.analyzer_mode = analyzer.value;
+    const gbVal = Number(document.getElementById("ai-event-video-max-gb")?.value || 3);
+    payload.event_video_max_bytes = Math.round(gbVal * 1024 * 1024 * 1024);
     try {
       const data = await request("/api/v1/settings", {
         method: "PUT",
