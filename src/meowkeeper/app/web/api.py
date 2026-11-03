@@ -967,6 +967,62 @@ def create_app(
         from meowkeeper.storage.semantic_jobs import SemanticJobJournal
         return {**SemanticJobJournal(core.store).runtime(),"worker_active":False,"pressure_reason":None}
 
+    # ------------------------------------------------------------------ #
+    #  每 provider 獨立配額 REST API                                        #
+    # ------------------------------------------------------------------ #
+
+    def _vision_settings():
+        """取得 VisionSettingsStore，若未接入則拋出 503。"""
+        vs = getattr(app.state, "vision_settings", None)
+        if vs is None:
+            raise HTTPException(status_code=503, detail="Vision 配額服務尚未接入。")
+        return vs
+
+    @app.get("/api/v1/vision/provider-quotas")
+    def vision_provider_quotas_list(request: Request):
+        """列出所有已設定獨立配額的 provider。"""
+        require_auth(request)
+        try:
+            return {"quotas": _vision_settings().list_provider_quotas()}
+        except RuntimeError as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+    @app.put("/api/v1/vision/provider-quotas/{provider_ref}")
+    def vision_provider_quota_set(request: Request, provider_ref: str, body: Any = Body(default=None)):  # noqa: B008
+        """新增或更新指定 provider 的獨立配額設定。"""
+        require_mutation(request)
+        payload = json_body(body) if body is not None else {}
+        try:
+            return _vision_settings().set_provider_quota(
+                provider_ref,
+                provider_label=str(payload.get("provider_label", "")),
+                daily_request_limit=int(payload.get("daily_request_limit", 400)),
+                requests_per_minute_limit=int(payload.get("requests_per_minute_limit", 12)),
+                tokens_per_minute_limit=int(payload.get("tokens_per_minute_limit", 0)),
+                warning_threshold_percent=int(payload.get("warning_threshold_percent", 80)),
+                enabled=bool(payload.get("enabled", True)),
+            )
+        except (ValueError, RuntimeError) as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    @app.delete("/api/v1/vision/provider-quotas/{provider_ref}")
+    def vision_provider_quota_delete(request: Request, provider_ref: str):
+        """刪除指定 provider 的獨立配額設定，回退至全域設定。"""
+        require_mutation(request)
+        try:
+            return _vision_settings().delete_provider_quota(provider_ref)
+        except (ValueError, RuntimeError) as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    @app.get("/api/v1/vision/provider-quotas/{provider_ref}/effective")
+    def vision_provider_quota_effective(request: Request, provider_ref: str):
+        """查詢指定 provider 的有效配額（個別設定或全域回退）。"""
+        require_auth(request)
+        try:
+            return _vision_settings().effective_limits_for(provider_ref)
+        except (ValueError, RuntimeError) as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+
     @app.post("/api/v1/events/{event_id}/analysis/{job_id}/cancel")
     def cancel_analysis(request: Request, event_id: str, job_id: str):
         require_mutation(request)
@@ -1268,6 +1324,71 @@ def create_app(
             raise HTTPException(status_code=400, detail="更新操作不合法。")
         background_tasks.add_task(updater.check if action == "check" else updater.prepare)
         return {"status": "queued", "message_zh_tw": "更新操作已排入；不會停止監控或自動安裝。"}
+
+    def _run_github_hotfix() -> None:
+        import logging
+        import subprocess
+        import time
+        from pathlib import Path
+
+        logger = logging.getLogger("meowkeeper.hotfix")
+        git = Path(r"C:\Users\user\AppData\Local\Programs\MeowKeeperPlus-DevTools\Git-2.56.0.2\bin\git.exe")
+        git_cmd = str(git) if git.is_file() else "git"
+        repo = Path(r"C:\Users\user\Desktop\MeowKeeperPlus-Git")
+        app_src = Path(r"C:\ProgramData\MeowKeeperPlus\App\src\meowkeeper")
+        git_src = repo / "src" / "meowkeeper"
+        app_tools = Path(r"C:\ProgramData\MeowKeeperPlus\App\tools")
+        git_tools = repo / "tools"
+
+        try:
+            logger.info("GitHub 熱修復啟動：自 origin/main 拉取最新程式碼...")
+            if repo.is_dir():
+                subprocess.run(
+                    [git_cmd, "-C", str(repo), "fetch", "origin", "main"],
+                    capture_output=True, text=True, timeout=30, check=False
+                )
+                subprocess.run(
+                    [git_cmd, "-C", str(repo), "merge", "origin/main", "--ff-only"],
+                    capture_output=True, text=True, timeout=30, check=False
+                )
+
+            if git_src.is_dir() and app_src.parent.is_dir():
+                subprocess.run(
+                    ["robocopy", str(git_src), str(app_src), "/E", "/XO", "/NDL", "/NFL", "/NJH", "/NJS"],
+                    timeout=60, check=False
+                )
+            if git_tools.is_dir() and app_tools.parent.is_dir():
+                subprocess.run(
+                    ["robocopy", str(git_tools), str(app_tools), "/E", "/XO", "/NDL", "/NFL", "/NJH", "/NJS"],
+                    timeout=60, check=False
+                )
+
+            logger.info("GitHub 熱修復代碼同步完成，觸發服務重啟...")
+            time.sleep(1)
+            detached_flags = 0x00000008 | 0x00000200
+            restart_script = (
+                'timeout /t 2 /nobreak >nul & '
+                'schtasks /End /TN "MeowKeeperPlus Core" & '
+                'timeout /t 2 /nobreak >nul & '
+                'schtasks /Run /TN "MeowKeeperPlus Core"'
+            )
+            subprocess.Popen(
+                ["cmd.exe", "/c", restart_script],
+                shell=False,
+                creationflags=detached_flags,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+        except Exception as exc:
+            logger.exception("GitHub 熱修復背景執行失敗: %s", exc)
+
+    @app.post("/api/v1/updates/hotfix-github")
+    def updates_hotfix_github(request: Request, background_tasks: BackgroundTasks) -> dict:
+        require_mutation(request)
+        if request.client is None or request.client.host not in {"127.0.0.1", "::1"}:
+            raise HTTPException(status_code=403, detail="GitHub 熱修復只允許從本機 Dashboard 操作。")
+        background_tasks.add_task(_run_github_hotfix)
+        return {"status": "queued", "message_zh_tw": "GitHub 熱修復已排入背景執行，數秒後服務將自動重啟。"}
 
     @app.get("/api/v1/identity/summary")
     def identity_summary(request: Request) -> dict:

@@ -68,6 +68,53 @@
   }
   check.addEventListener("click", () => act("check"));
   prepare.addEventListener("click", () => act("prepare"));
+
+  const hotfixBtn = document.getElementById("update-hotfix-github");
+  if (hotfixBtn) {
+    hotfixBtn.addEventListener("click", async () => {
+      if (!window.confirm("確定從 GitHub 拉取最新原始碼並平滑重載嗎？\n更新僅需數秒，Dashboard 會短暫離線重啟。")) return;
+      hotfixBtn.disabled = true;
+      const cookie = document.cookie.split(";").map(x => x.trim()).find(x => x.startsWith("meowkeeper_csrf="));
+      const csrf = cookie ? decodeURIComponent(cookie.substring("meowkeeper_csrf=".length)) : "";
+      try {
+        message.textContent = "正在發送 GitHub 熱修復指令…";
+        const response = await fetch("/api/v1/updates/hotfix-github", {
+          method: "POST",
+          headers: { "X-MeowKeeper-CSRF": csrf, "Content-Type": "application/json" },
+          body: JSON.stringify({ reauth: true })
+        });
+        const data = await response.json();
+        if (!response.ok) {
+          throw new Error(data.detail || "伺服器回應錯誤");
+        }
+        message.textContent = (data.message_zh_tw || "熱修復已啟動！") + " 正在重新整理連線…";
+        setTimeout(() => {
+          let attempts = 0;
+          const poll = setInterval(async () => {
+            attempts++;
+            try {
+              const res = await fetch("/api/v1/health", { cache: "no-store" });
+              if (res.ok) {
+                clearInterval(poll);
+                message.textContent = "✅ 熱修復已成功套用，服務已重啟！正在重載頁面…";
+                setTimeout(() => window.location.reload(), 1500);
+              }
+            } catch (_) {
+              if (attempts > 30) {
+                clearInterval(poll);
+                message.textContent = "服務重啟耗時較長，請稍候手動重新整理頁面。";
+                hotfixBtn.disabled = false;
+              }
+            }
+          }, 1500);
+        }, 3000);
+      } catch (err) {
+        message.textContent = "GitHub 熱修復啟動失敗：" + (err.message || "未知錯誤");
+        hotfixBtn.disabled = false;
+      }
+    });
+  }
+
   window.addEventListener("pagehide", () => clearTimeout(timer));
   load();
 })();

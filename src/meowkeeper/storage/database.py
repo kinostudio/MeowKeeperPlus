@@ -177,6 +177,16 @@ CREATE TABLE IF NOT EXISTS vision_provider_circuits (
     open_until REAL NOT NULL DEFAULT 0,
     needs_key_fix INTEGER NOT NULL DEFAULT 0
 );
+CREATE TABLE IF NOT EXISTS vision_provider_quotas (
+    provider_ref TEXT PRIMARY KEY,
+    provider_label TEXT NOT NULL DEFAULT '',
+    daily_request_limit INTEGER NOT NULL DEFAULT 400,
+    requests_per_minute_limit INTEGER NOT NULL DEFAULT 12,
+    tokens_per_minute_limit INTEGER NOT NULL DEFAULT 0,
+    warning_threshold_percent INTEGER NOT NULL DEFAULT 80,
+    enabled INTEGER NOT NULL DEFAULT 1,
+    updated_at REAL NOT NULL DEFAULT 0
+);
 CREATE TABLE IF NOT EXISTS event_semantic_revisions (
     event_id TEXT NOT NULL REFERENCES media_events(event_id) ON DELETE CASCADE,
     revision INTEGER NOT NULL,
