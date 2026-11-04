@@ -32,6 +32,19 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class DeltaUpdateTests(unittest.TestCase):
+    def test_worker_lock_blocks_duplicate_update_and_releases_after_exit(self):
+        worker = (ROOT / "scripts/Apply-MeowKeeperPlusUpdate.ps1").read_text(encoding="utf-8")
+        start = worker.index("function Enter-UpdateLock")
+        function = worker[start:worker.index("function Invoke-BoundedProcess", start)]
+        quoted = "'" + str(self.root).replace("'", "''") + "'"
+        command = "$ErrorActionPreference='Stop';function Assert-PlainPath($Path){};" + function
+        command += "$first=Enter-UpdateLock " + quoted + ";$blocked=$false;try{$second=Enter-UpdateLock " + quoted
+        command += "}catch [IO.IOException]{$blocked=$true};if(-not $blocked){throw 'duplicate_update_allowed'};$first.Dispose();"
+        command += "$third=Enter-UpdateLock " + quoted + ";$third.Dispose()"
+        result = subprocess.run(["powershell.exe", "-NoProfile", "-Command", command], capture_output=True, timeout=10, shell=False, check=False)
+        self.assertEqual(result.returncode, 0, result.stderr.decode(errors="replace"))
+        self.assertIn("if ($workerLock) { $workerLock.Dispose() }", worker)
+
     def test_classic_windows_transaction_paths_fit_bundled_200_character_names(self):
         for root in (r"C:\ProgramData\MeowKeeperPlus\Updater\work-aaaaaaaa\a",
                      r"C:\ProgramData\MeowKeeperPlus\App.b-aaaaaaaaaaaaaaaa",

@@ -29,6 +29,13 @@ $oldManifestHash = $null
 $installerResultPath = $null
 $version = ''
 $updateSucceeded = $false
+$workerLock = $null
+
+function Enter-UpdateLock([string]$Root) {
+    $path = Join-Path $Root 'apply.lock'
+    if (Test-Path -LiteralPath $path) { Assert-PlainPath $path }
+    return [IO.File]::Open($path, [IO.FileMode]::OpenOrCreate, [IO.FileAccess]::ReadWrite, [IO.FileShare]::None)
+}
 
 function Invoke-BoundedProcess([string]$Executable, [string[]]$Arguments, [int]$TimeoutSeconds) {
     $outputPath = Join-Path $workRoot ('process-' + [guid]::NewGuid().ToString('N') + '.txt')
@@ -347,6 +354,8 @@ try {
         $requestPath = Join-Path $updatesRoot 'apply-request.json'
     } else { $VerifierRoot = $AppRoot }
     Set-Location -LiteralPath $updaterRoot
+    try { $workerLock = Enter-UpdateLock $updaterRoot }
+    catch [IO.IOException] { Write-Host '已有更新工作正在執行；本次未切換版本，請勿重複執行。'; exit 3 }
     Assert-PlainPath $AppRoot
     Assert-PlainPath $DataRoot
     Assert-PlainPath $updatesRoot
@@ -514,4 +523,5 @@ finally {
             }
         } catch { }
     }
+    if ($workerLock) { $workerLock.Dispose() }
 }
