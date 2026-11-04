@@ -26,6 +26,8 @@
 
 受控更新明確跳過選用測溫驅動安裝提示，不在 SYSTEM Session 0 顯示對話框，也不重新安裝驅動；既有測溫背景工作保留。
 
+受控交易使用短 `work-xxxxxxxx/a` 與 `App.b-<16碼>`／`App.f-<16碼>` 目錄，保留完整 request ID 的狀態關聯；撞名即停止，不覆寫。Python 深層下載準備使用 extended path。worker 在停止監控前檢查目標樹的傳統 Windows 路徑長度，超出即停止，不修改系統長路徑登錄設定；舊式備份 receipt 仍可讀取復原。
+
 ## 驗收邊界
 
 `tests/test_delta_updates.py` 驗證僅變更檔案、簽章／基準／路徑／ZIP 防護、已知修正基準、無完整包回退、下載前拒絕及 worker 重建；`tests/test_hotfix_transaction.py` 驗證隔離檔案與 SQLite 回復。發布前另做真實候選包重建、逐檔完整性與包內 HTTP smoke。

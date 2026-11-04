@@ -51,7 +51,7 @@ if ($HotfixManaged) {
     $hotfixWorkRoot = [IO.Path]::GetDirectoryName($resolvedHotfixResult)
     $expectedUpdaterRoot = [IO.Path]::GetFullPath((Join-Path $installRoot 'Updater'))
     if ([IO.Path]::GetDirectoryName($hotfixWorkRoot) -ne $expectedUpdaterRoot -or
-        [IO.Path]::GetFileName($hotfixWorkRoot) -notmatch '^work-[a-f0-9]{32}$' -or
+        [IO.Path]::GetFileName($hotfixWorkRoot) -notmatch '^work-(?:[a-f0-9]{8}|[a-f0-9]{32})$' -or
         [IO.Path]::GetFileName($resolvedHotfixResult) -ne 'installer-result.json') {
         throw '安全更新結果路徑不符合固定工作目錄契約。'
     }
@@ -1022,7 +1022,7 @@ if ($CurrentUser) {
             & $sourcePython $snapshotTool capture --data $dataRoot --backup (Join-Path $hotfixWorkRoot 'data-backup')
             if ($LASTEXITCODE -ne 0) { throw '資料快照未完成；拒絕切換程式版本。' }
         }
-        $backupLeaf = "App.upgrade-backup-$([guid]::NewGuid().ToString('N'))"
+        $backupLeaf = if ($HotfixManaged) { 'App.b-' + [guid]::NewGuid().ToString('N').Substring(0, 16) } else { "App.upgrade-backup-$([guid]::NewGuid().ToString('N'))" }
         $upgradeBackupApp = [IO.Path]::GetFullPath((Join-Path $resolvedInstallRoot $backupLeaf))
         if ([IO.Path]::GetDirectoryName($upgradeBackupApp) -ne $resolvedInstallRoot -or
             (Test-Path -LiteralPath $upgradeBackupApp)) {
@@ -1203,7 +1203,7 @@ if ($CurrentUser) {
         $updaterWorkRoot = [IO.Path]::GetDirectoryName($resultPath)
         $expectedWorkParent = [IO.Path]::GetFullPath((Join-Path $installRoot 'Updater'))
         if ([IO.Path]::GetDirectoryName($updaterWorkRoot) -ne $expectedWorkParent -or
-            [IO.Path]::GetFileName($updaterWorkRoot) -notmatch '^work-[a-f0-9]{32}$' -or
+            [IO.Path]::GetFileName($updaterWorkRoot) -notmatch '^work-(?:[a-f0-9]{8}|[a-f0-9]{32})$' -or
             ((Get-Item -LiteralPath $updaterWorkRoot -Force).Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0 -or
             -not (Test-Path -LiteralPath $resultPath -PathType Leaf)) {
             throw '安全更新結果路徑驗證失敗。'
@@ -1278,7 +1278,7 @@ catch {
                 if ($LASTEXITCODE -ne 0) { throw "舊版資料自動復原未通過；已保留 App 封存目錄與資料，請勿刪除。" }
             }
             if (Test-Path -LiteralPath $appRoot) {
-                $failedLeaf = "App.failed-upgrade-$([guid]::NewGuid().ToString('N'))"
+                $failedLeaf = if ($HotfixManaged) { 'App.f-' + [guid]::NewGuid().ToString('N').Substring(0, 16) } else { "App.failed-upgrade-$([guid]::NewGuid().ToString('N'))" }
                 $failedPath = [IO.Path]::GetFullPath((Join-Path $installRoot $failedLeaf))
                 if ([IO.Path]::GetDirectoryName($failedPath) -ne [IO.Path]::GetFullPath($installRoot)) {
                     throw "失敗版本封存路徑驗證失敗。"

@@ -515,7 +515,8 @@ class UpdateManager:
             spec = importlib.util.spec_from_file_location("release_verifier", self.app_root / "tools/verify_portable.py")
             verifier = importlib.util.module_from_spec(spec)
             spec.loader.exec_module(verifier)
-            verifier.verify_portable(package)
+            from meowkeeper.app.delta_update import wide
+            verifier.verify_portable(wide(package))
             self.state = {"status": "prepared", "version": manifest["version"],
                           "message_zh_tw": "更新包已驗證。安裝版按「套用更新」即可；會短暫停止監控，套用前會再次驗證套件。可攜版請依備援安裝說明手動更新。",
                           "package_path": str(package), "prepared_id": folder.name}

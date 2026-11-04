@@ -16,7 +16,17 @@ REPOSITORY = "kinostudio/MeowKeeperPlus"
 MAX_DELTA = 512 * 1024**2
 
 
+def wide(path: Path) -> Path:
+    if os.name != "nt":
+        return path
+    value = os.path.abspath(path)
+    if value.startswith("\\\\?\\"):
+        return Path(value)
+    return Path("\\\\?\\UNC\\" + value[2:] if value.startswith("\\\\") else "\\\\?\\" + value)
+
+
 def digest(path: Path) -> str:
+    path = wide(path)
     result = hashlib.sha256()
     with path.open("rb") as stream:
         for chunk in iter(lambda: stream.read(1024 * 1024), b""):
@@ -40,6 +50,7 @@ def relative_path(value: str) -> str:
 
 
 def plain(path: Path) -> None:
+    path = wide(path)
     if path.is_symlink() or getattr(path.lstat(), "st_file_attributes", 0) & 0x400:
         raise ValueError("差量更新不接受重新解析點。")
 
@@ -119,6 +130,7 @@ def verifier(app_root: Path):
 
 def validate_base(app_root: Path, manifest: dict) -> dict:
     """Before any ZIP download, reject other versions and modified installed bytes."""
+    app_root = wide(app_root)
     plain(app_root)
     path = app_root / "build_manifest.json"
     plain(path)
@@ -167,6 +179,7 @@ def validate_base(app_root: Path, manifest: dict) -> dict:
 
 
 def extract_payload(archive: Path, manifest: dict, destination: Path) -> None:
+    archive, destination = wide(archive), wide(destination)
     if destination.exists() or archive.stat().st_size != manifest["size"] or digest(archive) != manifest["sha256"]:
         raise ValueError("差量套件雜湊／大小不符，或暫存目錄已存在。")
     expected = records({"files": manifest["changed"]})
@@ -189,6 +202,7 @@ def extract_payload(archive: Path, manifest: dict, destination: Path) -> None:
 
 
 def assemble(app_root: Path, archive: Path, manifest: dict, destination: Path, *, on_file=None) -> None:
+    app_root, archive, destination = wide(app_root), wide(archive), wide(destination)
     base = validate_base(app_root, manifest)
     if destination.exists():
         raise ValueError("差量重建目錄已存在，拒絕覆寫。")

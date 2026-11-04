@@ -59,8 +59,12 @@ def verify_and_stage(
         delta = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(delta)
         manifest = delta.verify_delta(envelope, (app_root / "configs/update-public.pem").read_bytes())
-        package = stage_root / "app"
+        package = stage_root / "a"
         delta.assemble(app_root, archive, manifest, package)
+        target = json.loads((package / "build_manifest.json").read_text(encoding="utf-8"))
+        if os.name == "nt" and any(len(str(package / item["path"])) >= 260 or len(str((package / item["path"]).parent)) >= 248
+                                   for item in target["files"]):
+            raise ValueError("更新暫存路徑超過 Windows 安全長度；尚未停止監控，不會改抓完整包。")
         return {"status": "staged", "version": manifest["version"], "package_path": str(package)}
     from meowkeeper.app.updates import safe_extract, verify_envelope
     from meowkeeper.app.web.release_info import release_information
@@ -107,7 +111,7 @@ def main(argv: list[str] | None = None) -> int:
         expected_stage = args.stage_root.resolve(strict=True)
         if (args.app_root.resolve(strict=True) != expected_app.resolve(strict=True)
                 or expected_stage.parent != expected_updater.resolve(strict=True)
-                or not re.fullmatch(r"work-[a-f0-9]{32}", expected_stage.name)):
+                or not re.fullmatch(r"work-(?:[a-f0-9]{8}|[a-f0-9]{32})", expected_stage.name)):
             raise ValueError("安全更新工作路徑不符合安裝邊界。")
         result = verify_and_stage(args.archive, args.envelope, app_root=args.app_root, stage_root=args.stage_root)
     except Exception as exc:  # noqa: BLE001 - emit only a safe error class to the privileged launcher.

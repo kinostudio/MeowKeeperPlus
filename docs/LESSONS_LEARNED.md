@@ -2,6 +2,8 @@
 
 ## 2026-11-05｜一鍵套用不等於差量下載
 
+- 不得假設目標 Windows 已啟用 LongPathsEnabled。GUID 暫存加上套件授權檔的深層路徑可能突破 Win32 上限；受控交易／備份採短名稱，停止監控前確認全樹路徑預算，Python 準備使用 extended path。回歸：`DELTA-WINDOWS-CLASSIC-PATH-LIMIT`。
+
 - 管理員過渡工具的要求與暫存也必須留在受保護 Updater，不能以管理員權限向一般帳號可改動的 Data／prepared 目錄複製檔案，避免重新解析點／檔案替換競態。回歸：`DELTA-BOOTSTRAP-PROTECTED-REQUEST`。
 
 - SYSTEM 更新不得顯示互動式驅動選項。worker 明確傳入 `-SkipCpuTemperature`，安裝器亦排除 HotfixManaged 的首次安裝提示；`MANAGED-HOTFIX-NO-DRIVER-PROMPT` 實際評估 PowerShell 條件，防止 Session 0 卡在對話框。

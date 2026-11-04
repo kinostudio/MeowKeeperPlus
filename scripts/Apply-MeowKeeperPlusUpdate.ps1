@@ -272,7 +272,7 @@ function Restore-PreviousApp([string]$ResultPath, [string]$ExpectedOldHash) {
     $backup = [IO.Path]::GetFullPath([string]$payload.old_backup_app)
     $installParent = [IO.Path]::GetFullPath($installRoot)
     if ([IO.Path]::GetDirectoryName($backup) -ne $installParent -or
-        [IO.Path]::GetFileName($backup) -notmatch '^App\.upgrade-backup-[a-f0-9]{32}$') { throw 'old_app_backup_path_invalid' }
+        [IO.Path]::GetFileName($backup) -notmatch '^App\.(?:upgrade-backup-[a-f0-9]{32}|b-[a-f0-9]{16})$') { throw 'old_app_backup_path_invalid' }
     if (-not (Test-Path -LiteralPath $backup)) {
         $existingManifest = Join-Path $AppRoot 'build_manifest.json'
         if ((Test-Path -LiteralPath $existingManifest -PathType Leaf) -and
@@ -289,7 +289,7 @@ function Restore-PreviousApp([string]$ResultPath, [string]$ExpectedOldHash) {
     }
     Stop-UpdateProcesses
     $currentApp = [IO.Path]::GetFullPath($AppRoot)
-    $failedApp = Join-Path $installRoot ('App.failed-hotfix-' + [guid]::NewGuid().ToString('N'))
+    $failedApp = Join-Path $installRoot ('App.f-' + [guid]::NewGuid().ToString('N').Substring(0, 16))
     if (Test-Path -LiteralPath $currentApp) {
         Assert-PlainPath $currentApp
         Move-Item -LiteralPath $currentApp -Destination $failedApp -ErrorAction Stop
@@ -371,7 +371,7 @@ try {
         throw 'prepared_package_size_invalid'
     }
 
-    $workRoot = Join-Path $updaterRoot ('work-' + $requestId)
+    $workRoot = Join-Path $updaterRoot ('work-' + $requestId.Substring(0, 8))
     if (Test-Path -LiteralPath $workRoot) { throw 'work_directory_exists' }
     New-Item -ItemType Directory -Path $workRoot | Out-Null
     & "$env:SystemRoot\System32\icacls.exe" $workRoot /inheritance:r /grant:r '*S-1-5-18:(OI)(CI)F' '*S-1-5-32-544:(OI)(CI)F' *> $null
@@ -440,7 +440,7 @@ try {
     if (-not (Wait-ForDashboard 90)) { throw 'new_dashboard_health_failed' }
     $backupApp = [IO.Path]::GetFullPath([string]$installerResult.old_backup_app)
     if ([IO.Path]::GetDirectoryName($backupApp) -ne [IO.Path]::GetFullPath($installRoot) -or
-        [IO.Path]::GetFileName($backupApp) -notmatch '^App\.upgrade-backup-[a-f0-9]{32}$') { throw 'old_app_backup_contract_invalid' }
+        [IO.Path]::GetFileName($backupApp) -notmatch '^App\.(?:upgrade-backup-[a-f0-9]{32}|b-[a-f0-9]{16})$') { throw 'old_app_backup_contract_invalid' }
     Assert-PlainPath $backupApp
     if ((Get-FileHash -Algorithm SHA256 -LiteralPath (Join-Path $backupApp 'build_manifest.json')).Hash.ToLowerInvariant() -ne $oldManifestHash.ToLowerInvariant()) {
         throw 'old_app_backup_changed'
@@ -508,7 +508,7 @@ finally {
         try {
             $resolvedWork = [IO.Path]::GetFullPath((Resolve-Path -LiteralPath $workRoot).Path)
             if ($resolvedWork.StartsWith([IO.Path]::GetFullPath($updaterRoot) + '\', [StringComparison]::OrdinalIgnoreCase) -and
-                [IO.Path]::GetFileName($resolvedWork) -match '^work-[a-f0-9]{32}$' -and
+                [IO.Path]::GetFileName($resolvedWork) -match '^work-(?:[a-f0-9]{8}|[a-f0-9]{32})$' -and
                 (Test-TreeWithoutReparsePoints $resolvedWork)) {
                 Remove-Item -LiteralPath $resolvedWork -Recurse -Force -ErrorAction SilentlyContinue
             }

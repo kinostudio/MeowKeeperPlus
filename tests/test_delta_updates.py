@@ -8,7 +8,7 @@ import subprocess
 import tempfile
 import unittest
 import zipfile
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 from unittest.mock import Mock, patch
 
 from Crypto.PublicKey import ECC
@@ -20,6 +20,7 @@ from meowkeeper.app.delta_update import (
     validate_base,
     validate_manifest,
     verify_delta,
+    wide,
 )
 from meowkeeper.app.updates import UpdateManager, canonical, verify_envelope
 from tools.apply_verified_update import verify_and_stage
@@ -31,6 +32,31 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class DeltaUpdateTests(unittest.TestCase):
+    def test_classic_windows_transaction_paths_fit_bundled_200_character_names(self):
+        for root in (r"C:\ProgramData\MeowKeeperPlus\Updater\work-aaaaaaaa\a",
+                     r"C:\ProgramData\MeowKeeperPlus\App.b-aaaaaaaaaaaaaaaa",
+                     r"C:\ProgramData\MeowKeeperPlus\App.f-aaaaaaaaaaaaaaaa"):
+            path = PureWindowsPath(root) / ("x" * 191) / "file.txt"
+            self.assertEqual(len(str(path)) - len(root) - 1, 200)
+            self.assertLess(len(str(path)), 260)
+            self.assertLess(len(str(path.parent)), 248)
+        worker = (ROOT / "scripts/Apply-MeowKeeperPlusUpdate.ps1").read_text(encoding="utf-8")
+        self.assertIn("$requestId.Substring(0, 8)", worker)
+
+    def test_extended_python_paths_are_idempotent_and_preserve_bytes(self):
+        root = self.root / "long-path-fixture"
+        path = root / ("a" * 100) / ("b" * 100) / "value.txt"
+        try:
+            wide(path).parent.mkdir(parents=True)
+            wide(path).write_bytes(b"unchanged")
+            self.assertEqual(wide(wide(path)), wide(path))
+            self.assertEqual(digest(path), digest(wide(path)))
+            if os.name == "nt":
+                self.assertTrue(str(wide(path)).startswith("\\\\?\\"))
+        finally:
+            if wide(root).exists():
+                shutil.rmtree(wide(root))
+
     def test_admin_bootstrap_stages_requests_only_under_protected_updater(self):
         install = self.root / "MeowKeeperPlus"
         app, data, updater = install / "App", install / "Data", install / "Updater"
@@ -281,6 +307,7 @@ class DeltaUpdateTests(unittest.TestCase):
         result = verify_and_stage(archive, envelope, app_root=self.base, stage_root=stage)
         self.assertEqual(result["status"], "staged")
         self.assertEqual(result["version"], "r118")
+        self.assertEqual(Path(result["package_path"]).name, "a")
         self.assertEqual(digest(Path(result["package_path"]) / "build_manifest.json"), digest(self.target / "build_manifest.json"))
         self.assertEqual((self.base / "src/demo.py").read_bytes(), b"old")
 
