@@ -6,6 +6,7 @@ import tempfile
 import time
 import unittest
 from pathlib import Path
+from typing import ClassVar
 from unittest.mock import patch
 
 from meowkeeper.app.core_controller import RepositoryCoreController
@@ -13,7 +14,7 @@ from meowkeeper.storage.database import SQLiteStore
 
 
 class _FakeTimer:
-    created: list["_FakeTimer"] = []
+    created: ClassVar[list[_FakeTimer]] = []
 
     def __init__(self, interval, function, args=(), kwargs=None):
         self.interval = interval

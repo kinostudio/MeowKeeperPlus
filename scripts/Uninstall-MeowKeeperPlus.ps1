@@ -9,10 +9,11 @@ $installRoot = if ($CurrentUser) {
 }
 $appRoot = Join-Path $installRoot "App"
 $dataRoot = Join-Path $installRoot "Data"
+$updaterRoot = Join-Path $installRoot "Updater"
 $tasks = if ($CurrentUser) {
     @("MeowKeeperPlus User Core", "MeowKeeperPlus User Tray")
 } else {
-    @("MeowKeeperPlus Core", "MeowKeeperPlus Tray")
+    @("MeowKeeperPlus Core", "MeowKeeperPlus Tray", "MeowKeeperPlus Update Worker")
 }
 $startMenuPrograms = if ($CurrentUser) {
     [Environment]::GetFolderPath("Programs")
@@ -216,6 +217,26 @@ if (Test-Path -LiteralPath $appRoot) {
         }
     }
     Remove-Item -LiteralPath $resolvedApp -Recurse -Force
+}
+if (-not $CurrentUser -and (Test-Path -LiteralPath $updaterRoot)) {
+    $resolvedUpdater = (Resolve-Path -LiteralPath $updaterRoot).Path
+    $expectedUpdater = [IO.Path]::GetFullPath((Join-Path $installRoot "Updater"))
+    if ($resolvedUpdater -ne $expectedUpdater -or
+        ((Get-Item -LiteralPath $resolvedUpdater -Force).Attributes -band [IO.FileAttributes]::ReparsePoint)) {
+        throw "安全更新目錄路徑驗證失敗，拒絕刪除。"
+    }
+    $pending = New-Object 'System.Collections.Generic.Stack[string]'
+    $pending.Push($resolvedUpdater)
+    while ($pending.Count -gt 0) {
+        $current = $pending.Pop()
+        foreach ($item in @(Get-ChildItem -LiteralPath $current -Force -ErrorAction Stop)) {
+            if (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+                throw "安全更新目錄包含重新解析點；為避免移除範圍外檔案，目錄仍保留。"
+            }
+            if ($item.PSIsContainer) { $pending.Push($item.FullName) }
+        }
+    }
+    Remove-Item -LiteralPath $resolvedUpdater -Recurse -Force
 }
 if ($RemoveData -and (Test-Path -LiteralPath $dataRoot)) {
     $resolvedData = (Resolve-Path -LiteralPath $dataRoot).Path

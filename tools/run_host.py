@@ -851,6 +851,7 @@ def main(argv: list[str] | None = None) -> int:
     telegram_dispatcher: NotificationDispatcher | None = None
     telegram_feedback_poller: TelegramFeedbackPoller | None = None
     telegram_command_router: TelegramCommandRouter | None = None
+    tray_supervisor = None
 
     def request_host_restart() -> dict[str, Any]:
         """Ask this process to shut down cleanly and re-exec the same venv.
@@ -891,6 +892,8 @@ def main(argv: list[str] | None = None) -> int:
         def request_host_shutdown() -> dict[str, Any]:
             nonlocal restart_requested
             restart_requested = False
+            if tray_supervisor is not None:
+                tray_supervisor.close()
             if getattr(app.state, "closing_requested", False):
                 return {"status": "closing", "message_zh_tw": "完整關閉已排程。"}
             # Reuse the Tray's ownership-verified helper, without recursively
@@ -936,6 +939,12 @@ def main(argv: list[str] | None = None) -> int:
             thread.join(timeout=5.0)
             return 2
         print(f"✅ 喵喵守護者+ Dashboard 已啟動：{base_url}/")
+        from meowkeeper.app.tray_supervisor import TraySupervisor
+
+        tray_supervisor = TraySupervisor(ROOT, Path(args.lock_root), controller._log, port=args.port)
+        controller.tray_ensure = tray_supervisor.ensure
+        app.state.tray_supervisor = tray_supervisor
+        tray_supervisor.ensure()
         startup_context = getattr(app.state, "startup_notice_context", {})
         notifier = startup_context.get("notifier") if isinstance(startup_context, Mapping) else None
         chat_ids = tuple(startup_context.get("chat_ids", ())) if isinstance(startup_context, Mapping) else ()
@@ -1006,6 +1015,8 @@ def main(argv: list[str] | None = None) -> int:
     except KeyboardInterrupt:
         print("ℹ️ 收到停止要求，正在安全關閉 Host。")
     finally:
+        if tray_supervisor is not None:
+            tray_supervisor.close()
         server.should_exit = True
         thread.join(timeout=10.0)
         if telegram_feedback_poller is not None:

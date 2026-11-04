@@ -52,6 +52,7 @@ RUNTIME_PACKAGES = (
     "jinja2",
     "pystray",
     "PIL",
+    "pi_heif",
     "psutil",
     "Crypto",
     "multipart",
@@ -136,6 +137,8 @@ def _validate_runtime(runtime: Path, *, dry_run: bool) -> list[str]:
                       + "; assert version('av') == '17.1.0'"],
                     capture_output=True,
                     text=True,
+                    encoding="utf-8",
+                    errors="replace",
                     timeout=120,
                     check=False,
                     env=environment,
@@ -155,6 +158,8 @@ def _validate_runtime(runtime: Path, *, dry_run: bool) -> list[str]:
                 [str(yt_dlp_cli), "--version"],
                 capture_output=True,
                 text=True,
+                encoding="utf-8",
+                errors="replace",
                 timeout=15,
                 check=False,
             )
@@ -216,6 +221,7 @@ PUBLIC_PACKAGE_DOCS = ("README.md", "docs/PUBLIC_USER_GUIDE.md")
 # migration traces, probes, and one-off recovery scripts must not ship.
 PUBLIC_RUNTIME_TOOLS = (
     "__init__.py",
+    "apply_verified_update.py",
     "close_application.py",
     "create_task_scheduler_xml.py",
     "launcher.py",
@@ -370,6 +376,11 @@ def build_portable(
     _validate_runtime(runtime, dry_run=dry_run)
     model_manifest = validate_model_file()
     required = _required_files(include_experimental_models)
+    if enable_verified_ptz:
+        required += (
+            ROOT / "reports" / "ptz-feedback-fix" / "go2rtc-ptz-feedback.exe",
+            ROOT / "reports" / "ptz-feedback-fix" / "manifest.json",
+        )
     missing = [str(path) for path in required if not path.is_file()]
     if missing:
         raise ValueError("發布包缺少必要檔案：" + "; ".join(missing))
@@ -488,6 +499,10 @@ def build_portable(
         _copy_powershell_script(
             ROOT / "scripts" / "Install-MeowKeeperPlus.ps1",
             staging / "scripts" / "Install-MeowKeeperPlus.ps1",
+        )
+        _copy_powershell_script(
+            ROOT / "scripts" / "Apply-MeowKeeperPlusUpdate.ps1",
+            staging / "scripts" / "Apply-MeowKeeperPlusUpdate.ps1",
         )
         _copy_powershell_script(
             ROOT / "scripts" / "Manage-CpuTemperature.ps1",

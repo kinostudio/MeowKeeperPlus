@@ -1,18 +1,16 @@
 import sys
+
 sys.path.insert(0, r"C:\Users\user\Desktop\MeowKeeperPlus-Workspace\src")
 
-import unittest
-import tempfile
-import sqlite3
-import json
 import subprocess
+import tempfile
+import unittest
 from pathlib import Path
 from unittest.mock import MagicMock, patch
-from fastapi.testclient import TestClient
 
 from meowkeeper.app.web.preview_rtc import validate_offer
-from meowkeeper.integrations.xiaomi.miss_privacy import MissPrivacyAdapter
 from meowkeeper.core.analytics.system_telemetry import gpu_sample
+from meowkeeper.integrations.xiaomi.miss_privacy import MissPrivacyAdapter
 
 
 class TestUiRefactoring10Items(unittest.TestCase):

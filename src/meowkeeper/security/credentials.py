@@ -11,6 +11,7 @@ from __future__ import annotations
 import ctypes
 import hashlib
 import json
+import logging
 import os
 import re
 from collections.abc import Mapping, Sequence
@@ -331,15 +332,15 @@ class TelegramCredentialStore:
                 key = self._read(self._vision_target(profile_reference))
                 if key:
                     return key
-            except Exception:
-                pass
+            except (OSError, RuntimeError, ValueError, TypeError):
+                logging.getLogger(__name__).debug("選用資料處理未完成；沿用安全備援結果。")
         if getattr(self, "_shared_vision_path", None) and self._shared_vision_path.is_file():
             try:
                 data = json.loads(self._shared_vision_path.read_text(encoding="utf-8"))
                 if isinstance(data, dict):
                     return str(data.get(profile_reference) or "")
-            except Exception:
-                pass
+            except (OSError, RuntimeError, ValueError, TypeError):
+                logging.getLogger(__name__).debug("選用資料處理未完成；沿用安全備援結果。")
         if self._use_dpapi:
             raise CredentialStoreError("Windows Credential Manager 不可用，視覺服務金鑰未讀取。")
         return ""
@@ -449,8 +450,8 @@ class TelegramCredentialStore:
                         chat_ids=str(data.get("chat_ids") or ""),
                         recipients_json=str(data.get("recipients_json") or ""),
                     )
-            except Exception:
-                pass
+            except (OSError, RuntimeError, ValueError, TypeError):
+                logging.getLogger(__name__).debug("選用資料處理未完成；沿用安全備援結果。")
         return creds
 
     def status(self) -> dict[str, Any]:
@@ -494,8 +495,8 @@ class TelegramCredentialStore:
                     }, ensure_ascii=False, indent=2),
                     encoding="utf-8"
                 )
-            except Exception:
-                pass
+            except (OSError, RuntimeError, ValueError, TypeError):
+                logging.getLogger(__name__).debug("選用資料處理未完成；沿用安全備援結果。")
         if self._use_dpapi:
             self._write_dpapi(token, normalized_chat_ids, recipients_json)
             return

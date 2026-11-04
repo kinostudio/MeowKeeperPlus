@@ -18,7 +18,7 @@ except ImportError:  # pragma: no cover - portable builder requires psutil
     psutil = None
 
 
-TASK_NAMES = ("MeowKeeperPlus Core", "MeowKeeperPlus Tray")
+TASK_NAMES = ("MeowKeeperPlus Core", "MeowKeeperPlus Tray", "MeowKeeperPlus Update Worker")
 
 
 def _dashboard_port(data_root: Path) -> int:
@@ -151,6 +151,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--wait-seconds", type=float, default=0.0)
     parser.add_argument("--core-task-name", default=TASK_NAMES[0])
     parser.add_argument("--tray-task-name", default=TASK_NAMES[1])
+    parser.add_argument("--updater-task-name", default=TASK_NAMES[2])
     parser.add_argument(
         "--startup-link",
         action="append",
@@ -163,7 +164,7 @@ def main(argv: list[str] | None = None) -> int:
         args.root,
         args.data_root,
         wait_seconds=args.wait_seconds,
-        task_names=(args.core_task_name, args.tray_task_name),
+        task_names=(args.core_task_name, args.tray_task_name, args.updater_task_name),
         startup_links=tuple(args.startup_link),
     )
     print(json.dumps(result, ensure_ascii=False))

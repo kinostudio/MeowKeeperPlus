@@ -270,7 +270,6 @@ class EventSemanticTests(unittest.TestCase):
 
 
     def test_semantic_request_with_pet_profiles_and_candidate_resolution(self):
-        from meowkeeper.core.event_semantics import normalize_storyboard_result
 
         request = SemanticRequest(
             "event-identity-test",

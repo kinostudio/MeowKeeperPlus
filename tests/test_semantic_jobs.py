@@ -70,6 +70,16 @@ class SemanticJobTests(unittest.TestCase):
         self.assertEqual(len(self.store.event_semantic_history("event")), 1)
         self.assertEqual(self.journal.list_event("event")[0]["projected"], 1)
 
+    def test_detailed_evidence_reason_is_persisted_in_job_ledger(self):
+        job = str(uuid4())
+        self.journal.register(self.request, job, self.provider, 60)
+        self.journal.finish(job, SemanticResult("insufficient_evidence", job_id=job, evidence_reason="view_changed"))
+        self.journal.recover(self.store.record_event_semantics)
+        self.assertEqual(self.journal.list_event("event")[0]["terminal_reason"], "view_changed")
+        result = self.store.event_semantic_history("event")[0]["result"]
+        self.assertEqual(result["evidence_reason"], "view_changed")
+        self.assertIn("視角", result["evidence_message"])
+
     def test_queue_full_and_invalid_media_have_persisted_terminal_results(self):
         gate, entered = threading.Event(), threading.Event()
         def analyze(*_args, **_kwargs):

@@ -9,14 +9,14 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 from meowkeeper.core.event_semantics import SemanticResult
+from meowkeeper.core.identity.pet_registry import PetRegistry
 from meowkeeper.core.media.event_clip import (
-    EventClipService,
     EventClipRequest,
+    EventClipService,
     _format_natural_cat_headline,
 )
 from meowkeeper.core.media.media_validation import MediaValidationResult
 from meowkeeper.core.media.ring_buffer import DiskSegmentRingBuffer
-from meowkeeper.core.identity.pet_registry import PetRegistry
 from meowkeeper.storage.database import SQLiteStore
 
 

@@ -323,6 +323,7 @@
       const analysisStates={completed:"分析完成，仍需確認",failed:"進階分析未完成",timeout:"AI 等候逾時",cancelled:"已取消",queue_full:"工作較忙，已略過",invalid_image:"圖片無法分析",auth_error:"服務金鑰或權限需確認",rate_limited:"服務忙碌或達使用限制",unavailable:"進階服務暫時無法連線",bad_response:"服務答案無法使用",skipped_disabled:"進階分析未啟用",skipped_no_consent:"未同意影像外送",skipped_busy:"進階工作較忙，使用本機摘要",insufficient_evidence:"參考影格證據不足",skipped_budget:"已達每日分析上限，影片照常",circuit_open:"進階服務暫停請求，影片照常",duplicate_request:"同一工作不重複外送"};
       (view.semantic_history || []).forEach(row=> {
         const result=row.result || {};
+        if (result.evidence_message) element("p",`略過原因：${result.evidence_message}`,semanticHistory);
         const tags=(result.tracks || []).map(track=>(track.tags || []).map(tag=>view.tags[tag]).filter(Boolean).join("、")).filter(Boolean).join("；");
         element("p",`候選第 ${row.revision} 版｜${shownTime(row.created_at)}｜${analysisStates[result.status] || "狀態尚未確認"}${tags ? "｜"+tags : ""}`,semanticHistory);
         const timing=result.timings || {};

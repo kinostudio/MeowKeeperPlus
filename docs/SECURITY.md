@@ -176,3 +176,12 @@ Phase 0 允許的唯讀操作：
   Funnel 或修改 ACL。Xiaomi 帳號只能由使用者在官方流程輸入；go2rtc 管理介面只綁 localhost。
 - Xiaomi MISS PTZ 實驗介面預設關閉；只有已登入 Dashboard、CSRF 通過且使用者明確按下
   方向或停止按鈕時才可送出 allow-listed command。官方 go2rtc binary 不會被此功能替換。
+
+## 12. 安裝版線上更新工作（候選流程）
+
+- 只有安裝版的管理員安裝／升級流程可註冊固定的 `MeowKeeperPlus Update Worker` SYSTEM 工作；不設定開機、登入或定時觸發。一般 Host 只能請求啟動該固定工作，Dashboard 必須登入、CSRF 通過、本機連線且使用者明確確認中斷。
+- 工作定義只接受 Windows PowerShell、ProgramData 內版本化且檔名含 SHA-256 前綴的 worker，固定 App/Data 根路徑及 SYSTEM 主體；Dashboard 以 Task Scheduler XML 驗證工作，不以工作名稱存在作為可信證據。
+- SYSTEM worker 不接受任意 shell 指令或外部 URL。它從固定更新 Data 目錄取出已驗證 package ID，先複製到 SYSTEM／Administrators ACL 保護的工作目錄，再驗證官方 Ed25519 envelope、完整 ZIP 雜湊與應用 manifest。
+- 安裝切換會停掉目前 Host／Tray／媒體程序；不是零中斷 hot patch。失敗回復依舊 App manifest、固定封存路徑、遷移 journal、原工作 XML／SDDL 及健康檢查執行。無法確證時保留檔案與停機狀態，不能聲稱自動回復成功。
+- 使用者可寫入的已下載更新快取不得由 SYSTEM worker 遞迴刪除，以免遭路徑替換／重新解析點攻擊。更新套件清理需由其資料擁有者或獨立安全清理流程處理。
+- 這是候選程式設計約束；在通過 Windows 安裝器、工作權限、故障注入、回滾及正式候選包驗收前，不得宣稱線上更新已正式支援。

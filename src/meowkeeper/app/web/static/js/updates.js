@@ -2,11 +2,14 @@
   "use strict";
   const check = document.getElementById("update-check"), prepare = document.getElementById("update-prepare");
   if (!check || !prepare) return;
+  const apply = document.getElementById("update-apply");
+  const dialog = document.getElementById("update-apply-dialog");
+  const confirmApply = document.getElementById("update-apply-confirm");
   const message = document.getElementById("update-message"), command = document.getElementById("update-command");
   const progressRegion = document.getElementById("update-progress-region");
   const progress = document.getElementById("update-progress");
   const progressLabel = document.getElementById("update-progress-label");
-  let timer;
+  let timer, applyRequested = false;
 
   function formatBytes(value) {
     if (!Number.isFinite(value) || value < 0) return "—";
@@ -47,13 +50,22 @@
       message.textContent = data.message_zh_tw;
       showProgress(data);
       prepare.disabled = data.status !== "available";
-      check.disabled = ["checking", "downloading"].includes(data.status);
+      check.disabled = ["checking", "downloading", "applying"].includes(data.status);
+      if (apply) {
+        apply.hidden = data.status !== "prepared" || data.apply_available !== true;
+        apply.disabled = data.status !== "prepared";
+      }
       command.hidden = !data.install_command;
       command.textContent = data.install_command || "";
-      if (check.disabled) timer = setTimeout(load, 2000);
+      if (data.status === "applying") applyRequested = true;
+      if (check.disabled || applyRequested && !["applied", "failed", "rollback_failed"].includes(data.status)) timer = setTimeout(load, 2000);
+      if (["applied", "failed", "rollback_failed"].includes(data.status)) applyRequested = false;
     } catch (_) {
-      message.textContent = "更新狀態讀取失敗，請確認已登入。";
+      message.textContent = applyRequested
+        ? "更新正在套用，Dashboard 暫時離線；請稍候自動重新連線，不要關機或重複操作。"
+        : "更新狀態讀取失敗，請確認已登入。";
       if (progressRegion) progressRegion.hidden = true;
+      if (applyRequested) timer = setTimeout(load, 2000);
     }
   }
   async function act(action) {
@@ -61,13 +73,21 @@
     const cookie = document.cookie.split(";").map(x => x.trim()).find(x => x.startsWith("meowkeeper_csrf="));
     try {
       const response = await fetch(`/api/v1/updates/${action}`, {method: "POST", headers: {"X-MeowKeeper-CSRF": cookie ? decodeURIComponent(cookie.substring("meowkeeper_csrf=".length)) : ""}});
-      if (!response.ok) throw new Error();
-      message.textContent = "正在處理更新要求…";
+      if (!response.ok) {
+        const body = await response.json().catch(() => ({}));
+        throw new Error(body.detail || "更新要求未完成。");
+      }
+      if (action === "apply") applyRequested = true;
+      message.textContent = action === "apply" ? "更新工作已啟動；Dashboard 暫時離線屬正常情況。" : "正在處理更新要求…";
       timer = setTimeout(load, 1000);
-    } catch (_) { message.textContent = "更新要求未完成，請重新登入後再試。"; check.disabled = false; }
+    } catch (error) { message.textContent = error.message || "更新要求未完成，請重新登入後再試。"; check.disabled = false; if (apply) apply.disabled = false; }
   }
   check.addEventListener("click", () => act("check"));
   prepare.addEventListener("click", () => act("prepare"));
+  if (apply && dialog && confirmApply) {
+    apply.addEventListener("click", () => dialog.showModal());
+    confirmApply.addEventListener("click", () => { dialog.close(); act("apply"); });
+  }
   window.addEventListener("pagehide", () => clearTimeout(timer));
   load();
 })();

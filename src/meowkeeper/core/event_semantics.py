@@ -4,35 +4,24 @@
 
 from __future__ import annotations
 
-
-
 import math
-
 import re
-
 import threading
-
 import time
-
 from collections.abc import Callable, Mapping
-
 from concurrent.futures import Future
-
-from dataclasses import dataclass
-
+from dataclasses import dataclass, replace
 from datetime import datetime, timezone
-
 from queue import Empty, Full, Queue
-
 from typing import Any, Protocol
-
 from uuid import UUID, uuid4
 
-
-
-from meowkeeper.core.semantic_storyboard import TrackStoryboard
-
-
+from meowkeeper.core.semantic_storyboard import (
+    COLLECTION_WINDOW_SECONDS,
+    EVIDENCE_FAILURE_LABELS,
+    StoryboardEvidenceError,
+    TrackStoryboard,
+)
 
 TAG_LABELS = {
 
@@ -296,7 +285,7 @@ class TagEvidence:
 
                 or len(self.offsets_seconds) != len(self.frame_indices)
 
-                or any(type(value) not in {int, float} or not math.isfinite(value) or not -4 <= value <= 2
+                or any(type(value) not in {int, float} or not math.isfinite(value) or not -4 <= value <= COLLECTION_WINDOW_SECONDS
 
                        for value in self.offsets_seconds)):
 
@@ -358,10 +347,16 @@ class SemanticResult:
 
     identity_candidates: tuple[tuple[str, dict[str, Any]], ...] = ()
     caption: str | None = None
+    evidence_reason: str | None = None
 
 
 
     def __post_init__(self) -> None:
+
+        if self.evidence_reason is not None and (
+            self.status != "insufficient_evidence" or self.evidence_reason not in EVIDENCE_FAILURE_LABELS
+        ):
+            raise ValueError("影格驗證原因不正確。")
 
         if (len(dict(self.provenance)) != len(self.provenance)
 
@@ -481,6 +476,9 @@ class SemanticResult:
 
         if self.caption:
             payload["caption"] = self.caption
+        if self.evidence_reason:
+            payload["evidence_reason"] = self.evidence_reason
+            payload["evidence_message"] = EVIDENCE_FAILURE_LABELS[self.evidence_reason]
         return payload
 
 
@@ -517,7 +515,7 @@ class SemanticFuture(Future):
 
 def normalize_result(raw: Mapping[str, Any], request: SemanticRequest) -> SemanticResult:
 
-    """只接受已知軌跡與 TAG；供應商自由文字、身分推測不進資料庫或 caption。"""
+    """驗證已知軌跡與 TAG；僅保留明確的候選描述欄位，不保存供應商原文。"""
 
     if request.storyboards:
 
@@ -756,7 +754,9 @@ def normalize_storyboard_result(raw: Mapping[str, Any], request: SemanticRequest
 
                           evidence=tuple(evidence),
 
-                          identity_candidates=tuple(identity_candidates))
+                          identity_candidates=tuple(identity_candidates),
+                          caption=raw["caption"].strip() if isinstance(raw, Mapping)
+                          and isinstance(raw.get("caption"), str) and raw["caption"].strip() else None)
 
 
 
@@ -1074,7 +1074,7 @@ class EventSemanticService:
 
                     if self.dispatch_validator is not None and not self.dispatch_validator(request):
 
-                        raise VisionFailure("insufficient_evidence")
+                        raise StoryboardEvidenceError("validation_failed")
 
                     if self.journal is not None:
 
@@ -1102,7 +1102,7 @@ class EventSemanticService:
 
                     if self.dispatch_validator is not None and not self.dispatch_validator(request):
 
-                        raise VisionFailure("insufficient_evidence")
+                        raise StoryboardEvidenceError("validation_failed")
 
                     started = time.monotonic()
 
@@ -1132,9 +1132,12 @@ class EventSemanticService:
 
                     if self.dispatch_validator is not None and not self.dispatch_validator(request):
 
-                        result = SemanticResult("insufficient_evidence")
+                        result = SemanticResult("insufficient_evidence", evidence_reason="validation_failed")
 
                     timings.append(("validation_ms", max(0, (time.monotonic() - responded) * 1000)))
+
+            except StoryboardEvidenceError as error:
+                result = SemanticResult("insufficient_evidence", evidence_reason=error.reason)
 
             except VisionFailure as error:
 
@@ -1162,9 +1165,8 @@ class EventSemanticService:
 
             timings.append(("finished_at", datetime.now(timezone.utc).isoformat()))
 
-            result = SemanticResult(result.status, result.tracks, job_id, tuple(timings), result.evidence,
-
-                                    dispatched, http_status, self._provenance(request))
+            result = replace(result, job_id=job_id, timings=tuple(timings), request_dispatched=dispatched,
+                             http_status=http_status, provenance=self._provenance(request))
 
             # 先完成 future，使通知不等待 SQLite sink 的忙碌狀態。
 

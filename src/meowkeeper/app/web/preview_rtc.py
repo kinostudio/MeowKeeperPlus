@@ -93,6 +93,8 @@ class SharedRtcSource:
 
 
 async def serve_rtc(websocket, *, core, sessions, go2rtc, slots, source, viewer_tracker=None):
+    from starlette.websockets import WebSocketDisconnect
+
     cookie = websocket.cookies.get("meowkeeper_session")
     session = sessions.authenticate(cookie)
     if session is None:
@@ -183,8 +185,8 @@ async def serve_rtc(websocket, *, core, sessions, go2rtc, slots, source, viewer_
         text = str(error) if str(error).startswith(("目前沒有", "本機媒體", "WebRTC", "只接受", "來源正在")) else "WebRTC格式無法協商；改用MSE。"
         try:
             await websocket.send_text(json.dumps({"type": "error", "value": text}, ensure_ascii=False))
-        except Exception:
-            pass
+        except (OSError, RuntimeError, WebSocketDisconnect):
+            return
     except Exception:  # noqa: BLE001 - no SDP, credentials or codec internals in logs
         try:
             await websocket.send_json({"type": "error", "value": "WebRTC暫時不可用；改用MSE。"})

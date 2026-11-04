@@ -116,7 +116,7 @@ class IdentityEvidenceAPITests(unittest.TestCase):
                 )
                 core = CoreStateFacade(store=store, event_directory=Path(folder) / "events")
                 with TestClient(create_app(facade=core, token="isolated-test-token-16-chars")) as client:
-                    headers = {"Authorization": "Bearer isolated-test-token-16-chars", "X-MeowKeeper-CSRF": hashlib.sha256(("isolated-test-token-16-chars:csrf").encode("utf-8")).hexdigest()}
+                    headers = {"Authorization": "Bearer isolated-test-token-16-chars", "X-MeowKeeper-CSRF": hashlib.sha256(b"isolated-test-token-16-chars:csrf").hexdigest()}
                     # Delete candidate
                     del_res = client.delete(f"/api/v1/pets/track-candidates/{eid}", headers=headers)
                     self.assertEqual(del_res.status_code, 200)

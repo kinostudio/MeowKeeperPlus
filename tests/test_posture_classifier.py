@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-import sqlite3
 import os
+import sqlite3
 import unittest
 from pathlib import Path
 from unittest.mock import MagicMock
@@ -13,12 +13,10 @@ import torch
 
 from meowkeeper.core.behavior.posture_classifier import (
     POSTURE_CLASSES,
-    POSTURE_LABELS_ZH,
     PostureClassifier,
     PostureMLP,
     PosturePrediction,
 )
-from meowkeeper.core.identity.base import IdentityPrediction, IdentityThresholds
 from meowkeeper.core.identity.identity_classifier import IdentityClassifier
 from meowkeeper.runtime import posture_model_file
 

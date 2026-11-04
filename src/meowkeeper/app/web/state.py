@@ -433,8 +433,8 @@ class CoreStateFacade:
                     continue
                 try:
                     inf_by_id[eid] = json.loads(r["note"])
-                except Exception:
-                    pass
+                except (ValueError, TypeError):
+                    continue
 
             cloud_by_id = {r["event_id"]: r["status"] for r in cloud_rows}
             beh_by_id = {r["event_id"]: dict(r) for r in beh_rows}
@@ -444,8 +444,8 @@ class CoreStateFacade:
                 from meowkeeper.core.identity.pet_registry import PetRegistry
                 reg = PetRegistry(self.event_directory.parent / "pets")
                 pet_display_names = {pet.pet_id: pet.display_name for pet in reg.list_pets()}
-            except Exception:
-                pass
+            except (OSError, RuntimeError, ValueError, TypeError):
+                pet_display_names = {}
 
             for it in items:
                 eid = it["event_id"]

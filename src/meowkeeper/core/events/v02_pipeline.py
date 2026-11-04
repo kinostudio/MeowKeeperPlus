@@ -194,7 +194,7 @@ class V02AnalysisPipeline:
                 pm = posture_model_file()
                 if pm.is_file():
                     posture_classifier = PostureClassifier(pm)
-            except Exception:
+            except (ImportError, OSError, RuntimeError, ValueError, TypeError):
                 posture_classifier = None
         self.posture_classifier = posture_classifier
         self._track_postures: dict[str | int, tuple[datetime, Any]] = {}
@@ -217,6 +217,7 @@ class V02AnalysisPipeline:
         if cached_img is None or (now - cached_time) > 2.0:
             try:
                 import io
+
                 from PIL import Image
                 raw_bytes = self.native_snapshot_provider()
                 if not raw_bytes:
@@ -225,7 +226,7 @@ class V02AnalysisPipeline:
                 img.load()
                 self._native_crop_cache = (now, img)
                 cached_img = img
-            except Exception:
+            except (OSError, RuntimeError, ValueError, TypeError):
                 return None
 
         if cached_img is None:
@@ -253,13 +254,13 @@ class V02AnalysisPipeline:
             crop_img = cached_img.crop((nx1, ny1, nx2, ny2))
             if crop_img.width < 96 or crop_img.height < 96:
                 scale = max(96 / crop_img.width, 96 / crop_img.height)
-                new_w = max(96, int(round(crop_img.width * scale)))
-                new_h = max(96, int(round(crop_img.height * scale)))
+                new_w = max(96, round(crop_img.width * scale))
+                new_h = max(96, round(crop_img.height * scale))
                 crop_img = crop_img.resize((new_w, new_h), Image.Resampling.BICUBIC)
             buf = io.BytesIO()
             crop_img.save(buf, format="JPEG", quality=92)
             return buf.getvalue()
-        except Exception:
+        except (OSError, RuntimeError, ValueError, TypeError):
             return None
 
     def _find_stitching_predecessor(self, observation: TrackObservation) -> str | int | None:
@@ -291,10 +292,9 @@ class V02AnalysisPipeline:
             iou = inter / union if union > 0 else 0.0
 
             max_allowed_dist = max(120.0, max(cw, ch) * 0.8)
-            if iou >= 0.2 or dist <= max_allowed_dist:
-                if dist < best_dist:
-                    best_dist = dist
-                    best_match = prev_track_id
+            if (iou >= 0.2 or dist <= max_allowed_dist) and dist < best_dist:
+                best_dist = dist
+                best_match = prev_track_id
 
         return best_match
 
@@ -663,8 +663,8 @@ class V02AnalysisPipeline:
                     ).fetchone()
                     if row:
                         target_event_id = row[0]
-            except Exception:
-                pass
+            except (sqlite3.Error, OSError, ValueError, TypeError):
+                target_event_id = None
         if target_event_id is not None and self.store is not None:
             try:
                 calibrated = False
@@ -672,8 +672,8 @@ class V02AnalysisPipeline:
                 if reg is not None and stable.predicted_pet_id:
                     try:
                         calibrated = reg.gallery_summary(stable.predicted_pet_id).get("feedback_feature_count", 0) > 0
-                    except Exception:
-                        pass
+                    except (OSError, RuntimeError, ValueError, TypeError):
+                        calibrated = False
                 self.store.record_identity_evidence(target_event_id, str(track_id), {
                     **asdict(stable), "captured_at": captured_at.isoformat(),
                     "decision": "recognized_candidate" if stable.stable else "unknown",
@@ -718,19 +718,19 @@ class V02AnalysisPipeline:
                 track_id=track_id, pet_id=stable.predicted_pet_id,
                 confidence=stable.similarity, resolved_at=captured_at,
             )
-        if stable.stable and stable.predicted_pet_id and stable.predicted_pet_id != "unknown":
-            if hasattr(self, "clip_service") and self.clip_service is not None:
-                try:
-                    p_tag = getattr(getattr(stable, "posture", None), "posture", None)
-                    self.clip_service.elevate_event_caption(
-                        target_event_id,
-                        stable.predicted_pet_id,
-                        track_id=track_id,
-                        posture=p_tag,
-                    )
-                except Exception as exc:
-                    if self.logger:
-                        self.logger(f"⚠️ 延遲身分自動升級觸發異常：{type(exc).__name__}")
+        if (stable.stable and stable.predicted_pet_id and stable.predicted_pet_id != "unknown"
+                and getattr(self, "clip_service", None) is not None):
+            try:
+                p_tag = getattr(getattr(stable, "posture", None), "posture", None)
+                self.clip_service.elevate_event_caption(
+                    target_event_id,
+                    stable.predicted_pet_id,
+                    track_id=track_id,
+                    posture=p_tag,
+                )
+            except (OSError, RuntimeError, ValueError, TypeError, sqlite3.Error) as exc:
+                if self.logger:
+                    self.logger(f"⚠️ 延遲身分自動升級觸發異常：{type(exc).__name__}")
 
     def _dispatch_track_summary(
         self,

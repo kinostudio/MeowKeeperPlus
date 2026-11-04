@@ -5,6 +5,7 @@ from __future__ import annotations
 import builtins
 import hashlib
 import json
+import logging
 import re
 import sqlite3
 import threading
@@ -17,6 +18,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from queue import Empty, Full, PriorityQueue
+from typing import Any
 
 from meowkeeper.core.event_semantics import (
     TAG_LABELS,
@@ -290,8 +292,8 @@ class EventClipService:
                                     "name": p.display_name,
                                     "traits": p.effective_traits(),
                                 })
-                        except Exception:
-                            pass
+                        except (OSError, RuntimeError, ValueError, TypeError, KeyError, AttributeError, sqlite3.Error):
+                            logging.getLogger(__name__).debug("選用資料處理未完成；沿用安全備援結果。")
                         semantics = self.semantic_service.submit(SemanticRequest(
                             request.event_id, request.screenshot_bytes or b"", tuple(str(t) for t in tracks),
                             trigger_at=request.trigger_at,
@@ -866,21 +868,21 @@ class EventClipService:
                         if t_json:
                             try:
                                 tags_found = json.loads(t_json)
-                            except Exception:
-                                pass
+                            except (OSError, RuntimeError, ValueError, TypeError, KeyError, AttributeError, sqlite3.Error):
+                                logging.getLogger(__name__).debug("選用資料處理未完成；沿用安全備援結果。")
                         if ev_json:
                             try:
                                 ev = json.loads(ev_json)
                                 p_data = ev.get("posture")
                                 if isinstance(p_data, dict) and p_data.get("posture") in {"sitting", "standing", "lying"}:
                                     posture_candidate = p_data["posture"]
-                            except Exception:
-                                pass
+                            except (OSError, RuntimeError, ValueError, TypeError, KeyError, AttributeError, sqlite3.Error):
+                                logging.getLogger(__name__).debug("選用資料處理未完成；沿用安全備援結果。")
                         if tags_found or posture_candidate:
                             headline_text = _format_natural_cat_headline(pet, tags_found, posture_candidate)
                             source_suffix = " DINOv2辨識"
-            except Exception:
-                pass
+            except (OSError, RuntimeError, ValueError, TypeError, KeyError, AttributeError, sqlite3.Error):
+                logging.getLogger(__name__).debug("選用資料處理未完成；沿用安全備援結果。")
 
         headline = f"🐈 {headline_text}" if not headline_text.startswith("🐈") else headline_text
 
@@ -944,16 +946,16 @@ class EventClipService:
                     if b_row[1]:
                         try:
                             tags_found = json.loads(b_row[1])
-                        except Exception:
-                            pass
+                        except (OSError, RuntimeError, ValueError, TypeError, KeyError, AttributeError, sqlite3.Error):
+                            logging.getLogger(__name__).debug("選用資料處理未完成；沿用安全備援結果。")
                     if b_row[2]:
                         try:
                             ev = json.loads(b_row[2])
                             p_data = ev.get("posture")
                             if isinstance(p_data, dict) and p_data.get("posture") in {"sitting", "standing", "lying"}:
                                 posture_candidate = p_data["posture"]
-                        except Exception:
-                            pass
+                        except (OSError, RuntimeError, ValueError, TypeError, KeyError, AttributeError, sqlite3.Error):
+                            logging.getLogger(__name__).debug("選用資料處理未完成；沿用安全備援結果。")
 
             if not latest_pet_id:
                 return current_caption
@@ -964,8 +966,8 @@ class EventClipService:
                 prof = reg.get_pet(latest_pet_id)
                 if prof and prof.enabled:
                     pet_name = prof.display_name
-            except Exception:
-                pass
+            except (OSError, RuntimeError, ValueError, TypeError, KeyError, AttributeError, sqlite3.Error):
+                logging.getLogger(__name__).debug("選用資料處理未完成；沿用安全備援結果。")
 
             if not pet_name:
                 return current_caption
@@ -978,7 +980,7 @@ class EventClipService:
             if not new_headline.startswith("🐈"):
                 new_headline = f"🐈 {new_headline}"
 
-            time_line, sep2, suffix_line = rest.partition("\n") if sep else (rest, "", "")
+            time_line, _sep2, suffix_line = rest.partition("\n") if sep else (rest, "", "")
             if "喵喵守護者+" in suffix_line:
                 if "辨識" not in suffix_line:
                     suffix_line = f"{suffix_line} DINOv2辨識"
@@ -986,8 +988,10 @@ class EventClipService:
                 suffix_line = "喵喵守護者+ DINOv2辨識"
 
             refreshed = f"{new_headline}\n{time_line}\n{suffix_line}" if time_line else f"{new_headline}\n{suffix_line}"
-            return refreshed
-        except Exception:
+            return self._merge_candidate_caption(refreshed, semantics,
+                                                 pet_registry_dir=self.output_directory.parent / "pets",
+                                                 store=self.store, event_id=request.event_id)
+        except (OSError, RuntimeError, ValueError, TypeError, KeyError, AttributeError, sqlite3.Error):
             return current_caption
 
     def _edit_caption_once(
@@ -1058,7 +1062,7 @@ class EventClipService:
                 text=caption,
                 reply_markup=reply_markup,
             )
-        except Exception as exc:
+        except (OSError, RuntimeError, ValueError, TypeError, KeyError, AttributeError, sqlite3.Error) as exc:
             if (
                 isinstance(exc, TelegramNotificationError)
                 and exc.reason_code == "message_not_modified"
@@ -1153,19 +1157,19 @@ class EventClipService:
                 p = reg.get_pet(pet_id)
                 if p and p.enabled and p.display_name:
                     pet_name = p.display_name
-            except Exception:
-                pass
+            except (OSError, RuntimeError, ValueError, TypeError, KeyError, AttributeError, sqlite3.Error):
+                logging.getLogger(__name__).debug("選用資料處理未完成；沿用安全備援結果。")
 
             with self.store._connection_lock:
                 receipts = self.store.connection.execute(
-                    "SELECT recipient_ref, message_id FROM telegram_receipts WHERE event_id=? AND media_kind='video'",
+                    "SELECT recipient_ref, message_id, event_id FROM telegram_receipts WHERE event_id=? AND media_kind='video'",
                     (event_id,),
                 ).fetchall()
 
             if not receipts and track_id is not None:
                 with self.store._connection_lock:
                     receipts = self.store.connection.execute(
-                        """SELECT r.recipient_ref, r.message_id 
+                        """SELECT r.recipient_ref, r.message_id, r.event_id
                            FROM telegram_receipts r 
                            JOIN media_events m ON r.event_id = m.event_id 
                            WHERE m.track_id=? AND r.media_kind='video'""",
@@ -1188,18 +1192,18 @@ class EventClipService:
                             if row[0] and not tags:
                                 try:
                                     tags = tuple(json.loads(row[0]))
-                                except Exception:
-                                    pass
+                                except (OSError, RuntimeError, ValueError, TypeError, KeyError, AttributeError, sqlite3.Error):
+                                    logging.getLogger(__name__).debug("選用資料處理未完成；沿用安全備援結果。")
                             if row[1]:
                                 try:
                                     ev = json.loads(row[1])
                                     p_data = ev.get("posture")
                                     if isinstance(p_data, dict) and p_data.get("posture") in {"sitting", "standing", "lying"}:
                                         posture = p_data["posture"]
-                                except Exception:
-                                    pass
-                except Exception:
-                    pass
+                                except (OSError, RuntimeError, ValueError, TypeError, KeyError, AttributeError, sqlite3.Error):
+                                    logging.getLogger(__name__).debug("選用資料處理未完成；沿用安全備援結果。")
+                except (OSError, RuntimeError, ValueError, TypeError, KeyError, AttributeError, sqlite3.Error):
+                    logging.getLogger(__name__).debug("選用資料處理未完成；沿用安全備援結果。")
 
             headline = _format_natural_cat_headline(pet_name, tags, posture)
             if not headline.startswith("🐈"):
@@ -1219,8 +1223,8 @@ class EventClipService:
                             ).fetchone()
                             if row:
                                 media_row = dict(row)
-                    except Exception:
-                        pass
+                    except (OSError, RuntimeError, ValueError, TypeError, KeyError, AttributeError, sqlite3.Error):
+                        logging.getLogger(__name__).debug("選用資料處理未完成；沿用安全備援結果。")
 
             time_line = ""
             if media_row and media_row.get("trigger_at"):
@@ -1238,17 +1242,24 @@ class EventClipService:
                                         event_type="cat_detected", source_id=(media_row["source_id"] if media_row and media_row["source_id"] else "camera"), trigger_origin="detector")
 
             updated = False
-            for ref, msg_id in receipts:
+            for ref, msg_id, receipt_event_id in receipts:
                 chat_id = chat_map.get(ref)
                 if not chat_id:
                     continue
+                from meowkeeper.storage.semantic_jobs import restore_result
+                saved = self.store.event_semantics(receipt_event_id)
+                preserved_caption = self._merge_candidate_caption(
+                    caption_text, restore_result(saved) if saved.get("status") == "completed" else None,
+                    pet_registry_dir=self.output_directory.parent / "pets", store=self.store,
+                    event_id=receipt_event_id,
+                )
                 markup = self._feedback_markup(chat_id, fake_req)
                 result = self._edit_caption_once(
                     event_id,
                     str(ref),
                     chat_id,
                     int(msg_id),
-                    caption_text[:1024],
+                    preserved_caption[:1024],
                     markup,
                     operation_label="Telegram 標題升級",
                     success_message=f"✨ Telegram 訊息 #{msg_id} 標題已自動平滑升級為：{pet_name}",
@@ -1256,7 +1267,7 @@ class EventClipService:
                 updated = updated or result in {"sent", "unchanged", "already_done"}
 
             return updated
-        except Exception as exc:
+        except (OSError, RuntimeError, ValueError, TypeError, KeyError, AttributeError, sqlite3.Error) as exc:
             self._log(f"⚠️ 延遲身分自動平滑升級異常：{type(exc).__name__}")
             return False
 
@@ -1325,7 +1336,7 @@ class EventClipService:
                 updated = updated or result in {"sent", "unchanged", "already_done"}
 
             return updated
-        except Exception as exc:
+        except (OSError, RuntimeError, ValueError, TypeError, KeyError, AttributeError, sqlite3.Error) as exc:
             self._log(f"⚠️ 雲端語意平滑升級異常：{type(exc).__name__}")
             return False
 
@@ -1352,8 +1363,8 @@ class EventClipService:
             try:
                 reg = PetRegistry(pet_registry_dir)
                 known_names = [p.display_name for p in reg.list_pets() if p.enabled and p.display_name]
-            except Exception:
-                pass
+            except (OSError, RuntimeError, ValueError, TypeError, KeyError, AttributeError, sqlite3.Error):
+                logging.getLogger(__name__).debug("選用資料處理未完成；沿用安全備援結果。")
 
         matched_name = None
         for name in sorted(known_names, key=len, reverse=True):
@@ -1375,7 +1386,7 @@ class EventClipService:
         if cand_map and pet_registry_dir is not None:
             try:
                 reg = PetRegistry(pet_registry_dir)
-                for _tid, cand in cand_map.items():
+                for cand in cand_map.values():
                     c_pid = cand.get("pet_id")
                     if c_pid and c_pid != "unknown":
                         prof = reg.get_pet(c_pid)
@@ -1388,14 +1399,14 @@ class EventClipService:
                                         (c_pid, event_id),
                                     )
                                     store.connection.commit()
-                                except Exception:
-                                    pass
+                                except (OSError, RuntimeError, ValueError, TypeError, KeyError, AttributeError, sqlite3.Error):
+                                    logging.getLogger(__name__).debug("選用資料處理未完成；沿用安全備援結果。")
                             break
-            except Exception:
-                pass
+            except (OSError, RuntimeError, ValueError, TypeError, KeyError, AttributeError, sqlite3.Error):
+                logging.getLogger(__name__).debug("選用資料處理未完成；沿用安全備援結果。")
 
         pet = cloud_pet_name or local_pet
-        time_line, sep2, _tail = rest.partition("\n") if separator else (rest, "", "")
+        time_line, _sep2, _tail = rest.partition("\n") if separator else (rest, "", "")
 
         # 1. 優先使用雲端開放性描述 (如「Saki現在躺在床上休息，好舒服～」)
         cloud_caption = getattr(semantics, "caption", None)
@@ -1407,6 +1418,7 @@ class EventClipService:
                     text = text.replace(local_pet, cloud_pet_name)
             if not text.startswith("🐈"):
                 text = f"🐈 {text}"
+            text = text.encode("utf-16-le")[:1600].decode("utf-16-le", errors="ignore")
             return f"{text}\n{time_line}\n喵喵守護者+ 雲端辨識"
 
         # 2. 若無開放文字描述，使用自然語意化格式
@@ -1421,8 +1433,8 @@ class EventClipService:
                         p_obj = PetRegistry(pet_registry_dir).get_pet(cand_info["pet_id"])
                         if p_obj and p_obj.enabled:
                             track_pet = p_obj.display_name
-                    except Exception:
-                        pass
+                    except (OSError, RuntimeError, ValueError, TypeError, KeyError, AttributeError, sqlite3.Error):
+                        logging.getLogger(__name__).debug("選用資料處理未完成；沿用安全備援結果。")
                 subject = track_pet if len(semantics.tracks) == 1 else f"貓咪 #{index}"
                 lines.append(_format_natural_cat_headline(subject, tags))
 

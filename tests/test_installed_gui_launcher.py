@@ -23,7 +23,10 @@ class InstalledGuiLauncherTests(unittest.TestCase):
         launcher_path = ROOT / "scripts" / "Launch-Installed-MeowKeeperPlus.ps1"
         launcher = launcher_path.read_text(encoding="utf-8-sig")
         uninstaller = (ROOT / "scripts" / "Uninstall-MeowKeeperPlus.ps1").read_text(encoding="utf-8-sig")
+        updater_worker = (ROOT / "scripts" / "Apply-MeowKeeperPlusUpdate.ps1").read_text(encoding="utf-8-sig")
         package_builder = (ROOT / "tools" / "build_portable.py").read_text(encoding="utf-8")
+        task_generator = (ROOT / "tools" / "create_task_scheduler_xml.py").read_text(encoding="utf-8")
+        task_verifier = (ROOT / "tools" / "verify_windows_installation.py").read_text(encoding="utf-8")
 
         self.assertIn('[Environment]::GetFolderPath("Programs")', installer)
         self.assertIn('[Environment]::GetFolderPath("CommonPrograms")', installer)
@@ -33,6 +36,23 @@ class InstalledGuiLauncherTests(unittest.TestCase):
         self.assertIn("migrate_legacy_app_data.py", installer)
         self.assertIn('"--mode", "move"', installer)
         self.assertIn("--mode rollback", installer)
+        self.assertIn("Register-ProtectedUpdateWorker $appRoot $dataRoot", installer)
+        self.assertNotIn("GetFolder('" + chr(92) * 2 + "')", installer)
+        self.assertIn("MeowKeeperPlus Update Worker", installer)
+        self.assertIn("Apply-MeowKeeperPlusUpdate-", installer)
+        self.assertIn("Apply-MeowKeeperPlusUpdate.ps1", package_builder)
+        self.assertIn("apply_verified_update.py", package_builder)
+        update_verifier = (ROOT / "tools/apply_verified_update.py").read_text(encoding="utf-8")
+        self.assertIn('sys.path.insert(0, str(ROOT / "src"))', update_verifier)
+        self.assertIn('"MeowKeeperPlus Update Worker"', uninstaller)
+        self.assertIn('"updater"', task_generator)
+        self.assertIn('"MeowKeeperPlus Update Worker"', task_verifier)
+        self.assertIn("$preparedId = [string]$request.prepared_id", updater_worker)
+        self.assertIn("Set-Location -LiteralPath $updaterRoot", updater_worker)
+        self.assertIn("worker_requires_system", updater_worker)
+        self.assertNotIn("Remove-Item -LiteralPath $sourceRoot", updater_worker)
+        self.assertIn("Restore-PreviousApp", updater_worker)
+        self.assertIn("installed_manifest_does_not_match_signed_package", updater_worker)
         self.assertIn("Assert-OwnedStartMenuShortcut $startMenuShortcut $appRoot", uninstaller)
         self.assertIn("Remove-Item -LiteralPath $startMenuShortcut -Force", uninstaller)
 
@@ -57,6 +77,7 @@ class InstalledGuiLauncherTests(unittest.TestCase):
             ROOT / "scripts" / "Install-MeowKeeperPlus.ps1",
             ROOT / "scripts" / "Launch-Installed-MeowKeeperPlus.ps1",
             ROOT / "scripts" / "Uninstall-MeowKeeperPlus.ps1",
+            ROOT / "scripts" / "Apply-MeowKeeperPlusUpdate.ps1",
         ]
         for path in paths:
             quoted_path = str(path).replace("'", "''")

@@ -7,19 +7,21 @@ import json
 import shutil
 import tempfile
 import unittest
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
-from urllib.error import HTTPError
 from unittest.mock import MagicMock, patch
+from urllib.error import HTTPError
 
+from meowkeeper.core.event_semantics import SemanticResult
 from meowkeeper.core.identity.base import IdentityPrediction, IdentityThresholds
 from meowkeeper.core.identity.temporal_identity import TemporalIdentity
-from meowkeeper.core.media.event_clip import EventClipService, EventClipRequest, _format_natural_cat_headline
-from meowkeeper.core.media.ring_buffer import DiskSegmentRingBuffer
-from meowkeeper.core.media.clip_assembler import ClipAssembler
+from meowkeeper.core.media.event_clip import (
+    EventClipRequest,
+    EventClipService,
+)
 from meowkeeper.core.media.media_validation import MediaValidationResult
-from meowkeeper.core.event_semantics import SemanticResult
+from meowkeeper.core.media.ring_buffer import DiskSegmentRingBuffer
 from meowkeeper.core.notifications.telegram import TelegramNotificationError, TelegramNotifier
 from meowkeeper.core.tracking.base import BoundingBox, TrackObservation
 from meowkeeper.storage.database import SQLiteStore
@@ -94,10 +96,7 @@ class TelegramSmoothElevationTests(unittest.TestCase):
         )
 
     def tearDown(self) -> None:
-        try:
-            self.store.close()
-        except Exception:
-            pass
+        self.store.close()
         shutil.rmtree(self.temp_dir, ignore_errors=True)
 
     def test_preflight_recheck_resolves_identity_before_dispatch(self) -> None:
@@ -136,7 +135,7 @@ class TelegramSmoothElevationTests(unittest.TestCase):
             track_id="trk-1",
         )
 
-        attempts, error = self.service._send_with_retries(
+        _attempts, error = self.service._send_with_retries(
             request, clip_path, "🐈 貓咪剛剛出現在畫面。\n10/24 03:42｜喵喵守護者+",
         )
         self.assertEqual(error, None)
@@ -173,7 +172,7 @@ class TelegramSmoothElevationTests(unittest.TestCase):
             track_id="trk-2",
         )
 
-        attempts, error = self.service._send_with_retries(
+        _attempts, error = self.service._send_with_retries(
             request, clip_path, "🐈 貓咪剛剛出現在畫面。\n10/24 03:42｜喵喵守護者+",
         )
         self.assertEqual(error, None)
@@ -294,9 +293,8 @@ class TelegramSmoothElevationTests(unittest.TestCase):
         }).encode("utf-8")
         response.__enter__.return_value = response
         response.__exit__.return_value = False
-        with patch("meowkeeper.core.notifications.telegram.urlopen", return_value=response):
-            with self.assertRaises(TelegramNotificationError) as caught:
-                TelegramNotifier("123456:secret-token")._call("editMessageCaption", fields={})
+        with patch("meowkeeper.core.notifications.telegram.urlopen", return_value=response), self.assertRaises(TelegramNotificationError) as caught:
+            TelegramNotifier("123456:secret-token")._call("editMessageCaption", fields={})
 
         self.assertEqual(caught.exception.api_error_code, 400)
         self.assertEqual(caught.exception.reason_code, "message_not_modified")
@@ -316,9 +314,8 @@ class TelegramSmoothElevationTests(unittest.TestCase):
             {},
             io.BytesIO(body),
         )
-        with patch("meowkeeper.core.notifications.telegram.urlopen", side_effect=response_error):
-            with self.assertRaises(TelegramNotificationError) as caught:
-                TelegramNotifier("123456:secret-token")._call("editMessageCaption", fields={})
+        with patch("meowkeeper.core.notifications.telegram.urlopen", side_effect=response_error), self.assertRaises(TelegramNotificationError) as caught:
+            TelegramNotifier("123456:secret-token")._call("editMessageCaption", fields={})
 
         self.assertEqual(caught.exception.status_code, 429)
         self.assertEqual(caught.exception.api_error_code, 429)
@@ -355,7 +352,7 @@ class TelegramSmoothElevationTests(unittest.TestCase):
             track_id="trk-3",
         )
 
-        attempts, error = self.service._send_with_retries(
+        _attempts, error = self.service._send_with_retries(
             request, clip_path, "🐈 貓咪剛剛出現在畫面。\n10/24 03:42｜喵喵守護者+",
         )
         self.assertEqual(error, None)
@@ -371,6 +368,29 @@ class TelegramSmoothElevationTests(unittest.TestCase):
         edited = self.notifier.edited_captions[0]
         self.assertIn("嗨啵現在躺在床上休息，好舒服～", edited["caption"])
         self.assertIn("雲端辨識", edited["caption"])
+
+    def test_identity_elevation_preserves_saved_cloud_description(self) -> None:
+        now = datetime.now(timezone.utc)
+        event_id = "cloud-then-identity"
+        self.store.create_media_event(event_id=event_id, event_type="cat_detected", trigger_at=now,
+                                      source_id="camera", track_id="track", pet_id="p_hiball", confidence=.9,
+                                      requested_pre_seconds=2, requested_post_seconds=3)
+        self.store.record_event_semantics(event_id, SemanticResult(
+            "completed", (("track", ("grooming",)),), caption="貓咪正在專心理毛。"))
+        self.store.connection.execute(
+            "INSERT INTO telegram_receipts(event_id,recipient_ref,media_kind,message_id) VALUES(?,?,?,?)",
+            (event_id, hashlib.sha256(b"12345678").hexdigest(), "video", 555),
+        )
+        self.store.connection.commit()
+        self.assertTrue(self.service.elevate_event_caption(event_id, "p_hiball", track_id="track"))
+        text = self.notifier.edited_captions[-1]["caption"]
+        self.assertIn("正在專心理毛", text)
+        self.assertIn("雲端辨識", text)
+        request = EventClipRequest(event_id, now, "cat_detected", "camera", track_id="track")
+        semantic = SemanticResult("completed", (("track", ("grooming",)),), caption="貓咪正在專心理毛。")
+        text = self.service._preflight_refresh_caption(request, text, semantics=semantic)
+        self.assertIn("正在專心理毛", text)
+        self.assertIn("雲端辨識", text)
 
     def test_track_stitching_temporal_identity(self) -> None:
         """Pillar 3: Track stitching preserves sample votes across small ID hops so valid_frames does not reset."""
@@ -418,9 +438,11 @@ class TelegramSmoothElevationTests(unittest.TestCase):
 
     def test_native_4k_crop_rescaling_and_quality(self) -> None:
         """Pillar 4: Native 4K crop is rescaled if small (<96px) to meet quality filter threshold."""
-        from meowkeeper.core.events.v02_pipeline import V02AnalysisPipeline
-        from PIL import Image
         import io
+
+        from PIL import Image
+
+        from meowkeeper.core.events.v02_pipeline import V02AnalysisPipeline
 
         # Create dummy 4K frame (3840x2160)
         img = Image.new("RGB", (3840, 2160), color=(128, 128, 128))

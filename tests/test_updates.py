@@ -1,5 +1,6 @@
 import base64
 import hashlib
+import json
 import tempfile
 import unittest
 import zipfile
@@ -16,9 +17,11 @@ from meowkeeper.app.updates import (
     UpdateManager,
     canonical,
     safe_extract,
+    validate_hotfix_task_xml,
     verify_envelope,
 )
 from meowkeeper.app.web import create_app
+from tools.create_task_scheduler_xml import create_xml
 
 
 class UpdateTests(unittest.TestCase):
@@ -150,6 +153,7 @@ class UpdateTests(unittest.TestCase):
                 "version": "r107", "tag": "r107", "asset": "MeowKeeperPlus-r107-windows-x64.zip",
                 "size": len(archive_bytes), "sha256": hashlib.sha256(archive_bytes).hexdigest(), "parts": [],
             }
+            manager._envelope = {"manifest": manager._manifest, "signature": "fixture-signature"}
             stages = []
             report = manager._report_progress
 
@@ -197,3 +201,113 @@ class UpdateTests(unittest.TestCase):
                 self.assertEqual(client.post("/api/v1/updates/check", headers={"Authorization": "Bearer update-fixture-token"}).status_code, 403)
                 self.assertEqual(client.get("/api/v1/updates", headers={"Authorization": "Bearer update-fixture-token"}).json()["status"], "not_checked")
             check.assert_not_called()
+
+    def test_hotfix_task_requires_versioned_system_worker_and_fixed_arguments(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            app_root, data_root, updater_root = root / "App", root / "Data", root / "Updater"
+            app_root.mkdir()
+            data_root.mkdir()
+            updater_root.mkdir()
+            content = b"# pinned worker fixture\n"
+            suffix = hashlib.sha256(content).hexdigest()[:16]
+            script = updater_root / f"Apply-MeowKeeperPlusUpdate-{suffix}.ps1"
+            script.write_bytes(content)
+            xml = create_xml(
+                app_root, task_name="MeowKeeperPlusUpdateWorker",
+                source_env="MEOWKEEPER_MEDIA_SOURCE_URL", role="updater",
+                data_root=data_root, updater_script=script,
+            )
+            # The task builder uses Windows PowerShell's canonical path. Match
+            # its command in this platform-independent validator fixture.
+            command_start = xml.index("<Command>") + len("<Command>")
+            command_end = xml.index("</Command>", command_start)
+            expected_runtime = Path(xml[command_start:command_end])
+            self.assertTrue(validate_hotfix_task_xml(
+                xml, expected_runtime=expected_runtime, app_root=app_root,
+                data_root=data_root, updater_root=updater_root,
+            ))
+            self.assertFalse(validate_hotfix_task_xml(
+                xml.replace("-NoProfile -ExecutionPolicy", "-NoProfile  -ExecutionPolicy"),
+                expected_runtime=expected_runtime, app_root=app_root,
+                data_root=data_root, updater_root=updater_root,
+            ))
+            self.assertFalse(validate_hotfix_task_xml(
+                xml.replace("S-1-5-18", "S-1-5-21-1-2-3-1001"),
+                expected_runtime=expected_runtime, app_root=app_root,
+                data_root=data_root, updater_root=updater_root,
+            ))
+            self.assertFalse(validate_hotfix_task_xml(
+                xml.replace("<Triggers></Triggers>", "<Triggers><BootTrigger><Enabled>true</Enabled></BootTrigger></Triggers>"),
+                expected_runtime=expected_runtime, app_root=app_root,
+                data_root=data_root, updater_root=updater_root,
+            ))
+            script.write_bytes(b"# altered worker fixture\n")
+            self.assertFalse(validate_hotfix_task_xml(
+                xml, expected_runtime=expected_runtime, app_root=app_root,
+                data_root=data_root, updater_root=updater_root,
+            ))
+
+    def test_hotfix_status_is_correlated_to_current_prepared_package(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            manager = UpdateManager(root / "App", root / "Data", hotfix_task_available=True)
+            prepared_id = "prepared-0123456789abcdef"
+            manager.state = {
+                "status": "prepared", "version": "r120", "prepared_id": prepared_id,
+                "package_path": str(root / "Data" / "updates" / prepared_id / "app"),
+            }
+            manager.worker_status_path.parent.mkdir(parents=True)
+            manager.worker_status_path.write_text(json.dumps({
+                "schema": 1, "status": "applied", "version": "r119",
+                "request_id": "a" * 32, "prepared_id": "prepared-ffeeddccbbaa9988",
+                "message_zh_tw": "舊更新結果",
+            }), encoding="utf-8")
+            state = manager.snapshot()
+            self.assertEqual(state["status"], "prepared")
+            self.assertEqual(state["version"], "r120")
+            self.assertTrue(state["apply_available"])
+
+    def test_failed_hotfix_keeps_verified_package_retryable_after_rollback(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            manager = UpdateManager(root / "App", root / "Data", hotfix_task_available=True)
+            prepared_id = "prepared-0123456789abcdef"
+            request_id = "a" * 32
+            manager.state = {
+                "status": "applying", "version": "r120", "prepared_id": prepared_id,
+                "request_id": request_id, "package_path": str(root / "app"),
+            }
+            manager.worker_status_path.parent.mkdir(parents=True)
+            manager.worker_status_path.write_text(json.dumps({
+                "schema": 1, "status": "failed", "version": "r120",
+                "request_id": request_id, "prepared_id": prepared_id,
+                "message_zh_tw": "舊版已恢復，可重試。",
+            }), encoding="utf-8")
+            state = manager.snapshot()
+            self.assertEqual(state["status"], "prepared")
+            self.assertEqual(state["hotfix_result"], "failed")
+            self.assertEqual(state["package_path"], str(root / "app"))
+            self.assertTrue(state["apply_available"])
+
+    def test_apply_queues_only_fixed_task_request_without_shell(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            prepared = root / "Data" / "updates" / "prepared-0123456789abcdef"
+            prepared.mkdir(parents=True)
+            manager = UpdateManager(root / "App", root / "Data", hotfix_task_available=True)
+            manager._manifest = {"version": "r120"}
+            manager._envelope = {"manifest": {}, "signature": "fixture"}
+            manager._prepared_dir = prepared
+            manager.state = {
+                "status": "prepared", "version": "r120", "prepared_id": prepared.name,
+                "package_path": str(prepared / "app"),
+            }
+            result = SimpleNamespace(returncode=0, stdout="", stderr="")
+            with patch("meowkeeper.app.updates.subprocess.run", return_value=result) as run:
+                state = manager.apply()
+            self.assertEqual(state["status"], "applying")
+            self.assertEqual(state["prepared_id"], prepared.name)
+            self.assertEqual(state["request_id"], json.loads((manager.root / "apply-request.json").read_text())["request_id"])
+            self.assertFalse(run.call_args.kwargs["shell"])
+            self.assertEqual(run.call_args.args[0][-3:], ["/Run", "/TN", "MeowKeeperPlus Update Worker"])

@@ -163,6 +163,44 @@ class LegacyTrayUpgradeTests(unittest.TestCase):
         self.assertIn("function Get-ProcessHandleOrNullIfExited([int]$ProcessId)", text)
         self.assertGreaterEqual(text.count("Get-ProcessHandleOrNullIfExited "), 5)
 
+    @unittest.skipUnless(shutil.which("powershell.exe"), "需要 Windows PowerShell")
+    def test_exit_after_handle_open_is_safe_but_identity_changes_fail_closed(self) -> None:
+        command = r'''
+        $ErrorActionPreference = 'Stop'
+        $tokens=$null; $errors=$null
+        $ast=[System.Management.Automation.Language.Parser]::ParseFile('__INSTALLER__',[ref]$tokens,[ref]$errors)
+        if ($errors.Count) { throw 'syntax error' }
+        $fn=$ast.Find({param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq 'Test-UpgradeProcessStillMatches'},$true)
+        Invoke-Expression $fn.Extent.Text
+        $snapshot=[pscustomobject]@{ProcessId=123;ExecutablePath='C:\TestApp\python.exe';CommandLine='python worker';CreationDate=[datetime]::UtcNow}
+        $script:live=@(); $script:queryFails=$false
+        function Get-CimInstance {
+            [CmdletBinding()]param($ClassName,$Filter)
+            if ($script:queryFails) { throw 'inventory unavailable' }
+            $script:live
+        }
+        if (Test-UpgradeProcessStillMatches $snapshot $snapshot.ExecutablePath) { throw 'absence not accepted' }
+        $script:live=@($snapshot)
+        if (-not (Test-UpgradeProcessStillMatches $snapshot $snapshot.ExecutablePath)) { throw 'same process rejected' }
+        foreach ($field in @('ExecutablePath','CommandLine','CreationDate')) {
+            $changed=[pscustomobject]@{ProcessId=123;ExecutablePath=$snapshot.ExecutablePath;CommandLine=$snapshot.CommandLine;CreationDate=$snapshot.CreationDate}
+            if ($field -eq 'CreationDate') { $changed.$field=$snapshot.CreationDate.AddSeconds(1) } else { $changed.$field='changed' }
+            $script:live=@($changed); $rejected=$false
+            try { $null=Test-UpgradeProcessStillMatches $snapshot $snapshot.ExecutablePath } catch { $rejected=$true }
+            if (-not $rejected) { throw "identity change accepted: $field" }
+        }
+        $script:queryFails=$true; $rejected=$false
+        try { $null=Test-UpgradeProcessStillMatches $snapshot $snapshot.ExecutablePath } catch { $rejected=$true }
+        if (-not $rejected) { throw 'unreadable inventory accepted' }
+        Write-Output 'post_handle_race_passed'
+        '''.replace("__INSTALLER__", str(INSTALLER).replace("'", "''"))
+        result = subprocess.run(
+            [shutil.which("powershell.exe"), "-NoProfile", "-Command", command],
+            capture_output=True, text=True, timeout=20, check=False,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("post_handle_race_passed", result.stdout)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import hashlib
 import shutil
+import sqlite3
 import threading
 import time
 import traceback
@@ -130,7 +131,9 @@ class RepositoryCoreController(CoreController):
         semantic_wait_seconds: float = 5.0,
         logger: Callable[[str], None] | None = None,
         event_sink: Callable[[dict[str, Any]], None] | None = None,
+        tray_ensure: Callable[[], dict[str, Any]] | None = None,
     ) -> None:
+        self.tray_ensure = tray_ensure
         self.store = store
         self.source_url = source_url.strip() if source_url and source_url.strip() else None
         self.model_path = model_path
@@ -419,6 +422,11 @@ class RepositoryCoreController(CoreController):
             if self._closing:
                 return {"action": "start", "status": self._state,
                         "message_zh_tw": "核心正在關閉，請重新開啟 MeowKeeper+。"}
+            if self.tray_ensure is not None:
+                try:
+                    self.tray_ensure()
+                except (OSError, RuntimeError, ValueError):
+                    self._log("⚠️ Tray 檢查未完成；不影響監控核心啟動。")
             if self._thread is not None and self._thread.is_alive():
                 message = ("核心正在結束前一次失敗工作，請稍候再手動啟動。"
                            if self._state == "error" else "監控已在執行中，沒有建立第二個來源連線。")
@@ -922,11 +930,13 @@ class RepositoryCoreController(CoreController):
 
             def _on_semantic_result(event_id, result):
                 self.store.record_event_semantics(event_id, result)
+                if result.evidence_reason:
+                    self._log(f"ℹ️ 雲端分析已略過：{result.payload()['evidence_message']}；事件影片與通知照常。")
                 if clip_service is not None:
                     try:
                         clip_service.update_event_semantics(event_id, result)
-                    except Exception:
-                        pass
+                    except (OSError, RuntimeError, ValueError, TypeError, sqlite3.Error):
+                        self._log("⚠️ 事件語意更新未完成；事件影片流程繼續。")
 
             semantic_service = EventSemanticService(
                 self.vision_provider, result_sink=_on_semantic_result,

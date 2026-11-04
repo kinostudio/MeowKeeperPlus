@@ -334,8 +334,8 @@ def create_app(
                 ips.add(ip.lower())
             for info in socket.getaddrinfo(hostname, None):
                 ips.add(info[4][0].lower())
-        except Exception:
-            pass
+        except OSError:
+            logging.getLogger(__name__).debug("本機位址探索未完成，沿用已知位址。")
         _local_ip_cache = ips
         _local_ip_cache_at = now
         return ips
@@ -619,7 +619,7 @@ def create_app(
                 "calibrated": feedback_total > 0,
                 "pets": pet_summaries,
             }
-        except Exception:
+        except (OSError, RuntimeError, ValueError, TypeError, sqlite3.Error):
             res = {
                 "pet_count": 0,
                 "feedback_feature_count": 0,
@@ -1079,9 +1079,15 @@ def create_app(
 
     def current_scene_frame(not_before=None):
         path=core.request_snapshot(high_quality=False)
-        if path is None or not path.is_file() or not 0<=datetime.now(timezone.utc).timestamp()-path.stat().st_mtime<=5 or path.stat().st_size>4*1024*1024:
+        if path is None or not path.is_file():
             raise ValueError("尚無新鮮共享影格。")
-        if not_before is not None and path.stat().st_mtime<not_before.timestamp():
+        metadata = path.stat()
+        # Windows FILETIME / datetime float conversion can differ by a microsecond.
+        # This permits rounding only; the post-movement lower bound remains strict.
+        age = datetime.now(timezone.utc).timestamp() - metadata.st_mtime
+        if not -0.001 <= age <= 5 or metadata.st_size > 4*1024*1024:
+            raise ValueError("尚無新鮮共享影格。")
+        if not_before is not None and metadata.st_mtime<not_before.timestamp():
             raise ValueError("尚未取得移動後的共享影格，未以舊圖判定到位。")
         return path.read_bytes()
 
@@ -1218,8 +1224,8 @@ def create_app(
                     summary = registry.gallery_summary(pred_pet)
                     if summary.get("feedback_feature_count", 0) > 0:
                         row["calibration_verified"] = True
-                except Exception:
-                    pass
+                except (OSError, RuntimeError, ValueError, TypeError):
+                    row["calibration_verified"] = False
             if not row.get("calibration_verified"):
                 row["unknown_reason"] = row.get("unknown_reason") or "calibration_required"
                 row["decision"] = "unknown" 
@@ -1264,10 +1270,20 @@ def create_app(
     @app.post("/api/v1/updates/{action}")
     def updates_action(request: Request, action: str, background_tasks: BackgroundTasks) -> dict:
         require_mutation(request)
-        if action not in {"check", "prepare"}:
+        if action not in {"check", "prepare", "apply"}:
             raise HTTPException(status_code=400, detail="更新操作不合法。")
+        if action == "apply":
+            # Applying an update stops the Host that serves this route. Restrict
+            # the one-click path to the computer itself; forwarded headers are
+            # deliberately ignored because they are not a trusted origin proof.
+            if request.client is None or request.client.host not in {"127.0.0.1", "::1"}:
+                raise HTTPException(status_code=403, detail="套用更新請在主機本機 Dashboard 操作。")
+            try:
+                return updater.apply()
+            except (OSError, RuntimeError, ValueError) as exc:
+                raise HTTPException(status_code=409, detail=str(exc)) from exc
         background_tasks.add_task(updater.check if action == "check" else updater.prepare)
-        return {"status": "queued", "message_zh_tw": "更新操作已排入；不會停止監控或自動安裝。"}
+        return {"status": "queued", "message_zh_tw": "正在檢查或準備更新；監控持續。"}
 
     @app.get("/api/v1/identity/summary")
     def identity_summary(request: Request) -> dict:
@@ -1315,9 +1331,9 @@ def create_app(
             raise HTTPException(status_code=429, detail="另一張照片正在比對，請稍後再試。")
 
         def compare():
+            from meowkeeper.core.identity.base import IdentityThresholds
             from meowkeeper.core.identity.dinov2_embedder import shared_cpu_embedder
             from meowkeeper.core.identity.photo_comparison import compare_photo
-            from meowkeeper.core.identity.base import IdentityThresholds
 
             if app.state.pet_comparison_embedder is None:
                 app.state.pet_comparison_embedder = shared_cpu_embedder()

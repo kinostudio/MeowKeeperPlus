@@ -20,7 +20,11 @@ from meowkeeper.core.identity import (
 )
 from meowkeeper.core.identity.identity_classifier import LazyIdentityClassifier
 from meowkeeper.core.inference.timings import StageTimings
-from meowkeeper.core.semantic_storyboard import FrameEvidence, FrameEvidenceBuffer
+from meowkeeper.core.semantic_storyboard import (
+    FrameEvidence,
+    FrameEvidenceBuffer,
+    StoryboardEvidenceError,
+)
 from meowkeeper.core.tracking import BoTSORTTracker, TrackHistory
 
 
@@ -115,8 +119,9 @@ class V02HostAnalyzer:
             import threading
             threading.Thread(target=lambda: getattr(identity, "_ready", lambda: None)(),
                              name="meowkeeper-dinov2-prewarm", daemon=True).start()
-        except Exception:
-            pass
+        except RuntimeError:
+            if logger:
+                logger("⚠️ 身分模型背景預熱未啟動；影音與偵測繼續。")
         return cls(
             tracker, identity, store=store, logger=logger, notifier=notifier,
             chat_ids=chat_ids, notification_dispatcher=notification_dispatcher,
@@ -254,9 +259,9 @@ class V02HostAnalyzer:
             self.semantic_buffer = FrameEvidenceBuffer(options)
 
     def prepare_semantic(self, request):
-        boards = ()
-        if self.semantic_buffer is not None and request.trigger_at is not None:
-            boards = self.semantic_buffer.collect(request.track_ids, request.trigger_at)
+        if self.semantic_buffer is None or request.trigger_at is None:
+            raise StoryboardEvidenceError("preparation_unavailable")
+        boards = self.semantic_buffer.collect(request.track_ids, request.trigger_at)
         scene_reference_jpeg = None
         scene_reference_labels = ()
         if boards and self._include_scene_references and self._zone_source:
@@ -300,22 +305,28 @@ class V02HostAnalyzer:
 
     def validate_semantic(self, request):
         if not request.storyboards:
-            return False
+            raise StoryboardEvidenceError("insufficient_frames")
+        if tuple(board.track_id for board in request.storyboards) != request.track_ids:
+            raise StoryboardEvidenceError("track_mismatch")
         if request.input_revision > 1:
             return True  # 明確手動重分析使用已保存的歷史裁切，不拿現在視角冒充。
         if self._semantic_privacy_blocked:
-            return False
+            raise StoryboardEvidenceError("privacy_blocked")
         if self._load_saved_zones and self._zone_source:
             from meowkeeper.core.behavior.scene_views import SceneViewRegistry
             try:
                 state = SceneViewRegistry(self.store).state(self._zone_source)
                 if state["epoch"] != self._scene_epoch:
-                    return False
+                    raise StoryboardEvidenceError("view_changed")
                 if any(board.zones for board in request.storyboards) and (state["state"] != "aligned" or any(view != state["active_view"] for board in request.storyboards for _index,view,_zone,_kind in board.zones)):
-                    return False
+                    raise StoryboardEvidenceError("view_unaligned")
+            except StoryboardEvidenceError:
+                raise
             except (sqlite3.Error,ValueError,TypeError):
-                return False
-        return all(board.epoch == self._latest_semantic_epoch for board in request.storyboards)
+                raise StoryboardEvidenceError("view_unavailable") from None
+        if not all(board.epoch == self._latest_semantic_epoch for board in request.storyboards):
+            raise StoryboardEvidenceError("track_changed")
+        return True
 
     def close(self):
         if self.semantic_buffer is not None:

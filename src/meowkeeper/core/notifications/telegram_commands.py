@@ -4,7 +4,10 @@ from __future__ import annotations
 
 import hashlib
 import ipaddress
+import json
+import logging
 import re
+import sqlite3
 import time
 from collections.abc import Callable, Mapping
 from datetime import datetime, timedelta, timezone
@@ -494,7 +497,7 @@ class TelegramCommandRouter:
             reg_dir = reg_dir.parent / "pets" if reg_dir else Path(r"C:\ProgramData\MeowKeeperPlus\Data\pets")
             registry = PetRegistry(reg_dir) if reg_dir.is_dir() else None
             pet_names = {p.pet_id: p.display_name for p in registry.list_pets(enabled_only=True)} if registry else {}
-        except Exception:
+        except (OSError, RuntimeError, ValueError, TypeError, KeyError, AttributeError, sqlite3.Error):
             pet_names = {}
 
         pet_counts: dict[str, int] = {}
@@ -513,8 +516,8 @@ class TelegramCommandRouter:
                 for r in rows:
                     pid = str(r["pet_id"] or "unknown").strip()
                     pet_counts[pid] = int(r["cnt"] or 0)
-        except Exception:
-            pass
+        except (OSError, RuntimeError, ValueError, TypeError, KeyError, AttributeError, sqlite3.Error):
+            logging.getLogger(__name__).debug("選用資料處理未完成；沿用安全備援結果。")
 
         pet_lines = []
         for pid, name in pet_names.items():
@@ -546,10 +549,10 @@ class TelegramCommandRouter:
                                 if tag in TAG_LABELS and tag not in {"unknown", "possible"}:
                                     zh = TAG_LABELS[tag]
                                     action_counts[zh] = action_counts.get(zh, 0) + 1
-                    except Exception:
-                        pass
-        except Exception:
-            pass
+                    except (OSError, RuntimeError, ValueError, TypeError, KeyError, AttributeError, sqlite3.Error):
+                        logging.getLogger(__name__).debug("選用資料處理未完成；沿用安全備援結果。")
+        except (OSError, RuntimeError, ValueError, TypeError, KeyError, AttributeError, sqlite3.Error):
+            logging.getLogger(__name__).debug("選用資料處理未完成；沿用安全備援結果。")
 
         try:
             behavior_zh = {"resting": "休息", "sleeping": "睡眠", "eating": "進食", "drinking": "喝水", "playing": "玩耍"}
@@ -569,8 +572,8 @@ class TelegramCommandRouter:
                         zh = behavior_zh[b_state]
                         if zh not in action_counts:
                             action_counts[zh] = int(r["cnt"] or 0)
-        except Exception:
-            pass
+        except (OSError, RuntimeError, ValueError, TypeError, KeyError, AttributeError, sqlite3.Error):
+            logging.getLogger(__name__).debug("選用資料處理未完成；沿用安全備援結果。")
 
         action_lines = []
         if action_counts:

@@ -26,7 +26,7 @@ class IdentityClassifier:
                 p_file = posture_model_file()
                 if p_file.is_file():
                     posture_classifier = PostureClassifier(p_file)
-            except Exception:
+            except (ImportError, OSError, RuntimeError, ValueError, TypeError):
                 posture_classifier = None
         self.posture_classifier = posture_classifier
 
@@ -49,8 +49,8 @@ class IdentityClassifier:
             if self.posture_classifier is not None:
                 try:
                     posture = self.posture_classifier.predict_vector(vector)
-                except Exception:
-                    pass
+                except (OSError, RuntimeError, ValueError, TypeError):
+                    posture = None
         except (KeyError, OSError, RuntimeError, TypeError, ValueError):
             return unknown("model_unavailable")
         try:

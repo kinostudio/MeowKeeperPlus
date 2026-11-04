@@ -40,11 +40,10 @@ class TemporalIdentity:
         """跨微小跳號平滑關聯：若同一位置 1 秒內追蹤號碼跳號，將身分特徵樣本自動平滑接續。"""
         src_samples = []
         for k, v in list(self._states.items()):
-            if k == from_track_id or (isinstance(k, tuple) and len(k) == 2 and k[1] == from_track_id):
-                if v and v.samples:
-                    for s in v.samples:
-                        if s not in src_samples:
-                            src_samples.append(s)
+            if (k == from_track_id or (isinstance(k, tuple) and len(k) == 2 and k[1] == from_track_id)) and v and v.samples:
+                for s in v.samples:
+                    if s not in src_samples:
+                        src_samples.append(s)
         if not src_samples:
             return False
 

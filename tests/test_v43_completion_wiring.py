@@ -1,5 +1,6 @@
 """三項缺口的API→執行端→SQLite接線；硬體／雲端使用明確替身。"""
 import hashlib
+import os
 import tempfile
 import threading
 import unittest
@@ -146,6 +147,33 @@ class V43CompletionWiringTests(unittest.TestCase):
             new_id=Path(profile.reference_images[0]).name
             tiny={**body,"polygon":[[.1,.1],[.11,.1],[.11,.11],[.1,.11]]}
             self.assertEqual(client.post(f"/api/v1/pets/test-cat/images/{new_id}/crop",json=tiny,headers=self.headers).status_code,422)
+
+    def test_scene_frame_filetime_rounding_is_tolerated_but_future_data_is_rejected(self):
+        now = datetime.now(timezone.utc)
+
+        class FrozenClock(datetime):
+            @classmethod
+            def now(cls, tz=None):
+                return now
+
+        scenes = SceneViewRegistry(self.store)
+        view = scenes.register(self.source, "合成參考圖", self.jpeg, 0)
+        adapter = SimpleNamespace(device=lambda: "fixture-device", read=lambda _: {
+            "success": True, "position_readback_verified": True,
+            "state": {"connected": True, "position": {
+                "ret": 0, "angle": 30, "elevation": 50, "updated_at": now.isoformat(),
+            }},
+        })
+        app = self.app(callbacks={"preview_snapshot": lambda: self.frame},
+                       integration=SimpleNamespace(privacy_adapter=adapter))
+        with TestClient(app) as client, patch("meowkeeper.app.web.api.datetime", FrozenClock):
+            for offset, status in ((0.000001, 200), (2.0, 422), (-6.0, 422)):
+                with self.subTest(offset=offset):
+                    stamp = now.timestamp() + offset
+                    os.utime(self.frame, (stamp, stamp))
+                    response = client.post(f"/api/v1/scene-registry/views/{view}/position",
+                        json={"expected_epoch": 0, "preset_label": "參考方向"}, headers=self.headers)
+                    self.assertEqual(response.status_code, status, response.text)
 
     def test_position_binding_requires_real_readback_correct_source_and_visual_alignment(self):
         scenes=SceneViewRegistry(self.store);view=scenes.register(self.source,"合成參考圖",self.jpeg,0)

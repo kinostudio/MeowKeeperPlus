@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 import re
 import sys
 from pathlib import Path
@@ -28,16 +29,17 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--role",
-        choices=("core", "user_core", "tray"),
+        choices=("core", "user_core", "tray", "updater"),
         default="core",
         help=(
-            "core 在開機且可無人登入執行；user_core 與 tray 在目前使用者登入後啟動。"
+            "core 在開機且可無人登入執行；user_core 與 tray 在登入後啟動；updater 是無觸發器、僅由固定本機要求啟動的 SYSTEM 工作。"
         ),
     )
     parser.add_argument(
         "--user-id",
         help="user_core／tray 的 Windows 使用者 SID；安裝器應明確提供。",
     )
+    parser.add_argument("--updater-script", type=Path, help="固定受保護更新工作腳本；僅 role=updater 使用。")
     return parser
 
 
@@ -49,30 +51,43 @@ def create_xml(
     role: str = "core",
     data_root: Path | None = None,
     user_id: str | None = None,
+    updater_script: Path | None = None,
 ) -> str:
     if not root.is_dir():
         raise ValueError(f"找不到可攜式包根目錄：{root}")
     if not task_name.strip() or not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", source_env):
         raise ValueError("Task 名稱不可為空白，來源環境變數須為有效名稱。")
-    if role not in {"core", "user_core", "tray"}:
-        raise ValueError("Task role 必須是 core、user_core 或 tray。")
+    if role not in {"core", "user_core", "tray", "updater"}:
+        raise ValueError("Task role 必須是 core、user_core、tray 或 updater。")
     if user_id is not None and not re.fullmatch(r"S-\d+(?:-\d+)+", user_id):
         raise ValueError("Windows 使用者 SID 格式無效。")
     root_text = str(root.resolve())
     command = str(root.resolve() / "runtime" / "python" / ("pythonw.exe" if role == "tray" else "python.exe"))
-    if role in {"user_core", "tray"}:
-        trigger = "<LogonTrigger><Enabled>true</Enabled></LogonTrigger>"
-        logon_type = "<LogonType>InteractiveToken</LogonType>"
-    if role == "tray":
+    trigger = ""
+    logon_type = ""
+    user_id_xml = ""
+    if role == "updater":
+        if data_root is None or updater_script is None or not updater_script.is_absolute():
+            raise ValueError("updater 工作需要資料根目錄及固定的絕對腳本路徑。")
+        # Keep the worker's current directory outside App so Windows can archive it.
+        root_text = str(updater_script.parent.resolve())
+        command = str(Path(os.environ.get("SystemRoot", r"C:\Windows")) / "System32" / "WindowsPowerShell" / "v1.0" / "powershell.exe")
+        arguments = (
+            f'-NoProfile -ExecutionPolicy Bypass -File "{updater_script}" '
+            f'-AppRoot "{root.resolve()}" -DataRoot "{data_root.resolve()}"'
+        )
+        user_id_xml = "<UserId>S-1-5-18</UserId>"
+        description = "驗證簽章後套用官方 MeowKeeper+ 更新；只接受固定本機更新要求"
+    elif role == "tray":
         arguments = f'"{root.resolve() / "tools" / "run_tray.py"}" --background'
         description = "Tray 操作入口；退出 Tray 不會停止背景核心"
     else:
-        if role == "core":
+        if role == "user_core":
+            trigger = "<LogonTrigger><Enabled>true</Enabled></LogonTrigger>"
+            logon_type = "<LogonType>InteractiveToken</LogonType>"
+        elif role == "core":
             trigger = "<BootTrigger><Enabled>true</Enabled></BootTrigger>"
-            # Task Scheduler infers SYSTEM from its SID. Its XML parser rejects
-            # an explicit ServiceAccount LogonType for this principal.
-            logon_type = ""
-            user_id = "<UserId>S-1-5-18</UserId>"
+            user_id_xml = "<UserId>S-1-5-18</UserId>"
         arguments = (
             f'"{root.resolve() / "tools" / "run_host.py"}" '
             f"--no-open-browser --source-url-env {source_env} --analyzer auto"
@@ -88,11 +103,16 @@ def create_xml(
                 f' --admin-storage-path "{state / "web_admin.json"}"'
                 f' --lock-root "{state.parent}"'
             )
-        description = "24H 背景監控與 Web Dashboard Host"
+        description = "24H 背景監控與 Web Dashboard Host" if role != "user_core" else "登入後背景監控與 Web Dashboard Host"
+    if role in {"user_core", "tray"}:
+        trigger = "<LogonTrigger><Enabled>true</Enabled></LogonTrigger>"
+        logon_type = "<LogonType>InteractiveToken</LogonType>"
+    if role == "core":
+        # Task Scheduler infers SYSTEM from its SID; its XML parser rejects an
+        # explicit ServiceAccount LogonType for this principal.
+        user_id_xml = "<UserId>S-1-5-18</UserId>"
     if role in {"user_core", "tray"}:
         user_id_xml = f"<UserId>{escape(user_id)}</UserId>" if user_id else ""
-    else:
-        user_id_xml = user_id
     if role == "tray" and data_root is not None:
         arguments += f' --lock-root "{data_root.resolve().parent}"'
     return f'''<?xml version="1.0" encoding="UTF-16"?>
@@ -116,6 +136,7 @@ def main(argv: list[str] | None = None) -> int:
             role=args.role,
             data_root=args.data_root,
             user_id=args.user_id,
+            updater_script=args.updater_script,
         )
         args.output.parent.mkdir(parents=True, exist_ok=True)
         args.output.write_text(xml, encoding="utf-16")

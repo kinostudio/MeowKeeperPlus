@@ -10,6 +10,7 @@ Windows 本地寵物監控：共用攝影機影音來源、事件影片、Telegr
 - [一般使用指南](docs/PUBLIC_USER_GUIDE.md)
 - Windows 發布包內附 Python、FFmpeg 與必要模型；一般使用者不必建立 venv 或執行 pip。
 - 安裝與更新由使用者執行發布包中的安裝入口；Git 原始碼更新不會自動升級正式 Host。
+- [r115 候選版與分階段驗收](docs/R115_CANDIDATE.md)：候選建置不等同正式部署或實機更新／回滾已通過。
 
 ## 原始碼協作
 

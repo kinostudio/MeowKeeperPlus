@@ -15,19 +15,18 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
-import os
+import logging
 import shutil
 import sqlite3
 import sys
 import time
 from pathlib import Path
-from typing import Any
 
 if hasattr(sys.stdout, "reconfigure"):
     try:
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")
-    except Exception:
-        pass
+    except (OSError, RuntimeError, ValueError, TypeError, KeyError, ImportError):
+        logging.getLogger(__name__).debug("選用資料處理未完成；沿用安全備援結果。")
 
 # Ensure workspace src is on sys.path
 WORKSPACE_SRC = Path(__file__).resolve().parents[1] / "src"
@@ -37,21 +36,18 @@ if str(WORKSPACE_SRC) not in sys.path:
 import cv2
 import numpy as np
 import torch
-import torch.nn as nn
+from torch import nn
 from torch.utils.data import DataLoader, TensorDataset
 
 from meowkeeper.core.behavior.posture_classifier import (
     POSTURE_CLASSES,
     POSTURE_LABELS_ZH,
-    PostureClassifier,
     PostureMLP,
 )
 from meowkeeper.core.identity.dinov2_embedder import DinoV2Embedder
 from meowkeeper.runtime import (
-    DEFAULT_POSTURE_MODEL_NAME,
     DEFAULT_POSTURE_MODEL_VERSION,
     posture_model_file,
-    project_root,
 )
 
 
@@ -86,16 +82,16 @@ def extract_c701_crops_and_features(
                 if raw_vec and len(raw_vec) == 384:
                     vec = np.asarray(raw_vec, dtype=np.float32)
                     precomputed_count += 1
-            except Exception:
-                pass
+            except (OSError, RuntimeError, ValueError, TypeError, KeyError, ImportError):
+                logging.getLogger(__name__).debug("選用資料處理未完成；沿用安全備援結果。")
 
         # 2. 若無特徵且在配額內，則即時提取
         if vec is None and embedder is not None and extracted_count < max_to_extract:
             try:
                 vec = embedder.embed(jpeg)
                 extracted_count += 1
-            except Exception:
-                pass
+            except (OSError, RuntimeError, ValueError, TypeError, KeyError, ImportError):
+                logging.getLogger(__name__).debug("選用資料處理未完成；沿用安全備援結果。")
 
         if vec is None:
             continue
@@ -165,8 +161,8 @@ def load_dataset_folder(
                     vec /= norm
                     vectors.append(vec)
                     labels.append(c)
-            except Exception:
-                pass
+            except (OSError, RuntimeError, ValueError, TypeError, KeyError, ImportError):
+                logging.getLogger(__name__).debug("選用資料處理未完成；沿用安全備援結果。")
     return vectors, labels
 
 
@@ -385,7 +381,7 @@ def main() -> int:
         try:
             print(f"🔧 初始化 DINOv2 特徵提取器 ({args.device})...")
             embedder = DinoV2Embedder(device=args.device)
-        except Exception as e:
+        except (OSError, RuntimeError, ValueError, TypeError, KeyError, ImportError) as e:
             print(f"⚠️ DINOv2 初始化略過：{e}")
 
     # 1. 載入特徵樣本
@@ -435,7 +431,7 @@ def main() -> int:
         program_data_dest.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(output_path, program_data_dest)
         print(f"📋 同步至主機安裝目錄：{program_data_dest}")
-    except Exception as exc:
+    except (OSError, RuntimeError, ValueError, TypeError, KeyError, ImportError) as exc:
         print(f"⚠️ 無法複製至主機目錄：{exc}")
 
     # 5. 寫入 Manifest

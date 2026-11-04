@@ -6,7 +6,11 @@
     [switch]$EnableCpuTemperature,
     [switch]$SkipCpuTemperature,
     [switch]$UserHost,
-    [ValidatePattern('^S-1-5-21-(\d+-){3}\d+$')][string]$HostUserSid
+    [ValidatePattern('^S-1-5-21-(\d+-){3}\d+$')][string]$HostUserSid,
+    [ValidatePattern('^S-\d+(?:-\d+)+$')][string]$TrayUserSid,
+    [switch]$HotfixManaged,
+    [string]$HotfixResultPath,
+    [ValidatePattern('^[a-fA-F0-9]{64}$')][string]$HotfixOldManifestSha256
 )
 
 $ErrorActionPreference = "Stop"
@@ -28,10 +32,27 @@ $dataRoot = Join-Path $installRoot "Data"
 $coreTask = if ($CurrentUser) { "MeowKeeperPlus User Core" } else { "MeowKeeperPlus Core" }
 $trayTask = if ($CurrentUser) { "MeowKeeperPlus User Tray" } else { "MeowKeeperPlus Tray" }
 $coreRole = if ($CurrentUser -or $UserHost) { "user_core" } else { "core" }
-$interactiveUserSid = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+$updaterTask = "MeowKeeperPlus Update Worker"
+$currentProcessSid = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+$interactiveUserSid = $currentProcessSid
 if ($UserHost) {
     if (-not $HostUserSid) { $HostUserSid = $interactiveUserSid }
     $interactiveUserSid = $HostUserSid
+}
+$trayTaskUserSid = if ($TrayUserSid) { $TrayUserSid } else { $interactiveUserSid }
+if ($HotfixManaged -and ($CurrentUser -or -not $Upgrade -or $SkipStart -or $currentProcessSid -ne 'S-1-5-18' -or [string]::IsNullOrWhiteSpace($HotfixResultPath) -or -not $HotfixOldManifestSha256)) {
+    throw '安全更新工作只能以 SYSTEM 身分更新既有的 ProgramData 安裝；拒絕使用其他升級路徑。'
+}
+if (-not $HotfixManaged -and $HotfixResultPath) { throw '更新結果路徑只允許由受保護的更新工作使用。' }
+if ($HotfixManaged) {
+    $resolvedHotfixResult = [IO.Path]::GetFullPath($HotfixResultPath)
+    $hotfixWorkRoot = [IO.Path]::GetDirectoryName($resolvedHotfixResult)
+    $expectedUpdaterRoot = [IO.Path]::GetFullPath((Join-Path $installRoot 'Updater'))
+    if ([IO.Path]::GetDirectoryName($hotfixWorkRoot) -ne $expectedUpdaterRoot -or
+        [IO.Path]::GetFileName($hotfixWorkRoot) -notmatch '^work-[a-f0-9]{32}$' -or
+        [IO.Path]::GetFileName($resolvedHotfixResult) -ne 'installer-result.json') {
+        throw '安全更新結果路徑不符合固定工作目錄契約。'
+    }
 }
 $startupFolder = [Environment]::GetFolderPath("Startup")
 $coreStartupLink = Join-Path $startupFolder "MeowKeeperPlus User Core.cmd"
@@ -98,6 +119,139 @@ function Test-ScheduledTaskExists([string]$Name) {
     }
     finally {
         $ErrorActionPreference = $previousPreference
+    }
+}
+
+function Set-DirectoryAcl([string]$Path, [string[]]$ReadOnlySids = @()) {
+    $acl = New-Object Security.AccessControl.DirectorySecurity
+    $acl.SetAccessRuleProtection($true, $false)
+    $administrators = New-Object Security.Principal.SecurityIdentifier('S-1-5-32-544')
+    $system = New-Object Security.Principal.SecurityIdentifier('S-1-5-18')
+    $acl.SetOwner($administrators)
+    foreach ($sidText in @('S-1-5-18', 'S-1-5-32-544')) {
+        $sid = New-Object Security.Principal.SecurityIdentifier($sidText)
+        $rule = New-Object Security.AccessControl.FileSystemAccessRule($sid, 'FullControl', 'ContainerInherit,ObjectInherit', 'None', 'Allow')
+        [void]$acl.AddAccessRule($rule)
+    }
+    foreach ($sidText in @($ReadOnlySids | Select-Object -Unique)) {
+        if ($sidText -and $sidText -notin @('S-1-5-18', 'S-1-5-32-544')) {
+            $sid = New-Object Security.Principal.SecurityIdentifier($sidText)
+            $rule = New-Object Security.AccessControl.FileSystemAccessRule($sid, 'ReadAndExecute', 'ContainerInherit,ObjectInherit', 'None', 'Allow')
+            [void]$acl.AddAccessRule($rule)
+        }
+    }
+    Set-Acl -LiteralPath $Path -AclObject $acl
+}
+
+function Set-FileAcl([string]$Path, [string[]]$ReadOnlySids = @()) {
+    $acl = New-Object Security.AccessControl.FileSecurity
+    $acl.SetAccessRuleProtection($true, $false)
+    $acl.SetOwner((New-Object Security.Principal.SecurityIdentifier('S-1-5-32-544')))
+    foreach ($sidText in @('S-1-5-18', 'S-1-5-32-544')) {
+        $sid = New-Object Security.Principal.SecurityIdentifier($sidText)
+        [void]$acl.AddAccessRule((New-Object Security.AccessControl.FileSystemAccessRule($sid, 'FullControl', 'Allow')))
+    }
+    foreach ($sidText in @($ReadOnlySids | Select-Object -Unique)) {
+        if ($sidText -and $sidText -notin @('S-1-5-18', 'S-1-5-32-544')) {
+            $sid = New-Object Security.Principal.SecurityIdentifier($sidText)
+            [void]$acl.AddAccessRule((New-Object Security.AccessControl.FileSystemAccessRule($sid, 'ReadAndExecute', 'Allow')))
+        }
+    }
+    Set-Acl -LiteralPath $Path -AclObject $acl
+}
+
+function Set-UpdateTaskDescriptor([string]$Name) {
+    $descriptor = 'D:P(A;;GA;;;SY)(A;;GA;;;BA)'
+    if ($UserHost -and $HostUserSid -and $HostUserSid -notin @('S-1-5-18', 'S-1-5-32-544')) {
+        $descriptor += ('(A;;GRGX;;;{0})' -f $HostUserSid)
+    }
+    $service = New-Object -ComObject 'Schedule.Service'
+    $service.Connect()
+    $task = $service.GetFolder('\').GetTask($Name)
+    if ($null -eq $task) { throw '更新工作註冊後無法讀取。' }
+    $task.SetSecurityDescriptor($descriptor, 0)
+}
+
+function Register-ProtectedUpdateWorker([string]$InstalledApp, [string]$InstalledData) {
+    $workerRoot = Join-Path $installRoot 'Updater'
+    $sourceScript = Join-Path $InstalledApp 'scripts\Apply-MeowKeeperPlusUpdate.ps1'
+    if (-not (Test-Path -LiteralPath $sourceScript -PathType Leaf)) { throw '發布包缺少安全更新工作。' }
+    if (-not (Test-Path -LiteralPath $workerRoot)) { New-Item -ItemType Directory -Path $workerRoot -Force | Out-Null }
+    if ((Get-Item -LiteralPath $workerRoot -Force).Attributes -band [IO.FileAttributes]::ReparsePoint) { throw '更新工作目錄不可為重新解析點。' }
+    $readSids = if ($UserHost) { @($HostUserSid) } else { @() }
+    Set-DirectoryAcl $workerRoot $readSids
+    foreach ($knownWorker in @(Get-ChildItem -LiteralPath $workerRoot -File -Filter 'Apply-MeowKeeperPlusUpdate-*.ps1' -ErrorAction SilentlyContinue)) {
+        $knownName = [regex]::Match($knownWorker.Name, '^Apply-MeowKeeperPlusUpdate-([a-f0-9]{16})\.ps1$')
+        $knownHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $knownWorker.FullName).Hash.ToLowerInvariant()
+        if (-not $knownName.Success -or $knownHash.Substring(0, 16) -ne $knownName.Groups[1].Value) {
+            throw '更新工作目錄包含未驗證腳本；拒絕調整權限或註冊。'
+        }
+        Set-FileAcl $knownWorker.FullName $readSids
+    }
+    $sourceHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $sourceScript).Hash.ToLowerInvariant()
+    $workerScript = Join-Path $workerRoot ('Apply-MeowKeeperPlusUpdate-' + $sourceHash.Substring(0, 16) + '.ps1')
+    if (Test-Path -LiteralPath $workerScript -PathType Leaf) {
+        if ((Get-FileHash -Algorithm SHA256 -LiteralPath $workerScript).Hash.ToLowerInvariant() -ne $sourceHash) {
+            throw '既有版本化更新工作雜湊不符；拒絕覆寫。'
+        }
+    } else {
+        Copy-Item -LiteralPath $sourceScript -Destination $workerScript
+    }
+    Set-FileAcl $workerScript $readSids
+    $sourceHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $sourceScript).Hash
+    $installedHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $workerScript).Hash
+    if ($sourceHash -ne $installedHash) { throw '受保護更新工作完整性校驗失敗。' }
+    $tempXml = Join-Path $tempRoot 'updater.xml'
+    $xmlTool = Join-Path $InstalledApp 'tools\create_task_scheduler_xml.py'
+    $python = Join-Path $InstalledApp 'runtime\python\python.exe'
+    & $python $xmlTool --root $InstalledApp --data-root $InstalledData --output $tempXml --task-name $updaterTask --role updater --updater-script $workerScript
+    if ($LASTEXITCODE -ne 0) { throw '安全更新工作 XML 產生失敗。' }
+    $service = New-Object -ComObject 'Schedule.Service'
+    $service.Connect()
+    $folder = $service.GetFolder('\')
+    $existing = $null
+    try { $existing = $folder.GetTask($updaterTask) } catch { }
+    $oldXml = if ($existing) { [string]$existing.Xml } else { $null }
+    $oldSddl = if ($existing) { [string]$existing.GetSecurityDescriptor(0) } else { $null }
+    if ($existing) {
+        if ($existing.Definition.Actions.Count -ne 1 -or [string]$existing.Definition.Principal.UserId -notin @('S-1-5-18', 'SYSTEM', 'NT AUTHORITY\SYSTEM') -or
+            $existing.Enabled -ne $true -or $existing.Definition.Triggers.Count -ne 0) {
+            throw '既有安全更新工作定義不符；拒絕覆寫。'
+        }
+        $oldAction = $existing.Definition.Actions.Item(1)
+        $expectedPowerShell = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
+        $oldArguments = [string]$oldAction.Arguments
+        $oldScriptMatch = [regex]::Match($oldArguments, '(?i)-File\s+"([^"]+\.ps1)"')
+        $oldWorkerPath = if ($oldScriptMatch.Success) { [IO.Path]::GetFullPath($oldScriptMatch.Groups[1].Value) } else { '' }
+        $oldNameMatch = [regex]::Match([IO.Path]::GetFileName($oldWorkerPath), '^Apply-MeowKeeperPlusUpdate-([a-f0-9]{16})\.ps1$')
+        $expectedOldArguments = if ($oldWorkerPath) {
+            '-NoProfile -ExecutionPolicy Bypass -File "' + $oldWorkerPath + '" -AppRoot "' + [IO.Path]::GetFullPath($InstalledApp) + '" -DataRoot "' + [IO.Path]::GetFullPath($InstalledData) + '"'
+        } else { '' }
+        $oldHashPrefix = if ($oldWorkerPath -and (Test-Path -LiteralPath $oldWorkerPath -PathType Leaf)) {
+            (Get-FileHash -Algorithm SHA256 -LiteralPath $oldWorkerPath).Hash.Substring(0, 16).ToLowerInvariant()
+        } else { '' }
+        if (-not [StringComparer]::OrdinalIgnoreCase.Equals([IO.Path]::GetFullPath([string]$oldAction.Path), [IO.Path]::GetFullPath($expectedPowerShell)) -or
+            -not $oldScriptMatch.Success -or
+            -not [StringComparer]::OrdinalIgnoreCase.Equals($oldArguments.Trim(), $expectedOldArguments) -or
+            [IO.Path]::GetDirectoryName($oldWorkerPath) -ne [IO.Path]::GetFullPath($workerRoot) -or
+            -not $oldNameMatch.Success -or $oldHashPrefix -ne $oldNameMatch.Groups[1].Value -or
+            $oldArguments.IndexOf(('-AppRoot "' + [IO.Path]::GetFullPath($InstalledApp) + '"'), [StringComparison]::OrdinalIgnoreCase) -lt 0 -or
+            $oldArguments.IndexOf(('-DataRoot "' + [IO.Path]::GetFullPath($InstalledData) + '"'), [StringComparison]::OrdinalIgnoreCase) -lt 0) {
+            throw '既有安全更新工作目標不符；拒絕沿用或覆寫。'
+        }
+    }
+    try {
+        & "$env:SystemRoot\System32\schtasks.exe" /Create /TN $updaterTask /XML $tempXml /F | Out-Host
+        if ($LASTEXITCODE -ne 0) { throw '安全更新工作註冊失敗。' }
+        Set-UpdateTaskDescriptor $updaterTask
+    }
+    catch {
+        if ($oldXml) {
+            [void]$folder.RegisterTask($updaterTask, $oldXml, 6, $null, $null, 0, $oldSddl)
+        } else {
+            & "$env:SystemRoot\System32\schtasks.exe" /Delete /TN $updaterTask /F *> $null
+        }
+        throw '安全更新工作註冊或權限限制未通過；已還原更新前設定。'
     }
 }
 
@@ -298,6 +452,24 @@ function Stop-CurrentUserProcesses([string]$ApplicationRoot) {
     }
 }
 
+function Test-UpgradeProcessStillMatches($Snapshot, [string]$ExpectedPath) {
+    $live = @(Get-CimInstance Win32_Process -Filter ("ProcessId = {0}" -f [int]$Snapshot.ProcessId) -ErrorAction Stop)
+    # Exiting after opening the handle is normal too (parent shutdown may
+    # reap children). Only a successful, empty fresh query proves absence.
+    if ($live.Count -eq 0) { return $false }
+    if ($live.Count -ne 1) { throw "程序識別有歧義；升級已中止。" }
+    $reason = if (-not [StringComparer]::OrdinalIgnoreCase.Equals($live[0].ExecutablePath, $ExpectedPath)) {
+        '執行路徑'
+    } elseif (-not [StringComparer]::Ordinal.Equals($live[0].CommandLine, $Snapshot.CommandLine)) {
+        '命令列'
+    } elseif ($null -eq $live[0].CreationDate -or
+        ([datetime]$live[0].CreationDate).ToUniversalTime() -ne ([datetime]$Snapshot.CreationDate).ToUniversalTime()) {
+        '建立時間'
+    } else { $null }
+    if ($reason) { throw "舊版內附 Python 程序 PID=$($Snapshot.ProcessId) 的$reason 已變更；升級已中止。" }
+    return $true
+}
+
 function Stop-InstalledHostProcess([string]$ApplicationRoot) {
     # Windows multiprocessing workers use the bundled interpreter but do not
     # include run_host.py in their command line. Stop only interpreters whose
@@ -321,18 +493,13 @@ function Stop-InstalledHostProcess([string]$ApplicationRoot) {
             $handle = Get-ProcessHandleOrNullIfExited ([int]$process.ProcessId)
             if ($null -eq $handle) { continue }
             try {
+                if (-not (Test-UpgradeProcessStillMatches $process $expectedPath)) { continue }
                 if ([string]::IsNullOrWhiteSpace($process.CommandLine) -or $null -eq $process.CreationDate -or
                     -not [StringComparer]::OrdinalIgnoreCase.Equals($handle.MainModule.FileName, $expectedPath) -or
                     [math]::Abs(($handle.StartTime.ToUniversalTime() - ([datetime]$process.CreationDate).ToUniversalTime()).TotalSeconds) -gt 1) {
                     throw "舊版內附 Python 程序身分無法完整驗證；升級已中止。"
                 }
-                $live = @(Get-CimInstance Win32_Process -Filter ("ProcessId = {0}" -f [int]$process.ProcessId) -ErrorAction Stop)
-                if ($live.Count -ne 1 -or
-                    -not [StringComparer]::OrdinalIgnoreCase.Equals($live[0].ExecutablePath, $expectedPath) -or
-                    -not [StringComparer]::Ordinal.Equals($live[0].CommandLine, $process.CommandLine) -or
-                    ([datetime]$live[0].CreationDate).ToUniversalTime() -ne ([datetime]$process.CreationDate).ToUniversalTime()) {
-                    throw "舊版內附 Python 程序資訊已變更；升級已中止。"
-                }
+                if (-not (Test-UpgradeProcessStillMatches $process $expectedPath)) { continue }
                 $role = if ($process.CommandLine.IndexOf($hostScript, [StringComparison]::OrdinalIgnoreCase) -ge 0) {
                     "Core"
                 } elseif ($process.CommandLine.IndexOf($trayScript, [StringComparison]::OrdinalIgnoreCase) -ge 0) {
@@ -343,6 +510,13 @@ function Stop-InstalledHostProcess([string]$ApplicationRoot) {
                 Write-Host ("升級停止已驗證的舊 {0} PID={1} Path={2}" -f $role, $process.ProcessId, $expectedPath)
                 Stop-Process -InputObject $handle -Force -ErrorAction Stop
                 if (-not $handle.WaitForExit(15000)) { throw "舊版內附 Python 程序未在 15 秒內退出；升級已中止。" }
+            }
+            catch {
+                $failure = $_
+                $remainingPid = @(Get-CimInstance Win32_Process -Filter ("ProcessId = {0}" -f [int]$process.ProcessId) -ErrorAction Stop)
+                if ($remainingPid.Count -ne 0) { throw $failure }
+                # A successfully confirmed exit is safe; an unreadable query
+                # or a reused PID must never be treated as disappearance.
             }
             finally { $handle.Dispose() }
         }
@@ -738,6 +912,7 @@ if ((Test-Path -LiteralPath $appRoot) -and -not $Upgrade -and -not $WhatIf) {
 
 $tempRoot = Join-Path ([IO.Path]::GetTempPath()) ("MeowKeeperPlus-install-" + [guid]::NewGuid().ToString("N"))
 New-Item -ItemType Directory -Path $tempRoot -Force | Out-Null
+if ($HotfixManaged) { Set-DirectoryAcl $tempRoot }
 $legacyDataMigrationJournal = Join-Path $tempRoot "legacy-data-migration.json"
 try {
     # The destination App directory does not exist until after the package is
@@ -788,6 +963,9 @@ if ($Upgrade -and (Test-Path -LiteralPath $appRoot)) {
     }
     if (-not (Test-Path -LiteralPath (Join-Path $resolvedUpgradeApp "build_manifest.json") -PathType Leaf)) {
         Write-Warning "舊 App 缺少完整性清單；視為上次升級中斷的程式目錄，將先封存，不會直接刪除。"
+    }
+    if ($HotfixManaged -and (Get-FileHash -Algorithm SHA256 -LiteralPath (Join-Path $resolvedUpgradeApp 'build_manifest.json')).Hash -ne $HotfixOldManifestSha256) {
+        throw '更新前版本校驗與安全更新工作不符；未停止正式監控。'
     }
     if ($CurrentUser) {
         Stop-InstalledHostProcess $appRoot
@@ -877,6 +1055,11 @@ if ($CurrentUser) {
         }
     }
     New-Item -ItemType Directory -Path $appRoot -Force | Out-Null
+    if (-not $CurrentUser) {
+        $applicationReadSids = @($trayTaskUserSid)
+        if ($UserHost) { $applicationReadSids += $HostUserSid }
+        Set-DirectoryAcl $appRoot $applicationReadSids
+    }
     New-Item -ItemType Directory -Path $dataRoot -Force | Out-Null
     $installationPhase = 'copy'
     Copy-Item -Path (Join-Path $packageRoot "*") -Destination $appRoot -Recurse -Force
@@ -916,7 +1099,7 @@ if ($CurrentUser) {
         # separate, and the CPU task uses its own protected Program Files copy.
         $dataAcl = Get-Acl -LiteralPath $dataRoot
         $hostSid = New-Object Security.Principal.SecurityIdentifier($HostUserSid)
-        $dataAcl.AddAccessRule((New-Object Security.AccessControl.FileSystemAccessRule($hostSid,'Modify','ContainerInherit,ObjectInherit','None','Allow')))
+        $dataAcl.SetAccessRule((New-Object Security.AccessControl.FileSystemAccessRule($hostSid,'Modify','ContainerInherit,ObjectInherit','None','Allow')))
         Set-Acl -LiteralPath $dataRoot -AclObject $dataAcl
         Write-Host 'Host 保留指定使用者身分，登入 Windows 後啟動；不等同無人登入的 SYSTEM 服務。'
     }
@@ -929,7 +1112,7 @@ if ($CurrentUser) {
         $installedXmlTool = Join-Path $appRoot "tools\create_task_scheduler_xml.py"
         $coreXmlArgs = @($installedXmlTool, "--root", $appRoot, "--data-root", $dataRoot, "--output", $coreXml, "--task-name", $coreTask, "--role", $coreRole)
         if ($UserHost) { $coreXmlArgs += @('--user-id', $interactiveUserSid) }
-        $trayXmlArgs = @($installedXmlTool, "--root", $appRoot, "--data-root", $dataRoot, "--output", $trayXml, "--task-name", $trayTask, "--role", "tray", "--user-id", $interactiveUserSid)
+        $trayXmlArgs = @($installedXmlTool, "--root", $appRoot, "--data-root", $dataRoot, "--output", $trayXml, "--task-name", $trayTask, "--role", "tray", "--user-id", $trayTaskUserSid)
         & $installedPython @coreXmlArgs
         & $installedPython @trayXmlArgs
         & "$env:SystemRoot\System32\schtasks.exe" /Create /TN $coreTask /XML $coreXml /F | Out-Host
@@ -939,6 +1122,7 @@ if ($CurrentUser) {
             & "$env:SystemRoot\System32\schtasks.exe" /Delete /TN $coreTask /F *> $null
             throw "Tray 排程工作註冊失敗，已回退 Core 工作。"
         }
+        Register-ProtectedUpdateWorker $appRoot $dataRoot
     }
     New-StartMenuLauncherShortcut $startMenuShortcut $appRoot
     if (-not $SkipStart) {
@@ -996,10 +1180,40 @@ if ($CurrentUser) {
         if ($LASTEXITCODE -ne 0) {
             Write-Warning "安裝已完成，但 Host／Tray 即時健康驗證未通過。請保留資料並查看 Dashboard 日誌。"
             Write-InstallOutcome $dataRoot 'health_failed' $installationPhase $packageRoot
-            exit 3
+            throw "Host／Tray 即時健康驗證未通過。"
         }
     }
+    if ($HotfixManaged) {
+        $resultPath = [IO.Path]::GetFullPath($HotfixResultPath)
+        $updaterWorkRoot = [IO.Path]::GetDirectoryName($resultPath)
+        $expectedWorkParent = [IO.Path]::GetFullPath((Join-Path $installRoot 'Updater'))
+        if ([IO.Path]::GetDirectoryName($updaterWorkRoot) -ne $expectedWorkParent -or
+            [IO.Path]::GetFileName($updaterWorkRoot) -notmatch '^work-[a-f0-9]{32}$' -or
+            ((Get-Item -LiteralPath $updaterWorkRoot -Force).Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0 -or
+            (Test-Path -LiteralPath $resultPath)) {
+            throw '安全更新結果路徑驗證失敗。'
+        }
+        $oldHash = if ($upgradeBackupApp -and (Test-Path -LiteralPath (Join-Path $upgradeBackupApp 'build_manifest.json') -PathType Leaf)) {
+            (Get-FileHash -Algorithm SHA256 -LiteralPath (Join-Path $upgradeBackupApp 'build_manifest.json')).Hash.ToLowerInvariant()
+        } else { '' }
+        if (-not $oldHash -or $oldHash -ne $HotfixOldManifestSha256.ToLowerInvariant()) { throw '無法保留升級前版本的回復校驗資料。' }
+        $resultPayload = [ordered]@{
+            schema = 1
+            status = 'installed_health_passed'
+            old_backup_app = $upgradeBackupApp
+            old_manifest_sha256 = $oldHash
+            migration_journal = $legacyDataMigrationJournal
+            installer_temp_root = $tempRoot
+        }
+        [IO.File]::WriteAllText($resultPath, ($resultPayload | ConvertTo-Json -Compress), [Text.UTF8Encoding]::new($false))
+        $upgradeNewAppVerified = $true
+    } else {
+        $upgradeNewAppVerified = $true
+    }
     if ($upgradeBackupApp -and (Test-Path -LiteralPath $upgradeBackupApp)) {
+        if ($HotfixManaged) {
+            Write-Host '新版已通過安裝器健康檢查；舊版封存保留至更新工作完成最終驗證。'
+        } else {
         try {
             Remove-Item -LiteralPath $upgradeBackupApp -Recurse -Force -ErrorAction Stop
             Write-Host "已清理封存的舊 App。"
@@ -1007,6 +1221,7 @@ if ($CurrentUser) {
         }
         catch {
             Write-Warning "新版已安裝；舊版備份因檔案占用未能清理，已保留供復原：$upgradeBackupApp"
+        }
         }
     }
     Write-Host "✅ 喵喵守護者+ 已安裝。應用：$appRoot"
@@ -1028,6 +1243,15 @@ finally {
 catch {
     if ($upgradeBackupApp -and (Test-Path -LiteralPath $upgradeBackupApp) -and -not $upgradeNewAppVerified) {
         try {
+            if ($HotfixManaged -and (Test-Path -LiteralPath $appRoot -PathType Container)) {
+                foreach ($ownedTask in @($coreTask, $trayTask)) { & "$env:SystemRoot\System32\schtasks.exe" /End /TN $ownedTask *> $null }
+                Stop-InstalledHostProcess $appRoot
+                Stop-CurrentUserProcesses $appRoot
+                Stop-InstalledGo2Rtc $appRoot
+                Stop-InstalledFfmpegForUpgrade $appRoot
+                Stop-InstalledFfprobe $appRoot
+                Assert-NoInstalledMediaConsumers $appRoot
+            }
             if ($legacyDataMigrationJournal -and (Test-Path -LiteralPath $legacyDataMigrationJournal -PathType Leaf)) {
                 Write-Host "新版尚未完成驗證；正在把本次移轉的舊資料復原至封存的 App。"
                 & $sourcePython $dataMigrationTool --mode rollback --journal $legacyDataMigrationJournal
@@ -1056,7 +1280,7 @@ catch {
 }
 finally {
     if ((Get-Variable installationPhase -ErrorAction SilentlyContinue) -and $installationPhase -eq 'complete' -and
-        (Get-Variable tempRoot -ErrorAction SilentlyContinue) -and (Test-Path -LiteralPath $tempRoot)) {
+        (Get-Variable tempRoot -ErrorAction SilentlyContinue) -and (Test-Path -LiteralPath $tempRoot) -and -not $HotfixManaged) {
         $resolvedTemp = [IO.Path]::GetFullPath((Resolve-Path -LiteralPath $tempRoot).Path)
         $expectedTempParent = [IO.Path]::GetFullPath([IO.Path]::GetTempPath()).TrimEnd('\')
         if ([IO.Path]::GetDirectoryName($resolvedTemp) -eq $expectedTempParent -and

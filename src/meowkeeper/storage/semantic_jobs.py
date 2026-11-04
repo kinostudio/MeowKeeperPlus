@@ -31,9 +31,12 @@ def restore_result(payload):
                      for row in payload.get("tag_evidence", []))
     transport = payload.get("transport", {})
     return SemanticResult(payload["status"], tuple((row["track_id"], tuple(row["tags"])) for row in payload["tracks"]),
-                          payload["job_id"], tuple(payload.get("timings", {}).items()), evidence,
+                          payload.get("job_id"), tuple(payload.get("timings", {}).items()), evidence,
                           transport.get("request_dispatched"), transport.get("http_status"),
-                          tuple(payload.get("analysis_source", {}).items()))
+                          tuple(payload.get("analysis_source", {}).items()),
+                          identity_candidates=tuple((row["track_id"], {key:value for key,value in row.items() if key != "track_id"})
+                                                    for row in payload.get("identity_candidates", [])),
+                          caption=payload.get("caption"), evidence_reason=payload.get("evidence_reason"))
 
 
 class SemanticJobJournal:
@@ -136,7 +139,8 @@ class SemanticJobJournal:
 
     def finish(self, job_id, result):
         self.store._write("UPDATE semantic_work_jobs SET state=?,terminal_reason=COALESCE(terminal_reason,?),result_json=? WHERE job_id=? AND result_json IS NULL",
-                          (result.status, result.status, json.dumps(result.payload(), ensure_ascii=False, allow_nan=False), job_id))
+                          (result.status, result.evidence_reason or result.status,
+                           json.dumps(result.payload(), ensure_ascii=False, allow_nan=False), job_id))
 
     def reason(self, job_id, reason):
         if not isinstance(reason,str) or not re.fullmatch(r"[a-z_]{1,64}",reason):

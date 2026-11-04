@@ -7,14 +7,12 @@
 
 from __future__ import annotations
 
-import os
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any
 
 import numpy as np
-
 
 POSTURE_CLASSES = ("sitting", "standing", "lying", "unknown")
 
@@ -63,7 +61,7 @@ class PostureMLP:
     @staticmethod
     def build_torch_module(in_features: int = 384, hidden_dim: int = 128, num_classes: int = 4) -> Any:
         import torch
-        import torch.nn as nn
+        from torch import nn
 
         class _Net(nn.Module):
             def __init__(self) -> None:
@@ -154,7 +152,7 @@ class PostureClassifier:
                 self.w2 = get_np("fc2.weight").T  # (4, 128) -> (128, 4)
                 self.b2 = get_np("fc2.bias")
                 return True
-        except Exception:
+        except (OSError, RuntimeError, ValueError, TypeError, KeyError, ImportError):
             return False
         return False
 
@@ -286,7 +284,7 @@ class PostureClassifier:
         try:
             vec = embedder.embed(crop)
             return self.predict_vector(vec)
-        except Exception:
+        except (OSError, RuntimeError, ValueError, TypeError):
             return PosturePrediction(
                 posture="unknown",
                 confidence=0.0,

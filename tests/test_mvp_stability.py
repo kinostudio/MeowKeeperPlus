@@ -215,10 +215,12 @@ class MvpStabilityTests(unittest.TestCase):
                 (packages / name).mkdir(parents=True, exist_ok=True)
             failed = type("Result", (), {"returncode": 1})()
             with (
-                patch.object(packaging.subprocess, "run", return_value=failed),
+                patch.object(packaging.subprocess, "run", return_value=failed) as smoke,
                 self.assertRaisesRegex(ValueError, "實際匯入"),
             ):
                 packaging._validate_runtime(runtime, dry_run=False)
+            self.assertEqual(smoke.call_args.kwargs["encoding"], "utf-8")
+            self.assertEqual(smoke.call_args.kwargs["errors"], "replace")
 
     def test_portable_runtime_rejects_missing_websocket_transport(self) -> None:
         packaging = importlib.import_module("tools.build_portable")
@@ -288,6 +290,28 @@ class MvpStabilityTests(unittest.TestCase):
             self.assertIn("run_host.py", xml)
             self.assertIn("--no-open-browser", xml)
             self.assertIn("<UserId>S-1-5-18</UserId>", xml)
+
+    def test_update_worker_task_is_manual_fixed_system_action(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory) / "App"
+            data = Path(directory) / "Data"
+            updater = Path(directory) / "Updater" / "Apply-MeowKeeperPlusUpdate-0123456789abcdef.ps1"
+            root.mkdir()
+            data.mkdir()
+            updater.parent.mkdir()
+            updater.write_text("# fixed worker", encoding="utf-8")
+            xml = create_xml(
+                root, task_name="MeowKeeperPlusUpdateWorker",
+                source_env="MEOWKEEPER_MEDIA_SOURCE_URL", role="updater",
+                data_root=data, updater_script=updater,
+            )
+            self.assertIn("<Triggers></Triggers>", xml)
+            self.assertIn(f"<WorkingDirectory>{updater.parent.resolve()}</WorkingDirectory>", xml)
+            self.assertIn("<UserId>S-1-5-18</UserId>", xml)
+            self.assertIn("powershell.exe", xml)
+            self.assertIn("-ExecutionPolicy Bypass", xml)
+            self.assertIn(str(root.resolve()), xml)
+            self.assertIn(str(data.resolve()), xml)
             self.assertNotIn("run_monitor.py", xml)
             self.assertNotIn("password", xml.lower())
             self.assertNotIn("token", xml.lower())

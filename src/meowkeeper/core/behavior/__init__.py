@@ -20,6 +20,8 @@ from .state_machine import BehaviorStateMachine
 from .zones import ZoneRegistry
 
 __all__ = [
+    "POSTURE_CLASSES",
+    "POSTURE_LABELS_ZH",
     "BehaviorConfig",
     "BehaviorEngine",
     "BehaviorEvent",
@@ -27,8 +29,6 @@ __all__ = [
     "BehaviorFeatureExtractor",
     "BehaviorObservation",
     "BehaviorStateMachine",
-    "POSTURE_CLASSES",
-    "POSTURE_LABELS_ZH",
     "PostureClassifier",
     "PosturePrediction",
     "RuleBehaviorClassifier",

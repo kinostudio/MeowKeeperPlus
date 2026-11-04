@@ -496,7 +496,7 @@ class VisionSettingsStore:
 
     def reorder_keys(self, order_ids: list[str]):
         if not isinstance(order_ids, list):
-            raise ValueError("金鑰排序格式不正確。")
+            raise TypeError("金鑰排序格式不正確。")
         with self._lock:
             values = self.read()
             existing = self.read_keys(values)
@@ -702,8 +702,8 @@ class VisionSettingsStore:
                     "name": p.display_name,
                     "traits": p.effective_traits(),
                 })
-        except Exception:
-            pass
+        except (OSError, RuntimeError, ValueError, TypeError):
+            logging.getLogger(__name__).debug("寵物參考資料無法讀取；測試使用空白參考。")
         storyboard = TrackStoryboard("demo-cat", "track_01", jpeg, (-0.5, 0.0), "track_01")
         request = SemanticRequest(str(uuid4()), jpeg, ("demo-cat",), now, (storyboard,),
                                   pet_profiles=tuple(pets))

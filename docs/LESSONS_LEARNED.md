@@ -1,5 +1,23 @@
 # MeowKeeper+ 防重犯手冊：錯誤、證據與處理方法
 
+## 2026-11-04｜雲端成功不等於影片說明保留成功
+
+- 收集等待與影格張數要相容；四張在低 FPS 下可能超過兩秒。依需求保留四張、收集上限三秒，不以重複圖片或降低隱私門檻冒充完成。只用觀察視窗內的影格檢查 epoch，避免視窗外舊資料污染。
+- 回應經過拼貼正規化、worker 加入 timings、帳本還原與本機身分更新四層，需逐層驗證 caption／候選欄位及更新先後順序。不能只測 `_merge_candidate_caption` 或拿 API HTTP 200 代替真正 Telegram 影片說明。
+- 固定錯誤分類須進結果 payload、工作帳本、日誌及事件歷史；「證據不足」不能混稱圖片不足、軌跡變更與視角失效。舊未分類紀錄不回填猜測。
+- 可執行門檻：`CLOUD-STORYBOARD-COLLECTION-REASONS`、`CLOUD-CAPTION-PRESERVATION`；實機證據需要 Telegram 回傳 Message 的 video 及 caption 核對，並區分歷史影格重播與正式即時部署。
+
+## 2026-11-01｜升級程序在 handle 開啟後退出
+
+r115 使用者安裝於停止 Tray 後，後續 Python 程序在二次盤點時觸發「資訊已變更」。程式將成功查詢但 PID 已消失與真實身分不符合併成同一失敗，既有測試只涵蓋開 handle 前消失，沒有涵蓋之後退出；當次原始錯誤未記錄差異欄位，不能斷言歷史 PID 消失已獲證明。修正只接受重新查詢確認不存在，路徑、命令列、建立時間變更及查詢失敗仍拒絕，最後仍需整體空清單才允許封存 App。錯誤只列 PID 與差異欄位，不輸出命令列。回歸：`UPGRADE-PROCESS-RACE` 的 `test_exit_after_handle_open_is_safe_but_identity_changes_fail_closed`。
+
+## 2026-10-31｜候選更新工作與影格時間精度
+
+- Windows Task Scheduler COM 根路徑是單一反斜線；PowerShell 字串不以反斜線跳脫，不能照抄其他語言的雙反斜線。`test_release_has_clickable_safe_relaunch_entry` 固定安裝器契約。
+- SYSTEM 更新腳本與工作目錄均置於受保護 Updater，避免 App 目前目錄被占用；embedded runtime 忽略 PYTHONPATH 時，工具須自行加入來源路徑。Task XML、真實工具啟動與安裝器語法分開驗收，不把靜態接線當成 UAC／回復成功。
+- Windows FILETIME／datetime 浮點換算可讓剛取得影格看似在未來約一微秒；量測後只允許 1 毫秒捨入誤差，明顯未來／過期資料仍拒絕，移動後影格下界不放寬。故障台帳 `SCENE-FILETIME-PRECISION` 對應邊界與位置讀回測試。
+- 測試執行期間修改來源會使整輪證據失效。此次 lint／修補後最終固定來源重跑 1,040 項且零略過，再由建置器重跑 138 項回歸；不沿用中途改碼或偶發失敗的試跑。
+
 整理日期：2026-10-12。涵蓋目前可取得的對話、repository 文件與驗收紀錄；未取得的原始資料不得補造。本文件不是功能完成清單，也不保證所有歷史問題已修復。
 
 ## 如何使用與判斷證據

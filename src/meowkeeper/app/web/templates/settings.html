@@ -443,17 +443,25 @@
 {% endif %}
 {% if page_path == '/settings/advanced' %}
 <section class="panel">
-  <div class="panel-heading"><h3>程式更新</h3><span>不影響目前監控</span></div>
-  <p>只從 kinostudio／MeowKeeperPlus 官方發布區下載，驗證簽章與完整性。此處不會自動安裝、不會觸發 UAC，也不會把你的資料上傳。身分與行為仍屬實驗性。</p>
-  <div class="actions"><button class="button" id="update-check" type="button">檢查新版</button><button class="button secondary" id="update-prepare" type="button" disabled>下載並驗證</button></div>
+  <div class="panel-heading"><h3>程式更新</h3><span>下載期間監控持續</span></div>
+  <p>只從 kinostudio／MeowKeeperPlus 官方發布區下載，並驗證簽章與完整性。安裝版首次升級會以一次 UAC 註冊固定、受限的更新工作；之後可由這裡套用更新，不必每次開安裝器。可攜版仍使用手動更新。</p>
+  <p class="notice">套用更新會短暫停止監控、錄影、通知與 Dashboard；程式設定、事件與其他資料不會隨更新覆寫。更新前會再次驗證官方套件，啟動失敗時會嘗試恢復舊版。</p>
+  <div class="actions"><button class="button" id="update-check" type="button">檢查新版</button><button class="button secondary" id="update-prepare" type="button" disabled>下載並驗證</button><button class="button" id="update-apply" type="button" hidden>套用更新</button></div>
   <p id="update-message" role="status">尚未檢查。</p>
   <div id="update-progress-region" class="update-progress-region" role="status" hidden>
     <progress id="update-progress" max="100" value="0" aria-label="更新準備進度"></progress>
     <p id="update-progress-label"></p>
   </div>
   <pre id="update-command" hidden></pre>
+  <dialog id="update-apply-dialog" aria-labelledby="update-apply-title" aria-describedby="update-apply-description">
+    <form method="dialog" class="panel">
+      <h3 id="update-apply-title">現在套用更新？</h3>
+      <p id="update-apply-description">監控核心、即時影像、錄影與 Telegram 通知會暫停幾分鐘，Dashboard 也會暫時離線。更新工作會重驗簽章與檔案；失敗時會嘗試恢復舊版。請確認現在可接受這段中斷。</p>
+      <div class="actions"><button class="button secondary" value="cancel">先不要</button><button class="button" id="update-apply-confirm" type="button">確認套用</button></div>
+    </form>
+  </dialog>
 </section>
-<script src="/static/js/updates.js?v=2" defer></script>
+<script src="/static/js/updates.js?v=3" defer></script>
 <section class="panel">
   <div class="panel-heading"><h3>完整資料備份（加密 ZIP）</h3></div>
   <p>完整備份會包含一般設定、Telegram 通知偏好、SQLite 事件／回饋、寵物登錄資料、參考照片、embeddings，以及已完成事件影片與截圖。暫存 ring cache、模型、FFmpeg 與 Python runtime 不會放入備份。</p>

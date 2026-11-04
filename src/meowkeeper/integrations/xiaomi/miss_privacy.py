@@ -213,8 +213,8 @@ class MissPrivacyAdapter:
                 try:
                     self._power(device, True)
                     powered_on = True
-                except Exception:
-                    pass
+                except (OSError, RuntimeError, ValueError, TypeError):
+                    powered_on = False
 
             if config.get("mode", "position") == "standby":
                 pose = config.get("standby_pose")
@@ -223,7 +223,7 @@ class MissPrivacyAdapter:
                 if isinstance(pose, dict):
                     try:
                         self._restore_pose(device, pose)
-                    except Exception:
+                    except (OSError, RuntimeError, ValueError, TypeError):
                         return {"success": False}
                 config["standby_restore"] = None
                 config.pop("standby_pose", None)

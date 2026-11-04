@@ -11,6 +11,7 @@ from meowkeeper.core.event_semantics import SemanticRequest, normalize_result
 from meowkeeper.core.semantic_storyboard import (
     FrameEvidence,
     FrameEvidenceBuffer,
+    StoryboardEvidenceError,
     build_storyboards,
 )
 
@@ -120,7 +121,9 @@ class StoryboardTests(unittest.TestCase):
         self.assertFalse(worker.is_alive())
         self.assertEqual(len(collected[0]), 1)
         buffer.close()
-        self.assertEqual(buffer.collect(("local-track-a",), self.trigger, wait_seconds=0), ())
+        with self.assertRaises(StoryboardEvidenceError) as caught:
+            buffer.collect(("local-track-a",), self.trigger, wait_seconds=0)
+        self.assertEqual(caught.exception.reason, "buffer_closed")
 
     def test_maximum_wait_and_memory_are_bounded(self):
         buffer = FrameEvidenceBuffer()
@@ -130,7 +133,7 @@ class StoryboardTests(unittest.TestCase):
         self.assertLessEqual(len(buffer._samples), 64)
         self.assertLessEqual(buffer._bytes, 8 * 1024 * 1024)
         with self.assertRaises(ValueError):
-            buffer.collect(("t",), self.trigger, wait_seconds=3)
+            buffer.collect(("t",), self.trigger, wait_seconds=4)
         buffer.close()
 
 

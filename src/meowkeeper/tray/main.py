@@ -15,7 +15,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from meowkeeper.runtime_paths import active_data_root_from_status
+from meowkeeper.runtime_paths import active_data_root_from_status, default_dashboard_config_path
 
 from .client import TrayApiClient, TrayApiError
 from .single_instance import SingleInstanceLock
@@ -39,7 +39,7 @@ MENU_LABELS = (
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="喵喵守護者+ Windows System Tray")
-    parser.add_argument("--base-url", default="http://127.0.0.1:8000")
+    parser.add_argument("--base-url", default=None)
     parser.add_argument("--token-env", default="MEOWKEEPER_WEB_TOKEN")
     parser.add_argument("--action", choices=("open", "health", "status", "start", "stop", "restart"), default="open")
     parser.add_argument("--confirm", action="store_true", help="確認停止或重啟背景核心")
@@ -422,13 +422,28 @@ def ensure_host(client: TrayApiClient, *, interactive: bool = True) -> bool:
     return True
 
 
+def _configured_base_url() -> str:
+    path = default_dashboard_config_path(Path(__file__).resolve().parents[3])
+    if not path.is_file():
+        return "http://127.0.0.1:8000"
+    try:
+        if path.stat().st_size > 1024 * 1024:
+            raise ValueError("設定檔過大。")
+        port = json.loads(path.read_text(encoding="utf-8")).get("dashboard", {}).get("port", 8000)
+        if type(port) is not int or not 1 <= port <= 65535:
+            raise ValueError("連線埠無效。")
+        return f"http://127.0.0.1:{port}"
+    except (OSError, ValueError, TypeError, AttributeError):
+        raise TrayApiError("無法確認已保存的 Dashboard 連線埠，未連接其他核心。") from None
+
+
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     if args.verify_menu:
         _safe_print(json.dumps(verify_menu_contract(), ensure_ascii=False, indent=2))
         return 0
     try:
-        client = TrayApiClient.from_environment(base_url=args.base_url, token_env=args.token_env)
+        client = TrayApiClient.from_environment(base_url=args.base_url or _configured_base_url(), token_env=args.token_env)
         if args.status_json:
             _safe_print(json.dumps(status_payload(client), ensure_ascii=False, indent=2))
             return 0

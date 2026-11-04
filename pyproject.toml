@@ -43,6 +43,7 @@ runtime = [
   "tzdata>=2024.1",
   "pystray>=0.19,<1",
   "pillow>=10,<12",
+  "pi-heif==1.4.0",
   "psutil>=5.9,<8",
   "pycryptodome==3.23.0",
   "websockets==15.0.1",

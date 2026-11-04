@@ -3,8 +3,11 @@ import unittest
 from pathlib import Path
 
 from meowkeeper.app.source_config import load_runtime_settings, save_runtime_settings
-from meowkeeper.app.web.contracts import SettingsValidationError, validate_settings_patch, validate_settings_with_pydantic
-from meowkeeper.core.identity.base import IdentityThresholds
+from meowkeeper.app.web.contracts import (
+    SettingsValidationError,
+    validate_settings_patch,
+    validate_settings_with_pydantic,
+)
 
 
 class IdentityThresholdsSettingsTests(unittest.TestCase):
