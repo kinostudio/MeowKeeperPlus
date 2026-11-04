@@ -29,6 +29,24 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class DeltaUpdateTests(unittest.TestCase):
+    def test_managed_hotfix_never_opens_driver_install_prompt(self):
+        installer = (ROOT / "scripts/Install-MeowKeeperPlus.ps1").read_text(encoding="utf-8")
+        guard = re.search(r"if \((-not \$HotfixManaged -and -not \$WhatIf.*?)\) \{\s*Add-Type -AssemblyName System.Windows.Forms", installer, re.DOTALL).group(1)
+        worker = (ROOT / "scripts/Apply-MeowKeeperPlusUpdate.ps1").read_text(encoding="utf-8")
+        arguments = next(line for line in worker.splitlines() if "$installerArgs = @(" in line)
+        self.assertIn("'-SkipCpuTemperature'", arguments)
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            (root / "vendor/cpu-sensor").mkdir(parents=True)
+            (root / "vendor/cpu-sensor/manifest.json").write_text("{}")
+            quoted = "'" + str(root).replace("'", "''") + "'"
+            command = "$packageRoot=" + quoted + ";$WhatIf=$false;$EnableCpuTemperature=$false;$SkipCpuTemperature=$false;"
+            command += "$HotfixManaged=$true;if(" + guard + "){throw 'managed_update_prompt'};"
+            command += "$HotfixManaged=$false;if(-not(" + guard + ")){throw 'manual_install_prompt_missing'}"
+            result = subprocess.run(["powershell.exe", "-NoProfile", "-Command", command],
+                                    capture_output=True, timeout=10, check=False, shell=False)
+            self.assertEqual(result.returncode, 0, result.stderr.decode(errors="replace"))
+
     def test_download_size_labels_use_correct_decimal_units(self):
         source = (ROOT / "src/meowkeeper/app/web/static/js/updates.js").read_text(encoding="utf-8")
         function = re.search(r"  function formatBytes\(value\) \{.*?\n  \}", source, re.DOTALL).group(0)

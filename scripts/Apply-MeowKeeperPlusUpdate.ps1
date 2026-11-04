@@ -411,7 +411,7 @@ try {
     Write-UpdateStatus 'applying' '套件已再次驗證；正在短暫停止監控並切換程式版本。' $version
     $powershell = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
     $installer = Join-Path $packageRoot 'scripts\Install-MeowKeeperPlus.ps1'
-    $installerArgs = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $installer, '-Upgrade', '-HotfixManaged', '-TrayUserSid', $traySid, '-HotfixResultPath', $installerResultPath, '-HotfixOldManifestSha256', $oldManifestHash)
+    $installerArgs = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $installer, '-Upgrade', '-HotfixManaged', '-SkipCpuTemperature', '-TrayUserSid', $traySid, '-HotfixResultPath', $installerResultPath, '-HotfixOldManifestSha256', $oldManifestHash)
     if ($coreSid -ne $systemSid) { $installerArgs += @('-UserHost', '-HostUserSid', $coreSid) }
     $updateStarted = $true
     Invoke-BoundedProcess $powershell $installerArgs 1800 | Out-Null

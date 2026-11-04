@@ -2,6 +2,8 @@
 
 ## 2026-11-05｜一鍵套用不等於差量下載
 
+- SYSTEM 更新不得顯示互動式驅動選項。worker 明確傳入 `-SkipCpuTemperature`，安裝器亦排除 HotfixManaged 的首次安裝提示；`MANAGED-HOTFIX-NO-DRIVER-PROMPT` 實際評估 PowerShell 條件，防止 Session 0 卡在對話框。
+
 - 更新進度的 byte→KB→MB→GB 必須與除數一致；不能先除以 1000 卻從 MB 開始標示。以實際 JavaScript 格式函式的 Node 回歸 `UPDATE-DOWNLOAD-SIZE-UNITS` 防止小型差量被誤標成 GB。
 
 - 完整包交換即使能自動套用／回滾，也不能宣稱只下載變更。發布需檢查差量 ZIP 真正檔案清單，未變 runtime、CUDA、FFmpeg、模型應為零。

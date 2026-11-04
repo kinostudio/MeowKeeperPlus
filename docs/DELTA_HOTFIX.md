@@ -22,6 +22,8 @@
 
 重新使用安全更新交易：停止已驗證的舊程序、備份 Data（含 SQLite 一致性快照）、保存 Core／Tray 工作定義與舊 App，再切換及檢查健康。失敗嘗試恢復 App、Data 與排程；保留失敗現場，不能只恢復程式卻宣稱資料已回復。
 
+受控更新明確跳過選用測溫驅動安裝提示，不在 SYSTEM Session 0 顯示對話框，也不重新安裝驅動；既有測溫背景工作保留。
+
 ## 驗收邊界
 
 `tests/test_delta_updates.py` 驗證僅變更檔案、簽章／基準／路徑／ZIP 防護、已知修正基準、無完整包回退、下載前拒絕及 worker 重建；`tests/test_hotfix_transaction.py` 驗證隔離檔案與 SQLite 回復。發布前另做真實候選包重建、逐檔完整性與包內 HTTP smoke。

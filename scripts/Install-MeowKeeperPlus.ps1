@@ -841,7 +841,7 @@ function Write-InstallOutcome {
 }
 
 if ($EnableCpuTemperature -and $SkipCpuTemperature) { throw 'CPU 溫度選項互相衝突。' }
-if (-not $WhatIf -and -not $EnableCpuTemperature -and -not $SkipCpuTemperature -and
+if (-not $HotfixManaged -and -not $WhatIf -and -not $EnableCpuTemperature -and -not $SkipCpuTemperature -and
     (Test-Path -LiteralPath (Join-Path $packageRoot 'vendor\cpu-sensor\manifest.json'))) {
     Add-Type -AssemblyName System.Windows.Forms
     $cpuChoice = [System.Windows.Forms.MessageBox]::Show(
