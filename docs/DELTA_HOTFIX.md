@@ -35,3 +35,23 @@
 `tests/test_delta_updates.py` 驗證僅變更檔案、簽章／基準／路徑／ZIP 防護、已知修正基準、無完整包回退、下載前拒絕及 worker 重建；`tests/test_hotfix_transaction.py` 驗證隔離檔案與 SQLite 回復。發布前另做真實候選包重建、逐檔完整性與包內 HTTP smoke。
 
 上述不等於正式 Host 的 SYSTEM 排程、UAC、真實停止／啟動、斷電恢復或正式資料回滾驗收。正式安裝由使用者執行，未實測項目必須標記 `not_checked`。
+
+## r118 更新命令
+
+[官方 r118 候選](https://github.com/kinostudio/MeowKeeperPlus/releases/tag/r118) 已通過完整1078／回歸177、實際包重建與隔離 HTTP 啟動驗收；三個公開資產下載與簽章／SHA-256均已核對。差量 ZIP 1,367,346 bytes、30個變更檔，runtime／vendor／models變更檔為零。正式安裝與斷電／正式資料回復尚未驗收。
+
+只適用本頁列出的精確 r116 基準。請在要更新的電腦上，親自開啟**管理員 Windows PowerShell**，貼上以下命令。r116尚不認識差量協定，因此首次使用6.5KB過渡工具；不需要先下載大型新版程式包。套用會短暫停止監控，並需要本機重建與備份空間。
+
+```powershell
+$ErrorActionPreference = 'Stop'
+[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+$hotfixTool = Join-Path $env:TEMP 'MeowKeeperPlus-r118-delta-bootstrap.pyz'
+$pythonPath = Join-Path $env:ProgramData 'MeowKeeperPlus\App\runtime\python\python.exe'
+if (-not (Test-Path -LiteralPath $pythonPath)) { throw '找不到既有安裝版 Python；未開始更新。' }
+Invoke-WebRequest -UseBasicParsing -Uri 'https://github.com/kinostudio/MeowKeeperPlus/releases/download/r118/MeowKeeperPlus-r118-delta-bootstrap.pyz' -OutFile $hotfixTool
+if ((Get-FileHash -LiteralPath $hotfixTool -Algorithm SHA256).Hash.ToLowerInvariant() -ne 'fddf1f4e94b6df7e403da018d7056d55b6424895ab0e7cf619be452a43373861') { throw '過渡工具校驗失敗，停止更新。' }
+& $pythonPath -B $hotfixTool --version r118 --apply
+if ($LASTEXITCODE -ne 0) { throw '差量更新未完成；請保留程式與備份，不要改抓完整包或重複執行。' }
+```
+
+工具先核對簽章與全檔案基準，再下載差量；不符就停止，沒有完整包自動回退。不要將ZIP直接覆蓋到App，也不要同時執行多個更新。

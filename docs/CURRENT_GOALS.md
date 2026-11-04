@@ -2,6 +2,8 @@
 
 ## 2026-11-05｜真正檔案差量 hotfix
 
+- [r118 候選已公開](https://github.com/kinostudio/MeowKeeperPlus/releases/tag/r118)：完整1078／回歸177零略過、實際重建21358檔、r116內附Python準備流程與包內HTTP smoke通過，公開下載／簽章／SHA-256再驗通過。差量1367346 bytes，30檔、無大型依賴；正式Host未由開發流程安裝，正式SYSTEM換版／資料回滾／斷電恢復仍為not_checked。
+
 - r116 一次性小型過渡工具與 schema 2 差量驗證／本機重建已接線；未變 runtime、CUDA、FFmpeg、模型不下載。精確基準不符即停止，沒有完整包回退。
 - 重新使用 App／Data／工作定義回復交易；隔離回歸、候選包重建與正式安裝驗收分開記錄。規格見 [DELTA_HOTFIX.md](DELTA_HOTFIX.md)。正式 Host 不由開發流程自動升級。
 
