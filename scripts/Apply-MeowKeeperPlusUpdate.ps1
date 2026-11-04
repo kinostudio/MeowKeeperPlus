@@ -1,6 +1,7 @@
 param(
     [string]$AppRoot = (Join-Path $env:ProgramData 'MeowKeeperPlus\App'),
-    [string]$DataRoot = (Join-Path $env:ProgramData 'MeowKeeperPlus\Data')
+    [string]$DataRoot = (Join-Path $env:ProgramData 'MeowKeeperPlus\Data'),
+    [string]$VerifierRoot = ''
 )
 
 $ErrorActionPreference = 'Stop'
@@ -330,10 +331,19 @@ function Wait-ForDashboard([int]$TimeoutSeconds = 60, [string]$ConfigDataRoot = 
 }
 
 try {
-    if ([Security.Principal.WindowsIdentity]::GetCurrent().User.Value -ne 'S-1-5-18') { throw 'worker_requires_system' }
+    $isSystem = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value -eq 'S-1-5-18'
+    $isAdministrator = ([Security.Principal.WindowsPrincipal]::new([Security.Principal.WindowsIdentity]::GetCurrent())).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+    if (-not $isSystem -and -not $isAdministrator) { throw 'worker_requires_system' }
     if (-not [StringComparer]::OrdinalIgnoreCase.Equals($AppRoot, $expectedApp) -or
         -not [StringComparer]::OrdinalIgnoreCase.Equals($DataRoot, $expectedData)) { throw 'install_roots_mismatch' }
     Assert-PlainPath $updaterRoot
+    if ($VerifierRoot) {
+        $VerifierRoot = [IO.Path]::GetFullPath($VerifierRoot)
+        if (-not $isAdministrator -or [IO.Path]::GetDirectoryName($VerifierRoot) -ne [IO.Path]::GetFullPath($updaterRoot) -or
+            [IO.Path]::GetFileName($VerifierRoot) -notmatch '^bootstrap-[a-f0-9]{32}$') { throw 'bootstrap_verifier_root_invalid' }
+        Assert-PlainPath $VerifierRoot
+        if (-not (Test-TreeWithoutReparsePoints $VerifierRoot)) { throw 'bootstrap_verifier_reparse_point' }
+    } else { $VerifierRoot = $AppRoot }
     Set-Location -LiteralPath $updaterRoot
     Assert-PlainPath $AppRoot
     Assert-PlainPath $DataRoot
@@ -386,7 +396,7 @@ try {
     $oldManifestHash = (Get-FileHash -Algorithm SHA256 -LiteralPath (Join-Path $AppRoot 'build_manifest.json')).Hash
 
     $python = Join-Path $AppRoot 'runtime\python\python.exe'
-    $verifyTool = Join-Path $AppRoot 'tools\apply_verified_update.py'
+    $verifyTool = Join-Path $VerifierRoot 'tools\apply_verified_update.py'
     $stageArgs = @($verifyTool, '--archive', (Join-Path $workRoot 'package.zip'), '--envelope', (Join-Path $workRoot 'update-manifest.json'), '--app-root', $AppRoot, '--stage-root', $workRoot)
     $env:PYTHONDONTWRITEBYTECODE = '1'
     $env:PYTHONPATH = Join-Path $AppRoot 'src'

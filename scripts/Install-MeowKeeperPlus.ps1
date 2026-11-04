@@ -40,8 +40,10 @@ if ($UserHost) {
     $interactiveUserSid = $HostUserSid
 }
 $trayTaskUserSid = if ($TrayUserSid) { $TrayUserSid } else { $interactiveUserSid }
-if ($HotfixManaged -and ($CurrentUser -or -not $Upgrade -or $SkipStart -or $currentProcessSid -ne 'S-1-5-18' -or [string]::IsNullOrWhiteSpace($HotfixResultPath) -or -not $HotfixOldManifestSha256)) {
-    throw '安全更新工作只能以 SYSTEM 身分更新既有的 ProgramData 安裝；拒絕使用其他升級路徑。'
+if ($HotfixManaged -and ($CurrentUser -or -not $Upgrade -or $SkipStart -or
+    ($currentProcessSid -ne 'S-1-5-18' -and -not ([Security.Principal.WindowsPrincipal]::new([Security.Principal.WindowsIdentity]::GetCurrent())).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) -or
+    [string]::IsNullOrWhiteSpace($HotfixResultPath) -or -not $HotfixOldManifestSha256)) {
+    throw '安全更新工作只能以 SYSTEM 或使用者明確授權的管理員更新既有的 ProgramData 安裝。'
 }
 if (-not $HotfixManaged -and $HotfixResultPath) { throw '更新結果路徑只允許由受保護的更新工作使用。' }
 if ($HotfixManaged) {

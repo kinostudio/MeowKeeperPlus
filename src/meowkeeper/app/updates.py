@@ -37,6 +37,9 @@ def verify_envelope(envelope, public_key):
     manifest = envelope["manifest"]
     eddsa.new(ECC.import_key(public_key), "rfc8032").verify(
         canonical(manifest), base64.b64decode(envelope["signature"], validate=True))
+    if manifest.get("schema") == 2:
+        from meowkeeper.app.delta_update import validate_manifest
+        return validate_manifest(manifest)
     if (manifest.get("schema") != 1 or manifest.get("repository") != REPOSITORY
             or not re.fullmatch(r"r[1-9]\d*", manifest.get("version", ""))
             or not re.fullmatch(r"r[1-9]\d*", manifest.get("tag", ""))
@@ -351,15 +354,23 @@ class UpdateManager:
             from meowkeeper.app.web.release_info import release_information
             current = release_information(self.app_root)["version"]
             available = not re.fullmatch(r"r\d+", current) or int(manifest["version"][1:]) > int(current[1:])
+            if available and manifest.get("kind") != "file_delta":
+                self._manifest = self._envelope = None
+                self.state = {"status": "failed", "reason": "delta_unavailable",
+                              "message_zh_tw": "發布區尚未提供適用的差量包；不會自動下載完整包。監控持續。"}
+                return
             self._manifest = manifest if available else None
             self._envelope = envelope if available else None
+            if available and manifest.get("kind") == "file_delta":
+                from meowkeeper.app.delta_update import validate_base
+                validate_base(self.app_root, manifest)
             self.state = {"status": "available" if available else "current", "version": manifest["version"],
-                          "message_zh_tw": "找到新版，簽章驗證成功；下載不會停止監控。" if available else "目前版本無需更新。"}
+                          "message_zh_tw": ("找到已簽章差量更新；只下載變更檔案，不會下載完整包。" if manifest.get("kind") == "file_delta" else "找到新版，簽章驗證成功；下載不會停止監控。") if available else "目前版本無需更新。"}
         except Exception as error:  # noqa: BLE001 - network cannot stop media
             self._manifest = None
             self._envelope = None
             self.state = {"status": "failed", "error_type": type(error).__name__,
-                          "message_zh_tw": "更新檢查未完成；可能尚未發布、網路不可達或簽章不符。原監控不受影響。"}
+                          "message_zh_tw": "更新檢查未完成；可能版本基準／安裝檔案不符、網路不可達或簽章不符。不會自動下載完整包，原監控不受影響。"}
         finally:
             self._lock.release()
 
@@ -375,6 +386,9 @@ class UpdateManager:
             if self._envelope is None:
                 raise ValueError("缺少已驗證的官方簽章資料，請重新檢查新版。")
             manifest = dict(self._manifest)
+            if manifest.get("kind") == "file_delta":
+                from meowkeeper.app.delta_update import validate_base
+                validate_base(self.app_root, manifest)
             version = manifest["version"]
             total_download = manifest["size"]
             downloaded = 0
@@ -485,7 +499,15 @@ class UpdateManager:
             self._report_progress(version, "extract", "準備解壓更新檔",
                                   completed=0, total=extract_total,
                                   downloaded=downloaded, total_download=total_download)
-            safe_extract(archive, package, on_progress=report_extract_progress)
+            if manifest.get("kind") == "file_delta":
+                from meowkeeper.app.delta_update import assemble
+                self._report_progress(version, "rebuild", "在本機重用未變更檔案（不下載 runtime／模型）",
+                                      downloaded=downloaded, total_download=total_download)
+                assemble(self.app_root, archive, manifest, package,
+                         on_file=lambda done, total: self._report_progress(version, "rebuild", "本機重建差量版本",
+                             completed=done, total=total, downloaded=downloaded, total_download=total_download))
+            else:
+                safe_extract(archive, package, on_progress=report_extract_progress)
             # Reuse strict release verification; never relax data boundaries.
             import importlib.util
             self._report_progress(version, "verify_package", "驗證程式檔案清單與完整性",

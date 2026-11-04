@@ -26,4 +26,6 @@ Windows 本地寵物監控：共用攝影機影音來源、事件影片、Telegr
 私人設定、金鑰、資料庫、攝影機畫面、實機量測與操作紀錄只保存在使用者本機。安全管理見 [安全規範](docs/SECURITY.md)。
 # 安全更新整合候選
 
+r118 新增真正的簽章檔案差量：未變 runtime／CUDA／FFmpeg／模型不下載，精確基準不符即停止、不自動改抓完整包。[差量更新契約與驗收邊界](docs/DELTA_HOTFIX.md)。套用仍會短暫中斷；正式 Host 升級由使用者執行。
+
 已發布 [r117 候選版](https://github.com/kinostudio/MeowKeeperPlus/releases/tag/r117)。整合與驗收邊界見 [r117 安全更新](docs/R117_SAFE_HOTFIX.md)：包含三秒拼貼與雲端說明修正，更新採官方簽章及資料快照，不直接覆蓋 Git 原始碼。正式 SYSTEM 更新交易仍待使用者安裝後驗收，不能將隔離測試等同正式部署成功。

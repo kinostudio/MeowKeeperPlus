@@ -14,10 +14,6 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT / "src") not in sys.path:
     sys.path.insert(0, str(ROOT / "src"))
 
-from meowkeeper.app.updates import safe_extract, verify_envelope
-from meowkeeper.app.web.release_info import release_information
-
-
 def _is_reparse(path: Path) -> bool:
     try:
         attributes = path.stat(follow_symlinks=False).st_file_attributes
@@ -56,6 +52,19 @@ def verify_and_stage(
             raise ValueError("更新驗證路徑無效。")
     archive_size = archive.stat().st_size
     envelope = json.loads(envelope_path.read_text(encoding="utf-8"))
+    if envelope.get("manifest", {}).get("schema") == 2:
+        import importlib.util
+        module_path = ROOT / "src/meowkeeper/app/delta_update.py"
+        spec = importlib.util.spec_from_file_location("signed_delta_verifier", module_path)
+        delta = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(delta)
+        manifest = delta.verify_delta(envelope, (app_root / "configs/update-public.pem").read_bytes())
+        package = stage_root / "app"
+        delta.assemble(app_root, archive, manifest, package)
+        return {"status": "staged", "version": manifest["version"], "package_path": str(package)}
+    from meowkeeper.app.updates import safe_extract, verify_envelope
+    from meowkeeper.app.web.release_info import release_information
+
     manifest = verify_envelope(envelope, (app_root / "configs" / "update-public.pem").read_bytes())
     if archive_size != manifest["size"] or _digest(archive) != manifest["sha256"].lower():
         raise ValueError("官方更新套件簽章或 SHA-256 校驗不符。")

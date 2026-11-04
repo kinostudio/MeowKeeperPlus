@@ -222,6 +222,7 @@ PUBLIC_PACKAGE_DOCS = ("README.md", "docs/PUBLIC_USER_GUIDE.md")
 PUBLIC_RUNTIME_TOOLS = (
     "__init__.py",
     "apply_verified_update.py",
+    "bootstrap_delta.py",
     "hotfix_data_snapshot.py",
     "close_application.py",
     "create_task_scheduler_xml.py",
