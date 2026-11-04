@@ -62,10 +62,9 @@ def main() -> int:
         if not args.apply:
             print("差量下載與簽章驗證完成，尚未停止監控或安裝。")
             return 0
-        request = data / "updates/apply-request.json"
-        if request.exists():
+        if (data / "updates/apply-request.json").exists():
             raise ValueError("已有更新要求，拒絕重複套用。")
-        request.parent.mkdir(parents=True, exist_ok=True)
+        request = payload / "apply-request.json"
         prepared = request.parent / ("prepared-" + uuid.uuid4().hex)
         prepared.mkdir()
         for name in ("package.zip", "update-manifest.json"):

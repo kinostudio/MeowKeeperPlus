@@ -1,6 +1,7 @@
 {
   "schema_version": 1,
   "incidents": [
+    {"id": "DELTA-BOOTSTRAP-PROTECTED-REQUEST", "title": "管理員過渡工具只在受保護Updater建立要求與套件，不對使用者可寫Data建立高權限檔案", "tests": ["tests.test_delta_updates.DeltaUpdateTests.test_admin_bootstrap_stages_requests_only_under_protected_updater"]},
     {"id": "MANAGED-HOTFIX-NO-DRIVER-PROMPT", "title": "受控hotfix跳過測溫驅動提示，避免SYSTEM Session 0對話框卡住", "tests": ["tests.test_delta_updates.DeltaUpdateTests.test_managed_hotfix_never_opens_driver_install_prompt"]},
     {"id": "UPDATE-DOWNLOAD-SIZE-UNITS", "title": "下載進度大小單位不得將MB誤顯示為GB", "tests": ["tests.test_delta_updates.DeltaUpdateTests.test_download_size_labels_use_correct_decimal_units"]},
     {"id": "DELTA-PROTECTED-WORKER-STAGING", "title": "受保護更新工作重新驗證差量簽章與精確重建，不修改原App", "tests": ["tests.test_delta_updates.DeltaUpdateTests.test_protected_worker_reverifies_and_stages_delta"]},

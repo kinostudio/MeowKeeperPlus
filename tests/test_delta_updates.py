@@ -1,6 +1,7 @@
 import base64
 import copy
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -22,6 +23,7 @@ from meowkeeper.app.delta_update import (
 )
 from meowkeeper.app.updates import UpdateManager, canonical, verify_envelope
 from tools.apply_verified_update import verify_and_stage
+from tools.bootstrap_delta import main as bootstrap_main
 from tools.bootstrap_delta import prepare
 from tools.prepare_delta_release import build_delta
 
@@ -29,6 +31,37 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class DeltaUpdateTests(unittest.TestCase):
+    def test_admin_bootstrap_stages_requests_only_under_protected_updater(self):
+        install = self.root / "MeowKeeperPlus"
+        app, data, updater = install / "App", install / "Data", install / "Updater"
+        shutil.copytree(self.base, app)
+        data.mkdir()
+        updater.mkdir()
+        commands = []
+        def fetch(_manager, url, destination, _limit):
+            shutil.copy2(self.out / url.rsplit("/", 1)[1], destination)
+        def execute(arguments, **_options):
+            commands.append(arguments)
+            if arguments[0] == "powershell.exe":
+                payload = Path(arguments[arguments.index("-VerifierRoot") + 1])
+                self.assertEqual(payload.parent, updater)
+                request = json.loads((payload / "apply-request.json").read_text())
+                prepared = payload / request["prepared_id"]
+                self.assertEqual(digest(prepared / "package.zip"), digest(self.archive))
+                self.assertFalse((data / "updates/apply-request.json").exists())
+                (updater / "hotfix-status.json").write_text(json.dumps({"request_id": request["request_id"], "status": "applied"}))
+            return subprocess.CompletedProcess(arguments, 0)
+        with patch.dict(os.environ, {"ProgramData": str(self.root)}), \
+                patch("sys.argv", ["bootstrap", "--version", "r118", "--apply"]), \
+                patch("tools.bootstrap_delta.ctypes.windll.shell32.IsUserAnAdmin", return_value=True), \
+                patch.object(UpdateManager, "_download", fetch), \
+                patch("tools.bootstrap_delta.subprocess.run", side_effect=execute):
+            self.assertEqual(bootstrap_main(), 0)
+        self.assertEqual(len(commands), 2)
+        self.assertEqual(list(data.rglob("*")), [])
+        worker = (ROOT / "scripts/Apply-MeowKeeperPlusUpdate.ps1").read_text(encoding="utf-8")
+        self.assertIn("$updatesRoot = $VerifierRoot", worker)
+
     def test_managed_hotfix_never_opens_driver_install_prompt(self):
         installer = (ROOT / "scripts/Install-MeowKeeperPlus.ps1").read_text(encoding="utf-8")
         guard = re.search(r"if \((-not \$HotfixManaged -and -not \$WhatIf.*?)\) \{\s*Add-Type -AssemblyName System.Windows.Forms", installer, re.DOTALL).group(1)

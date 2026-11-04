@@ -343,6 +343,8 @@ try {
             [IO.Path]::GetFileName($VerifierRoot) -notmatch '^bootstrap-[a-f0-9]{32}$') { throw 'bootstrap_verifier_root_invalid' }
         Assert-PlainPath $VerifierRoot
         if (-not (Test-TreeWithoutReparsePoints $VerifierRoot)) { throw 'bootstrap_verifier_reparse_point' }
+        $updatesRoot = $VerifierRoot
+        $requestPath = Join-Path $updatesRoot 'apply-request.json'
     } else { $VerifierRoot = $AppRoot }
     Set-Location -LiteralPath $updaterRoot
     Assert-PlainPath $AppRoot

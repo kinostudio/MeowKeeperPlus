@@ -2,6 +2,8 @@
 
 ## 2026-11-05｜一鍵套用不等於差量下載
 
+- 管理員過渡工具的要求與暫存也必須留在受保護 Updater，不能以管理員權限向一般帳號可改動的 Data／prepared 目錄複製檔案，避免重新解析點／檔案替換競態。回歸：`DELTA-BOOTSTRAP-PROTECTED-REQUEST`。
+
 - SYSTEM 更新不得顯示互動式驅動選項。worker 明確傳入 `-SkipCpuTemperature`，安裝器亦排除 HotfixManaged 的首次安裝提示；`MANAGED-HOTFIX-NO-DRIVER-PROMPT` 實際評估 PowerShell 條件，防止 Session 0 卡在對話框。
 
 - 更新進度的 byte→KB→MB→GB 必須與除數一致；不能先除以 1000 卻從 MB 開始標示。以實際 JavaScript 格式函式的 Node 回歸 `UPDATE-DOWNLOAD-SIZE-UNITS` 防止小型差量被誤標成 GB。

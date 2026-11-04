@@ -14,6 +14,8 @@
 
 過渡工具只接受固定官方版本網址，使用已安裝的官方公鑰驗證差量簽章；先驗基準，再下載 ZIP。已驗證的新 worker／驗證器置於 Administrators／SYSTEM 保護的 Updater 目錄，只有使用者明確 `--apply` 才呼叫受控換版流程。不自行觸發 UAC。
 
+過渡工具的更新要求、差量封存及 verifier 也全部位於受保護的 Updater 子目錄；不以管理員權限向一般帳號可寫的 Data 更新暫存複製檔案。固定 SYSTEM 的日常 Dashboard 路徑仍會先複製至受保護目錄並重新驗證。
+
 本次 r116→r118 包的基準為官方 r116 加上一份已知、已公開的 `src/meowkeeper/app/web/state.py` 修正；該檔案的確切大小與 SHA-256 另列於簽章 `base_overrides`。這不是允許任意修改：其他內容或未包含該修正的 r116 會拒絕套用。基準不符需另外製作對應的簽章差量，不自動下載完整包。
 
 後續版本由既有固定 SYSTEM 更新工作處理新協定；Dashboard 仍須本機登入、CSRF 與明確中斷確認。不接受任意下載網址、命令或 verifier 路徑。
