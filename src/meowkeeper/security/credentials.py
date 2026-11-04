@@ -336,7 +336,7 @@ class TelegramCredentialStore:
                 logging.getLogger(__name__).debug("選用資料處理未完成；沿用安全備援結果。")
         if getattr(self, "_shared_vision_path", None) and self._shared_vision_path.is_file():
             try:
-                data = json.loads(self._shared_vision_path.read_text(encoding="utf-8"))
+                data = self._read_shared_vision()
                 if isinstance(data, dict):
                     return str(data.get(profile_reference) or "")
             except (OSError, RuntimeError, ValueError, TypeError):
@@ -350,14 +350,52 @@ class TelegramCredentialStore:
             raise CredentialStoreError("Windows Credential Manager 不可用，視覺服務金鑰未保存。")
         if not isinstance(value, str) or not value or len(value) > 4096 or "\r" in value or "\n" in value:
             raise ValueError("視覺服務金鑰格式不正確。")
-        self._write(self._vision_target(profile_reference), value)
+        target = self._vision_target(profile_reference)
+        saved = False
+        try:
+            self._write(target, value)
+            saved = True
+        except CredentialStoreError:
+            if not getattr(self, "_shared_vision_path", None):
+                raise
+        try:
+            self._update_shared_vision(profile_reference, value)
+        except (OSError, ValueError, TypeError):
+            if not saved:
+                raise CredentialStoreError("視覺服務金鑰未保存；原有設定未清除。") from None
+
+    def _read_shared_vision(self) -> dict:
+        raw = self._shared_vision_path.read_bytes()
+        # Legacy shared JSON is read locally; every new write is machine-DPAPI encrypted.
+        decoded = raw if raw.lstrip().startswith(b"{") else self._dpapi(raw, protect=False)
+        return json.loads(decoded.decode("utf-8"))
+
+    def _update_shared_vision(self, reference: str, value: str | None) -> None:
+        path = getattr(self, "_shared_vision_path", None)
+        if path is None:
+            return
+        current = self._read_shared_vision() if path.is_file() else {}
+        if not isinstance(current, dict):
+            raise TypeError("共用金鑰格式無效，拒絕覆寫。")
+        if value is None:
+            current.pop(reference, None)
+        else:
+            current[reference] = value
+        path.parent.mkdir(parents=True, exist_ok=True)
+        temporary = path.with_suffix(".tmp")
+        try:
+            temporary.write_bytes(self._dpapi(json.dumps(current, ensure_ascii=False).encode("utf-8"), protect=True, machine=True))
+            temporary.replace(path)
+        finally:
+            temporary.unlink(missing_ok=True)
 
     def delete_vision_key(self, profile_reference: str) -> None:
         if self._use_dpapi:
             raise CredentialStoreError("Windows Credential Manager 不可用，視覺服務金鑰未清除。")
         self._delete(self._vision_target(profile_reference))
+        self._update_shared_vision(profile_reference, None)
 
-    def _dpapi(self, payload: bytes, *, protect: bool) -> bytes:
+    def _dpapi(self, payload: bytes, *, protect: bool, machine: bool = False) -> bytes:
         source = ctypes.create_string_buffer(payload)
         input_blob = _DataBlob(len(payload), ctypes.cast(source, ctypes.POINTER(ctypes.c_ubyte)))
         output_blob = _DataBlob()
@@ -368,7 +406,7 @@ class TelegramCredentialStore:
                 None,
                 None,
                 None,
-                1,
+                5 if machine else 1,
                 ctypes.byref(output_blob),
             )
         else:
@@ -466,6 +504,7 @@ class TelegramCredentialStore:
                 {
                     "alias": item.alias,
                     "recipient_id": item.recipient_id,
+                    "chat_id": item.chat_id,
                     "chat_id_masked": _mask_chat_id(item.chat_id),
                     "enabled": item.enabled,
                     "role": item.role,

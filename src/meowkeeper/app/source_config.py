@@ -39,6 +39,8 @@ RUNTIME_SETTING_DEFAULTS: dict[str, Any] = {
     "event_post_seconds": 10.0,
     "retention_seconds": 60.0,
     "ring_maximum_size_mb": 512.0,
+    "event_video_max_age_days": 30,
+    "event_video_max_bytes": 3 * 1024 ** 3,
     "dashboard_auto_open": False,
     "telegram_startup_notice": False,
 }
@@ -57,6 +59,8 @@ _RUNTIME_SETTING_RANGES: dict[str, tuple[float, float]] = {
     "event_post_seconds": (0.0, 180.0),
     "retention_seconds": (10.0, 120.0),
     "ring_maximum_size_mb": (16.0, 4096.0),
+    "event_video_max_age_days": (1.0, 3650.0),
+    "event_video_max_bytes": (104857600.0, 214748364800.0),
 }
 
 
@@ -250,7 +254,7 @@ def _coerce_runtime_setting(name: str, value: Any) -> Any:
             return default
         if name == "analysis_width" and int(number) not in {640, 960, 1280, 1920}:
             return default
-        return int(number) if name.endswith("_fps") or name in {"identity_frame_width", "preview_frame_width", "analysis_width"} else number
+        return int(number) if name.endswith("_fps") or name in {"identity_frame_width", "preview_frame_width", "analysis_width", "event_video_max_age_days", "event_video_max_bytes"} else number
     return value if isinstance(value, bool) else default
 
 

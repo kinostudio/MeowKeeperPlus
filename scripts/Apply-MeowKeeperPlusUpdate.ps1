@@ -25,6 +25,59 @@ $workRoot = $null
 $taskRecords = @()
 $updateStarted = $false
 $oldManifestHash = $null
+$installerResultPath = $null
+$version = ''
+$updateSucceeded = $false
+
+function Invoke-BoundedProcess([string]$Executable, [string[]]$Arguments, [int]$TimeoutSeconds) {
+    $outputPath = Join-Path $workRoot ('process-' + [guid]::NewGuid().ToString('N') + '.txt')
+    $errorPath = $outputPath + '.error'
+    $quoted = @($Arguments | ForEach-Object {
+        if ($_ -match '["\r\n]') { throw 'process_argument_invalid' }
+        '"' + $_ + '"'
+    })
+    $process = Start-Process -FilePath $Executable -ArgumentList ($quoted -join ' ') -PassThru -WindowStyle Hidden -RedirectStandardOutput $outputPath -RedirectStandardError $errorPath
+    try {
+        $null = $process.Handle
+        if (-not $process.WaitForExit($TimeoutSeconds * 1000)) {
+            $process.Kill()
+            [void]$process.WaitForExit(10000)
+            throw 'update_process_timeout'
+        }
+        if ($process.ExitCode -ne 0) { throw 'update_process_failed' }
+        if (Test-Path -LiteralPath $outputPath -PathType Leaf) { Get-Content -LiteralPath $outputPath -Encoding UTF8 }
+    } finally { $process.Dispose() }
+}
+
+function Stop-UpdateProcesses {
+    foreach ($taskName in @($coreTaskName, $trayTaskName)) {
+        & "$env:SystemRoot\System32\schtasks.exe" /End /TN $taskName *> $null
+    }
+    $prefix = [IO.Path]::GetFullPath($AppRoot).TrimEnd('\') + '\'
+    $processes = @(Get-CimInstance Win32_Process -ErrorAction Stop | Where-Object {
+        $_.ExecutablePath -and $_.ExecutablePath.StartsWith($prefix, [StringComparison]::OrdinalIgnoreCase)
+    })
+    foreach ($snapshot in $processes) {
+        $current = Get-CimInstance Win32_Process -Filter ("ProcessId = {0}" -f $snapshot.ProcessId) -ErrorAction Stop
+        if (-not $current) { continue }
+        if ($current.ExecutablePath -ne $snapshot.ExecutablePath -or $current.CreationDate -ne $snapshot.CreationDate) {
+            throw 'rollback_process_identity_changed'
+        }
+        $handle = $null
+        try {
+            try { $handle = [Diagnostics.Process]::GetProcessById([int]$snapshot.ProcessId) }
+            catch [ArgumentException] { continue }
+            if ([Math]::Abs(($handle.StartTime.ToUniversalTime() - $snapshot.CreationDate.ToUniversalTime()).TotalMilliseconds) -gt 1) {
+                throw 'rollback_process_handle_changed'
+            }
+            $handle.Kill()
+            if (-not $handle.WaitForExit(15000)) { throw 'rollback_process_exit_timeout' }
+        } finally { if ($handle) { $handle.Dispose() } }
+    }
+    if (@(Get-CimInstance Win32_Process -ErrorAction Stop | Where-Object {
+        $_.ExecutablePath -and $_.ExecutablePath.StartsWith($prefix, [StringComparison]::OrdinalIgnoreCase)
+    }).Count -gt 0) { throw 'rollback_processes_remain' }
+}
 
 function Write-UpdateStatus([string]$Status, [string]$Message, [string]$Version = '') {
     try {
@@ -121,6 +174,8 @@ function Restore-TaskRecords {
         $sddl = [IO.File]::ReadAllText($record.SddlPath, [Text.Encoding]::UTF8)
         $restored = $folder.RegisterTask($record.Name, $xml, 6, $null, $null, 0, $sddl)
         if ($null -eq $restored) { throw 'task_restore_failed' }
+    }
+    foreach ($record in $taskRecords) {
         if ($record.WasRunning -and $record.Name -ne 'MeowKeeperPlus Update Worker') {
             & "$env:SystemRoot\System32\schtasks.exe" /Run /TN $record.Name *> $null
             if ($LASTEXITCODE -ne 0) { throw 'task_restart_failed' }
@@ -210,22 +265,28 @@ function Test-TreeWithoutReparsePoints([string]$Root) {
 function Restore-PreviousApp([string]$ResultPath, [string]$ExpectedOldHash) {
     if (-not (Test-Path -LiteralPath $ResultPath -PathType Leaf)) { return $false }
     $payload = Get-Content -Raw -LiteralPath $ResultPath | ConvertFrom-Json
-    if ($payload.schema -ne 1 -or $payload.status -ne 'installed_health_passed' -or
+    if ($payload.schema -ne 1 -or $payload.status -notin @('switch_started', 'installed_health_passed') -or
         $payload.old_manifest_sha256 -notmatch '^[a-f0-9]{64}$' -or
         $payload.old_manifest_sha256 -ne $ExpectedOldHash.ToLowerInvariant()) { throw 'installer_result_contract_invalid' }
     $backup = [IO.Path]::GetFullPath([string]$payload.old_backup_app)
     $installParent = [IO.Path]::GetFullPath($installRoot)
     if ([IO.Path]::GetDirectoryName($backup) -ne $installParent -or
         [IO.Path]::GetFileName($backup) -notmatch '^App\.upgrade-backup-[a-f0-9]{32}$') { throw 'old_app_backup_path_invalid' }
+    if (-not (Test-Path -LiteralPath $backup)) {
+        $existingManifest = Join-Path $AppRoot 'build_manifest.json'
+        if ((Test-Path -LiteralPath $existingManifest -PathType Leaf) -and
+            (Get-FileHash -Algorithm SHA256 -LiteralPath $existingManifest).Hash.ToLowerInvariant() -eq $ExpectedOldHash.ToLowerInvariant()) {
+            return $false
+        }
+        throw 'old_app_backup_missing'
+    }
     Assert-PlainPath $backup
     $backupManifest = Join-Path $backup 'build_manifest.json'
     if (-not (Test-Path -LiteralPath $backupManifest -PathType Leaf) -or
         (Get-FileHash -Algorithm SHA256 -LiteralPath $backupManifest).Hash.ToLowerInvariant() -ne $ExpectedOldHash.ToLowerInvariant()) {
         throw 'old_app_backup_hash_invalid'
     }
-    foreach ($taskName in @($coreTaskName, $trayTaskName)) {
-        & "$env:SystemRoot\System32\schtasks.exe" /End /TN $taskName *> $null
-    }
+    Stop-UpdateProcesses
     $currentApp = [IO.Path]::GetFullPath($AppRoot)
     $failedApp = Join-Path $installRoot ('App.failed-hotfix-' + [guid]::NewGuid().ToString('N'))
     if (Test-Path -LiteralPath $currentApp) {
@@ -329,9 +390,7 @@ try {
     $stageArgs = @($verifyTool, '--archive', (Join-Path $workRoot 'package.zip'), '--envelope', (Join-Path $workRoot 'update-manifest.json'), '--app-root', $AppRoot, '--stage-root', $workRoot)
     $env:PYTHONDONTWRITEBYTECODE = '1'
     $env:PYTHONPATH = Join-Path $AppRoot 'src'
-    $verificationOutput = & $python @stageArgs 2>$null
-    $verificationExitCode = $LASTEXITCODE
-    if ($verificationExitCode -ne 0) { throw 'signed_package_verification_failed' }
+    $verificationOutput = Invoke-BoundedProcess $python $stageArgs 900
     $staged = ($verificationOutput | Select-Object -Last 1) | ConvertFrom-Json
     if ($staged.status -ne 'staged' -or $staged.version -ne $version) { throw 'staging_contract_invalid' }
     $packageRoot = [IO.Path]::GetFullPath([string]$staged.package_path)
@@ -345,9 +404,7 @@ try {
     $installerArgs = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $installer, '-Upgrade', '-HotfixManaged', '-TrayUserSid', $traySid, '-HotfixResultPath', $installerResultPath, '-HotfixOldManifestSha256', $oldManifestHash)
     if ($coreSid -ne $systemSid) { $installerArgs += @('-UserHost', '-HostUserSid', $coreSid) }
     $updateStarted = $true
-    & $powershell @installerArgs *> $null
-    $installExitCode = $LASTEXITCODE
-    if ($installExitCode -ne 0) { throw 'installer_or_health_check_failed' }
+    Invoke-BoundedProcess $powershell $installerArgs 1800 | Out-Null
     if (-not (Test-Path -LiteralPath $installerResultPath -PathType Leaf)) { throw 'installer_result_missing' }
     $installerResult = Get-Content -Raw -LiteralPath $installerResultPath | ConvertFrom-Json
     if ($installerResult.schema -ne 1 -or $installerResult.status -ne 'installed_health_passed' -or
@@ -398,14 +455,21 @@ try {
         '更新完成，Dashboard 與監控核心已通過健康檢查；舊版備份已安全清理。'
     }
     Write-UpdateStatus 'applied' $successMessage $version
+    $updateSucceeded = $true
     Remove-OwnedRequest
 }
 catch {
     $rollbackOk = -not $updateStarted
     try {
         if ($updateStarted -and $taskRecords.Count -gt 0) {
+            Stop-UpdateProcesses
             if ($installerResultPath -and (Test-Path -LiteralPath $installerResultPath -PathType Leaf)) {
                 [void](Restore-PreviousApp $installerResultPath $oldManifestHash)
+            }
+            $dataBackup = Join-Path $workRoot 'data-backup'
+            if (Test-Path -LiteralPath (Join-Path $workRoot 'data-snapshot.json') -PathType Leaf) {
+                $restoreTool = Join-Path $packageRoot 'tools\hotfix_data_snapshot.py'
+                Invoke-BoundedProcess (Join-Path $AppRoot 'runtime\python\python.exe') @($restoreTool, 'restore', '--data', $DataRoot, '--backup', $dataBackup) 900 | Out-Null
             }
             Restore-TaskRecords
             $currentManifest = Join-Path $AppRoot 'build_manifest.json'
@@ -418,15 +482,17 @@ catch {
             $rollbackOk = $true
         }
     } catch { $rollbackOk = $false }
-    if ($rollbackOk) {
-        Write-UpdateStatus 'failed' '更新未完成；已恢復原版本並確認 Dashboard 重新啟動。原有設定與資料未移除。' $version
+    if ($rollbackOk -and -not $updateStarted) {
+        Write-UpdateStatus 'failed' '套件或更新前置驗證未通過；尚未切換版本，原有程式與資料維持不變。' $version
+    } elseif ($rollbackOk) {
+        Write-UpdateStatus 'failed' '更新未完成；已恢復原版本、資料及排程，並確認 Dashboard 重新啟動。失敗現場與快照已保留。' $version
     } else {
         Write-UpdateStatus 'rollback_failed' '更新或自動復原未能完成。請保留程式與資料，使用開始功能表啟動入口檢查狀態；不要再次套用。' $version
     }
     Remove-OwnedRequest
 }
 finally {
-    if ($workRoot -and (Test-Path -LiteralPath $workRoot)) {
+    if ($updateSucceeded -and $workRoot -and (Test-Path -LiteralPath $workRoot)) {
         try {
             $resolvedWork = [IO.Path]::GetFullPath((Resolve-Path -LiteralPath $workRoot).Path)
             if ($resolvedWork.StartsWith([IO.Path]::GetFullPath($updaterRoot) + '\', [StringComparison]::OrdinalIgnoreCase) -and

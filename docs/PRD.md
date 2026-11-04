@@ -325,3 +325,6 @@ MVP 不依賴 PTZ。若維護者另行建立並驗證固定 commit 的 Xiaomi MI
 在使用者明確啟用後提供左右上下與停止控制。正式官方 go2rtc v1.9.14 仍為預設，沒有活動
 Xiaomi producer 或未通過 Dashboard 登入／CSRF 時不得送出任何 PTZ 指令；實驗功能不可被描述
 為已完成的家庭環境驗收。完整來源、build 與安全邊界見 `docs/XIAOMI_MISS_PTZ_EXPERIMENT.md`。
+# 2026-11-05 更新交易補強
+
+安裝版更新只允許固定官方簽章流程，不直接從 Git 覆寫正式來源。套用前需保存可驗證 Data 快照，失敗時同時恢復 App、資料與工作定義；不接受只恢復程式而留下新版 schema。暫存快取不屬持久快照。細節與未驗收邊界見 [r117 安全更新](R117_SAFE_HOTFIX.md)。

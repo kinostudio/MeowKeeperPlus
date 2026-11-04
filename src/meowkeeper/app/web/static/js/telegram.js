@@ -96,7 +96,7 @@
     const rows = Array.from(recipientList.children);
     const usable = rows.filter((row) => {
       const inputs = row.querySelectorAll("input");
-      return inputs.length >= 3 && inputs[1].value.trim();
+      return inputs.length >= 3 && (inputs[1].value.trim() || row.dataset.recipientId);
     });
     const selected = usable.filter((row) => row.querySelectorAll("input")[2].checked).length;
     const pending = rows.length - usable.length;
@@ -136,7 +136,7 @@
       const item = { alias, enabled: inputs[2].checked, role };
       if (chatId) item.chat_id = chatId;
       if (row.dataset.recipientId) item.recipient_id = row.dataset.recipientId;
-      if (requireChatIds && !chatId) throw new Error(`請輸入「${alias}」的 Chat ID。`);
+      if (requireChatIds && !chatId && !row.dataset.recipientId) throw new Error(`請輸入「${alias}」的 Chat ID。`);
       return item;
     }).filter(Boolean);
   }

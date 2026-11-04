@@ -475,7 +475,8 @@ class CoreStateFacade:
                     pred_name = local_data.get("predicted_name")
                     if pred_name and pred_name not in predicted_names and float(local_data.get("similarity") or 0) >= 0.65:
                         predicted_names.insert(0, pred_name)
-                    posture_zh = local_data.get("posture", {}).get("label_zh")
+                    posture = local_data.get("posture")
+                    posture_zh = posture.get("label_zh") if isinstance(posture, dict) else None
 
                 if not predicted_names and it.get("pet_id") and it.get("pet_id") != "unknown":
                     raw_id = it.get("pet_id")

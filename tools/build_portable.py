@@ -222,6 +222,7 @@ PUBLIC_PACKAGE_DOCS = ("README.md", "docs/PUBLIC_USER_GUIDE.md")
 PUBLIC_RUNTIME_TOOLS = (
     "__init__.py",
     "apply_verified_update.py",
+    "hotfix_data_snapshot.py",
     "close_application.py",
     "create_task_scheduler_xml.py",
     "launcher.py",
@@ -420,8 +421,9 @@ def build_portable(
     # against this exact source tree before creating or replacing a package.
     if str(ROOT) not in sys.path:
         sys.path.insert(0, str(ROOT))
+    from tools.verify_public_source import verify_public_source
     from tools.verify_regression_gate import source_digest, verify_gate
-
+    verify_public_source(ROOT)
     plan["regression_gate"] = verify_gate()
     output.parent.mkdir(parents=True, exist_ok=True)
     staging = output.with_name(f"{output.name}.staging-{uuid.uuid4().hex[:8]}")

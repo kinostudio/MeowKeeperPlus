@@ -1015,6 +1015,11 @@ if ($CurrentUser) {
             Assert-NoInstalledMediaConsumers $resolvedApp
         }
         $resolvedInstallRoot = [IO.Path]::GetFullPath((Resolve-Path -LiteralPath $installRoot).Path)
+        if ($HotfixManaged) {
+            $snapshotTool = Join-Path $packageRoot 'tools\hotfix_data_snapshot.py'
+            & $sourcePython $snapshotTool capture --data $dataRoot --backup (Join-Path $hotfixWorkRoot 'data-backup')
+            if ($LASTEXITCODE -ne 0) { throw '資料快照未完成；拒絕切換程式版本。' }
+        }
         $backupLeaf = "App.upgrade-backup-$([guid]::NewGuid().ToString('N'))"
         $upgradeBackupApp = [IO.Path]::GetFullPath((Join-Path $resolvedInstallRoot $backupLeaf))
         if ([IO.Path]::GetDirectoryName($upgradeBackupApp) -ne $resolvedInstallRoot -or
@@ -1023,6 +1028,14 @@ if ($CurrentUser) {
         }
         try {
             $installationPhase = 'archive'
+            if ($HotfixManaged) {
+                $recoveryRecord = [ordered]@{
+                    schema = 1; status = 'switch_started'; old_backup_app = $upgradeBackupApp
+                    old_manifest_sha256 = $HotfixOldManifestSha256.ToLowerInvariant()
+                    migration_journal = $legacyDataMigrationJournal; installer_temp_root = $tempRoot
+                }
+                [IO.File]::WriteAllText($HotfixResultPath, ($recoveryRecord | ConvertTo-Json -Compress), [Text.UTF8Encoding]::new($false))
+            }
             # Same-volume directory rename is the preflight: a locked file
             # aborts here instead of leaving Remove-Item half-complete.
             Move-Item -LiteralPath $resolvedApp -Destination $upgradeBackupApp -ErrorAction Stop
@@ -1190,8 +1203,13 @@ if ($CurrentUser) {
         if ([IO.Path]::GetDirectoryName($updaterWorkRoot) -ne $expectedWorkParent -or
             [IO.Path]::GetFileName($updaterWorkRoot) -notmatch '^work-[a-f0-9]{32}$' -or
             ((Get-Item -LiteralPath $updaterWorkRoot -Force).Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0 -or
-            (Test-Path -LiteralPath $resultPath)) {
+            -not (Test-Path -LiteralPath $resultPath -PathType Leaf)) {
             throw '安全更新結果路徑驗證失敗。'
+        }
+        $recoveryRecord = Get-Content -Raw -LiteralPath $resultPath | ConvertFrom-Json
+        if ($recoveryRecord.status -ne 'switch_started' -or $recoveryRecord.old_backup_app -ne $upgradeBackupApp -or
+            $recoveryRecord.old_manifest_sha256 -ne $HotfixOldManifestSha256.ToLowerInvariant()) {
+            throw '安全更新復原紀錄與本次交易不符。'
         }
         $oldHash = if ($upgradeBackupApp -and (Test-Path -LiteralPath (Join-Path $upgradeBackupApp 'build_manifest.json') -PathType Leaf)) {
             (Get-FileHash -Algorithm SHA256 -LiteralPath (Join-Path $upgradeBackupApp 'build_manifest.json')).Hash.ToLowerInvariant()

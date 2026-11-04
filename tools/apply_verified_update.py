@@ -77,6 +77,8 @@ def verify_and_stage(
     verifier = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(verifier)
     verifier.verify_portable(package)
+    if release_information(package)["version"] != manifest["version"]:
+        raise ValueError("套件版本與官方簽章清單不符。")
     return {"status": "staged", "version": manifest["version"], "package_path": str(package)}
 
 

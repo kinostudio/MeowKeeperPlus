@@ -988,6 +988,10 @@ class VisionSettingsStore:
                 "estimated_tokens_per_request": values["estimated_tokens_per_request"],
                 "reset_timezone": "America/Los_Angeles" if values["provider_id"] == "gemini" else "UTC"}
 
+    def effective_limits(self) -> dict:
+        """回傳目前啟用的全域有效配額與重置時區。"""
+        return self.quota_limits(self.read())
+
     def usage(self, *, hours=24, limit=100, offset=0):
         if type(hours) is not int or hours not in {1, 24, 168, 720}:
             raise ValueError("用量區間只允許最近1小時、24小時、7天或30天。")
@@ -1004,6 +1008,129 @@ class VisionSettingsStore:
                                   recent_limit=limit, recent_offset=offset)
         result["event_details"] = self._event_details(result.get("recent", []), values["provider_id"])
         return result
+
+    # ------------------------------------------------------------------ #
+    #  每 provider 獨立配額管理                                             #
+    # ------------------------------------------------------------------ #
+
+    @staticmethod
+    def _validate_provider_ref(provider_ref: str) -> None:
+        """驗證 provider_ref 為 64 位元小寫十六進位字串（SHA-256）。"""
+        import re
+        if not isinstance(provider_ref, str) or not re.fullmatch(r"[a-f0-9]{64}", provider_ref):
+            raise ValueError("provider_ref 必須為 64 位小寫十六進位字串（SHA-256）。")
+
+    def list_provider_quotas(self) -> list:
+        """列出所有已設定獨立配額的 provider，依 provider_label 排序。"""
+        if self.guard is None:
+            raise RuntimeError("此執行環境沒有 SQLite 配額帳本，無法列出 provider 配額。")
+        with self.guard.store._connection_lock:
+            rows = self.guard.store.connection.execute(
+                "SELECT provider_ref, provider_label, daily_request_limit, "
+                "requests_per_minute_limit, tokens_per_minute_limit, "
+                "warning_threshold_percent, enabled, updated_at "
+                "FROM vision_provider_quotas ORDER BY provider_label, provider_ref"
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def set_provider_quota(
+        self,
+        provider_ref: str,
+        *,
+        provider_label: str = "",
+        daily_request_limit: int = 400,
+        requests_per_minute_limit: int = 12,
+        tokens_per_minute_limit: int = 0,
+        warning_threshold_percent: int = 80,
+        enabled: bool = True,
+    ) -> dict:
+        """新增或更新一筆 provider 獨立配額設定。
+
+        回傳儲存後的完整紀錄（provider_ref 已驗證為 SHA-256 格式）。
+        """
+        import time
+        self._validate_provider_ref(provider_ref)
+        if not isinstance(provider_label, str) or len(provider_label) > 120:
+            raise ValueError("provider_label 最長 120 個字元。")
+        if not isinstance(daily_request_limit, int) or not 1 <= daily_request_limit <= 1_000_000:
+            raise ValueError("daily_request_limit 須為 1～1000000 整數。")
+        if not isinstance(requests_per_minute_limit, int) or not 0 <= requests_per_minute_limit <= 10_000:
+            raise ValueError("requests_per_minute_limit 須為 0～10000 整數（0 代表停用限制）。")
+        if not isinstance(tokens_per_minute_limit, int) or not 0 <= tokens_per_minute_limit <= 10_000_000:
+            raise ValueError("tokens_per_minute_limit 須為 0～10000000 整數（0 代表停用限制）。")
+        if not isinstance(warning_threshold_percent, int) or not 0 <= warning_threshold_percent <= 100:
+            raise ValueError("warning_threshold_percent 須為 0～100 整數。")
+        if self.guard is None:
+            raise RuntimeError("此執行環境沒有 SQLite 配額帳本，無法儲存 provider 配額。")
+        now = time.time()
+        with self.guard.store._connection_lock:
+            self.guard.store.connection.execute(
+                "INSERT OR REPLACE INTO vision_provider_quotas "
+                "(provider_ref, provider_label, daily_request_limit, requests_per_minute_limit, "
+                "tokens_per_minute_limit, warning_threshold_percent, enabled, updated_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                (provider_ref, provider_label.strip(), daily_request_limit,
+                 requests_per_minute_limit, tokens_per_minute_limit,
+                 warning_threshold_percent, int(bool(enabled)), now),
+            )
+            self.guard.store.connection.commit()
+            row = self.guard.store.connection.execute(
+                "SELECT provider_ref, provider_label, daily_request_limit, "
+                "requests_per_minute_limit, tokens_per_minute_limit, "
+                "warning_threshold_percent, enabled, updated_at "
+                "FROM vision_provider_quotas WHERE provider_ref=?",
+                (provider_ref,),
+            ).fetchone()
+        return dict(row)
+
+    def delete_provider_quota(self, provider_ref: str) -> dict:
+        """刪除指定 provider 的獨立配額設定，回傳刪除的紀錄筆數。"""
+        self._validate_provider_ref(provider_ref)
+        if self.guard is None:
+            raise RuntimeError("此執行環境沒有 SQLite 配額帳本，無法刪除 provider 配額。")
+        with self.guard.store._connection_lock:
+            cursor = self.guard.store.connection.execute(
+                "DELETE FROM vision_provider_quotas WHERE provider_ref=?", (provider_ref,)
+            )
+            self.guard.store.connection.commit()
+        return {"deleted": cursor.rowcount, "provider_ref": provider_ref}
+
+    def effective_limits_for(self, provider_ref: str) -> dict:
+        """查詢指定 provider 的有效配額。
+
+        若 vision_provider_quotas 有個別設定，使用個別設定；
+        否則回退到 vision-analysis.json 的全域設定。
+        """
+        self._validate_provider_ref(provider_ref)
+        if self.guard is not None:
+            with self.guard.store._connection_lock:
+                row = self.guard.store.connection.execute(
+                    "SELECT daily_request_limit, requests_per_minute_limit, "
+                    "tokens_per_minute_limit, warning_threshold_percent, enabled "
+                    "FROM vision_provider_quotas WHERE provider_ref=?",
+                    (provider_ref,),
+                ).fetchone()
+            if row is not None:
+                return {
+                    "source": "provider_override",
+                    "provider_ref": provider_ref,
+                    "daily_request_limit": row["daily_request_limit"],
+                    "requests_per_minute_limit": row["requests_per_minute_limit"],
+                    "tokens_per_minute_limit": row["tokens_per_minute_limit"],
+                    "warning_threshold_percent": row["warning_threshold_percent"],
+                    "enabled": bool(row["enabled"]),
+                }
+        # 回退到全域設定
+        global_limits = self.effective_limits()
+        return {
+            "source": "global_fallback",
+            "provider_ref": provider_ref,
+            "daily_request_limit": global_limits.get("daily_limit", 400),
+            "requests_per_minute_limit": global_limits.get("rpm_limit", 12),
+            "tokens_per_minute_limit": global_limits.get("tpm_limit", 0),
+            "warning_threshold_percent": 80,
+            "enabled": True,
+        }
 
     @staticmethod
     def _parse_timeline_timestamp(value):

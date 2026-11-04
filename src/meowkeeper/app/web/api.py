@@ -967,6 +967,62 @@ def create_app(
         from meowkeeper.storage.semantic_jobs import SemanticJobJournal
         return {**SemanticJobJournal(core.store).runtime(),"worker_active":False,"pressure_reason":None}
 
+    # ------------------------------------------------------------------ #
+    #  每 provider 獨立配額 REST API                                        #
+    # ------------------------------------------------------------------ #
+
+    def _vision_settings():
+        """取得 VisionSettingsStore，若未接入則拋出 503。"""
+        vs = getattr(app.state, "vision_settings", None)
+        if vs is None:
+            raise HTTPException(status_code=503, detail="Vision 配額服務尚未接入。")
+        return vs
+
+    @app.get("/api/v1/vision/provider-quotas")
+    def vision_provider_quotas_list(request: Request):
+        """列出所有已設定獨立配額的 provider。"""
+        require_auth(request)
+        try:
+            return {"quotas": _vision_settings().list_provider_quotas()}
+        except RuntimeError as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+    @app.put("/api/v1/vision/provider-quotas/{provider_ref}")
+    def vision_provider_quota_set(request: Request, provider_ref: str, body: Any = Body(default=None)):  # noqa: B008
+        """新增或更新指定 provider 的獨立配額設定。"""
+        require_mutation(request)
+        payload = json_body(body) if body is not None else {}
+        try:
+            return _vision_settings().set_provider_quota(
+                provider_ref,
+                provider_label=str(payload.get("provider_label", "")),
+                daily_request_limit=int(payload.get("daily_request_limit", 400)),
+                requests_per_minute_limit=int(payload.get("requests_per_minute_limit", 12)),
+                tokens_per_minute_limit=int(payload.get("tokens_per_minute_limit", 0)),
+                warning_threshold_percent=int(payload.get("warning_threshold_percent", 80)),
+                enabled=bool(payload.get("enabled", True)),
+            )
+        except (ValueError, RuntimeError) as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    @app.delete("/api/v1/vision/provider-quotas/{provider_ref}")
+    def vision_provider_quota_delete(request: Request, provider_ref: str):
+        """刪除指定 provider 的獨立配額設定，回退至全域設定。"""
+        require_mutation(request)
+        try:
+            return _vision_settings().delete_provider_quota(provider_ref)
+        except (ValueError, RuntimeError) as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    @app.get("/api/v1/vision/provider-quotas/{provider_ref}/effective")
+    def vision_provider_quota_effective(request: Request, provider_ref: str):
+        """查詢指定 provider 的有效配額（個別設定或全域回退）。"""
+        require_auth(request)
+        try:
+            return _vision_settings().effective_limits_for(provider_ref)
+        except (ValueError, RuntimeError) as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+
     @app.post("/api/v1/events/{event_id}/analysis/{job_id}/cancel")
     def cancel_analysis(request: Request, event_id: str, job_id: str):
         require_mutation(request)
@@ -1284,6 +1340,7 @@ def create_app(
                 raise HTTPException(status_code=409, detail=str(exc)) from exc
         background_tasks.add_task(updater.check if action == "check" else updater.prepare)
         return {"status": "queued", "message_zh_tw": "正在檢查或準備更新；監控持續。"}
+
 
     @app.get("/api/v1/identity/summary")
     def identity_summary(request: Request) -> dict:
@@ -2467,6 +2524,8 @@ def create_app(
             "event_post_seconds": 10.0,
             "retention_seconds": 60.0,
             "ring_maximum_size_mb": 512.0,
+            "event_video_max_age_days": 30,
+            "event_video_max_bytes": 3 * 1024 ** 3,
             "dashboard_auto_open": False,
             "telegram_startup_notice": False,
         }
