@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+import io
 import json
 import sys
 import threading
@@ -8,6 +9,7 @@ import unittest
 import urllib.error
 import urllib.request
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -25,6 +27,18 @@ spec.loader.exec_module(agent)
 
 
 class RelayControlTest(unittest.TestCase):
+    def test_rejected_body_drain_is_bounded_and_does_not_dispatch(self) -> None:
+        for length, expected in ((20, 20), (1025, 0), (-1, 0), ("invalid", 0)):
+            with self.subTest(length=length):
+                calls = []
+                handler = object.__new__(agent.Handler)
+                handler.headers = {"Content-Length": str(length)}
+                handler.rfile = io.BytesIO(b"x" * 30)
+                handler.connection = SimpleNamespace(settimeout=calls.append)
+                handler._discard_rejected_body()
+                self.assertEqual(handler.rfile.tell(), expected)
+                self.assertEqual(calls[-1], 8)
+
     def test_client_rejects_non_tailnet_and_unsupported_actions(self) -> None:
         with self.assertRaises(RelayControlError):
             RelayControlClient("192.168.1.1", "a" * 32)

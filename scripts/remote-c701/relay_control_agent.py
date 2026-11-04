@@ -153,12 +153,25 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def _discard_rejected_body(self) -> None:
+        try:
+            length = int(self.headers.get("Content-Length", "0"))
+            if 0 < length <= 1024:
+                self.connection.settimeout(0.25)
+                self.rfile.read(length)
+        except (OSError, ValueError):
+            pass  # Rejection must not wait for or parse an unauthorized payload.
+        finally:
+            self.connection.settimeout(8)
+
     def do_POST(self) -> None:
         if self.path != "/v1/control" or self.headers.get("Content-Type") != "application/json":
             self._reply(404, {"success": False})
             return
         token = self.headers.get("Authorization", "")
         if not hmac.compare_digest(token, "Bearer " + self.server.credential["nonce"]):
+            # An unread POST body can reset Windows TCP before the 403 arrives.
+            self._discard_rejected_body()
             self._reply(403, {"success": False})
             return
         try:
