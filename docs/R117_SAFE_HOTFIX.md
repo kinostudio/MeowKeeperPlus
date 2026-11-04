@@ -28,3 +28,11 @@
 - 隔離 Windows 測試：真實暫存檔案 App 交換、錯誤雜湊拒絕、切換中／健康後回復、SQLite schema 與刪除媒體還原、快照竄改及空間不足拒絕、程序失敗與逾時、DPAPI 寫入及刪除。
 - 這些測試不註冊真正 SYSTEM 更新工作、不觸發 UAC、不改正式 Host。正式工作權限、完整安裝交易、重開機／斷電後恢復仍為 `not_checked`。
 - 候選包與正式發布不同；不得在安全阻擋或必要測試未通過時發布。完整測試與包內結果另列本輪執行證據，不引用舊版綠燈。
+
+## 候選發布產物
+
+- [r117 prerelease](https://github.com/kinostudio/MeowKeeperPlus/releases/tag/r117)，程式提交 `41dbe7361da25db0f16f8d76ee1cef72ee21af1b`；不取代 stable latest。
+- ZIP 2,413,044,285 bytes，SHA-256 `68082af965f7b71f92b133eb0768a247b62f7b7eb212817257dfa2173c154bdd`；三分卷配官方 Ed25519 簽章清單，沿用原信任根。
+- 包內完整檔案驗證 21,356 檔通過且無私人資料；內附 Python 隔離啟動的狀態／更新／進階頁 HTTP 200，新更新／快照工具啟動通過，再次完整檔案驗證通過。沒有連接攝影機或修改正式 Host。
+- GitHub 五附件的大小與伺服器 SHA-256 全部與本機一致；公開下載清單簽章與 helper 雜湊通過，各分卷 HTTP 206 小段與本機一致。沒有重複下載完整遠端 ZIP，也沒有把這些檢查當成安裝／SYSTEM 更新驗收。
+- 下載 helper 只下載、校驗及解壓，不安裝。SHA-256 `671b361bad803bca2d33b1fa53eb92f597ae4c450bc966ddb3c9bb2295ad2d99`；Windows PowerShell 語法與已有目錄拒絕檢查通過。
