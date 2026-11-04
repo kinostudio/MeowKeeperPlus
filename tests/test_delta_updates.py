@@ -1,7 +1,9 @@
 import base64
 import copy
 import json
+import re
 import shutil
+import subprocess
 import tempfile
 import unittest
 import zipfile
@@ -27,6 +29,14 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class DeltaUpdateTests(unittest.TestCase):
+    def test_download_size_labels_use_correct_decimal_units(self):
+        source = (ROOT / "src/meowkeeper/app/web/static/js/updates.js").read_text(encoding="utf-8")
+        function = re.search(r"  function formatBytes\(value\) \{.*?\n  \}", source, re.DOTALL).group(0)
+        node = next(path for path in (ROOT / "vendor/javascript/node.exe", ROOT / "../../vendor/javascript/node.exe") if path.is_file())
+        result = subprocess.run([str(node.resolve()), "-e", function + ";console.log(JSON.stringify([1000,1000000,1000000000,1366019].map(formatBytes)))"],
+                                check=True, capture_output=True, text=True, timeout=10, shell=False)
+        self.assertEqual(json.loads(result.stdout), ["1.00 KB", "1.00 MB", "1.00 GB", "1.37 MB"])
+
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)

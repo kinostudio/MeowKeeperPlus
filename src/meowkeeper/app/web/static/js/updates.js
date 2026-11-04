@@ -14,7 +14,7 @@
   function formatBytes(value) {
     if (!Number.isFinite(value) || value < 0) return "—";
     if (value < 1000) return `${Math.round(value)} B`;
-    const units = ["MB", "GB", "TB"];
+    const units = ["KB", "MB", "GB", "TB"];
     let amount = value / 1000, unit = 0;
     while (amount >= 1000 && unit < units.length - 1) { amount /= 1000; unit += 1; }
     return `${amount.toFixed(amount >= 100 ? 0 : amount >= 10 ? 1 : 2)} ${units[unit]}`;
