@@ -240,6 +240,10 @@ r94 首頁補充：共用 JS 必須版本化；圖表初始化不得依賴攝影
 
 Chat ID 是 numeric ID，不是 @username。使用者先 /start，Bot 可回覆 ID，但不得因此授予管理權。設定 enabled、已選收件者、secret owner 與執行 sender 狀態須一致；依目前 lifecycle 支援確認是否需重啟，不能永遠顯示舊環境變數提示。
 
+### Telegram 接收器退出與自動恢復
+
+發送影片正常、getMe 成功或 Host 健康檢查正常，都不能證明 getUpdates 接收工作仍活著。應核對實際命令、持久化游標及接收日誌；不得為診斷另外呼叫 getUpdates 搶走正式接收器的更新。HTTP 400／409 不應直接令接收工作永久退出：同一工作以 60～300 秒退避後重查 webhook，保留游標並可取消等待；不得平行啟動另一輪詢、刪除 webhook 或重設憑證。已設定 webhook、401／403 則維持安全停用，須檢查設定。啟動階段非預期暫時錯誤也須有界退避。判定須兼顧 HTTP 狀態與 Telegram API error_code；真實執行緒測試需確認關閉會中斷退避、重複 start 不建立第二個工作。回歸門檻 `TELEGRAM-RECEIVER-RECOVERY`、`TELEGRAM-RECEIVER-SHUTDOWN-AND-API-CODE`；隔離測試不代表正式 Host 已部署或實際命令已恢復，重啟也不能證明最初停止原因就是 409。
+
 ### 41｜Telegram ok=true 不等於手錶播放成功
 
 送影片提供 width、height、duration；檢查 H.264、yuv420p、音訊相容性及 MP4 moov/faststart。相容影片直接封裝／上傳；索引問題優先 remux，HEVC／不相容像素格式才必要轉碼為 H.264/AAC，保留原片。message_id 不是播放證據。2026-10-14 使用者確認已在實機 Apple Watch 上接收並播放喵喵守護者+ Telegram 事件影片；面向此使用者的教學應明確寫可播放，不再加上「可能無法播放」的泛化保留語。此實測不推論所有 Watch／Telegram 組合。

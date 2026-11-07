@@ -100,19 +100,38 @@ class TelegramFeedbackPoller:
                         self._log(f"⚠️ Telegram 命令選單同步失敗：{type(exc).__name__}。")
                 break
             except TelegramNotificationError as exc:
-                if exc.status_code in {401, 403}:
+                if (exc.status_code or exc.api_error_code) in {401, 403}:
                     self._log("⚠️ Telegram 憑證或 Bot 權限未通過；回饋接收已停止，請在本機 Dashboard 檢查設定。")
                     return
                 self._log("⚠️ Telegram webhook 狀態暫時無法確認；回饋接收稍後重試。")
                 if self._stop.wait(delay):
                     return
                 delay = min(60.0, delay * 2)
+            except Exception as exc:  # noqa: BLE001 - startup failures must not silently kill the receiver
+                self._log(f"⚠️ Telegram 接收器初始化暫時失敗：{type(exc).__name__}；稍後重試。")
+                if self._stop.wait(delay):
+                    return
+                delay = min(60.0, delay * 2)
 
         delay = 3.0
+        conflict_delay = 60.0
+        recheck_webhook = False
+        recovering = False
         while not self._stop.is_set():
             try:
+                if recheck_webhook:
+                    webhook = self.notifier.get_webhook_info()
+                    result = webhook.get("result")
+                    if isinstance(result, Mapping) and result.get("url"):
+                        self._log("⚠️ Telegram 已設定 webhook；接收器保持停用，不會刪除其他服務的設定。")
+                        return
+                    recheck_webhook = False
                 updates = self.notifier.get_updates(offset=self._offset, timeout_seconds=20)
+                if recovering:
+                    self._log("ℹ️ Telegram 指令與回饋接收已恢復。")
+                    recovering = False
                 delay = 3.0
+                conflict_delay = 60.0
                 for update in updates:
                     if self._stop.is_set():
                         return
@@ -128,18 +147,27 @@ class TelegramFeedbackPoller:
                             return
                         break
             except TelegramNotificationError as exc:
-                if exc.status_code in {400, 409}:
-                    self._log("⚠️ Telegram 回饋接收與既有 webhook／poller 衝突，已停止輪詢。")
-                    return
-                if exc.status_code in {401, 403}:
+                error_code = exc.status_code or exc.api_error_code
+                if error_code in {400, 409}:
+                    reason = "另一個接收器衝突" if error_code == 409 else "接收請求未通過"
+                    self._log(f"⚠️ Telegram {reason}（錯誤碼 {error_code}）；{int(conflict_delay)} 秒後重新檢查，不重設接收游標。")
+                    recheck_webhook = True
+                    recovering = True
+                    if self._stop.wait(conflict_delay):
+                        return
+                    conflict_delay = min(300.0, conflict_delay * 2)
+                    continue
+                if error_code in {401, 403}:
                     self._log("⚠️ Telegram 憑證或 Bot 權限失效；回饋接收已停止，請在本機 Dashboard 檢查設定。")
                     return
                 self._log("⚠️ Telegram 回饋服務暫時無法連線，稍後重試。")
+                recovering = True
                 if self._stop.wait(delay):
                     return
                 delay = min(60.0, delay * 2)
             except Exception as exc:  # noqa: BLE001 - feedback worker must not stop core monitoring
                 self._log(f"⚠️ Telegram 回饋背景工作發生錯誤：{type(exc).__name__}。")
+                recovering = True
                 if self._stop.wait(delay):
                     return
                 delay = min(60.0, delay * 2)
