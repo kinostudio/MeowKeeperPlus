@@ -10,13 +10,13 @@
 
 ## r116 的一次性過渡
 
-舊版更新器不認識新協定，因此提供對應目標版本的小型 `MeowKeeperPlus-r119-delta-bootstrap.pyz`。使用者在主機本機管理員 PowerShell 核對其固定 SHA-256，使用**現有內附 Python**執行；不需要安裝 Python、pip 或重新下載 runtime。
+舊版更新器不認識新協定，因此提供對應目標版本的小型 `MeowKeeperPlus-r120-delta-bootstrap.pyz`。使用者在主機本機管理員 PowerShell 核對其固定 SHA-256，使用**現有內附 Python**執行；不需要安裝 Python、pip 或重新下載 runtime。
 
 過渡工具只接受固定官方版本網址，使用已安裝的官方公鑰驗證差量簽章；先驗基準，再下載 ZIP。已驗證的新 worker／驗證器置於 Administrators／SYSTEM 保護的 Updater 目錄，只有使用者明確 `--apply` 才呼叫受控換版流程。不自行觸發 UAC。
 
 過渡工具的更新要求、差量封存及 verifier 也全部位於受保護的 Updater 子目錄；不以管理員權限向一般帳號可寫的 Data 更新暫存複製檔案。固定 SYSTEM 的日常 Dashboard 路徑仍會先複製至受保護目錄並重新驗證。
 
-r116→r118 與 r116→r119 包的基準為官方 r116 加上一份已知、已公開的 `src/meowkeeper/app/web/state.py` 修正；該檔案的確切大小與 SHA-256 另列於簽章 `base_overrides`。這不是允許任意修改：其他內容或未包含該修正的 r116 會拒絕套用。基準不符需另外製作對應的簽章差量，不自動下載完整包。
+r116→r118／r119／r120 包的基準為官方 r116 加上一份已知、已公開的 `src/meowkeeper/app/web/state.py` 修正；該檔案的確切大小與 SHA-256 另列於簽章 `base_overrides`。這不是允許任意修改：其他內容或未包含該修正的 r116 會拒絕套用。r120 額外辨識[精確的執行期產物](R120_RUNTIME_BASELINE.md)，不會複用或打包這些檔案，也不允許任意 Data／logs 檔案。基準不符需另外製作對應的簽章差量，不自動下載完整包。
 
 後續版本由既有固定 SYSTEM 更新工作處理新協定；Dashboard 仍須本機登入、CSRF 與明確中斷確認。不接受任意下載網址、命令或 verifier 路徑。
 
@@ -36,7 +36,27 @@ r116→r118 與 r116→r119 包的基準為官方 r116 加上一份已知、已�
 
 上述不等於正式 Host 的 SYSTEM 排程、UAC、真實停止／啟動、斷電恢復或正式資料回滾驗收。正式安裝由使用者執行，未實測項目必須標記 `not_checked`。
 
+## r120 更新命令
+
+[r120 修正版](https://github.com/kinostudio/MeowKeeperPlus/releases/tag/r120) 保留 r119 全部修正，辨識正常執行期快取／日誌，不需要刪除或搬動檔案。完整 1,089 項／回歸 188 項零略過；帶執行期產物的實際重建、原 r116 runtime 準備及 HTTP 啟動通過。公開下載再驗簽章／SHA-256／內容通過。
+
+差量 ZIP 1,375,468 bytes、31 檔、零刪除／大型依賴；清單 6,821 bytes、過渡工具 6,914 bytes，合計約 1.39 MB。只適用精確 r116 基準。請由使用者在主機本機**管理員 Windows PowerShell**執行；換版短暫中斷監控，仍需本機重建／快照空間，不自動觸發 UAC。正式 SYSTEM 更新及正式資料回滾仍待實機驗收。
+
+```powershell
+$ErrorActionPreference = 'Stop'
+[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+$hotfixTool = Join-Path $env:TEMP 'MeowKeeperPlus-r120-delta-bootstrap.pyz'
+$pythonPath = Join-Path $env:ProgramData 'MeowKeeperPlus\App\runtime\python\python.exe'
+if (-not (Test-Path -LiteralPath $pythonPath)) { throw '找不到既有安裝版 Python；未開始更新。' }
+Invoke-WebRequest -UseBasicParsing -Uri 'https://github.com/kinostudio/MeowKeeperPlus/releases/download/r120/MeowKeeperPlus-r120-delta-bootstrap.pyz' -OutFile $hotfixTool
+if ((Get-FileHash -LiteralPath $hotfixTool -Algorithm SHA256).Hash.ToLowerInvariant() -ne '7705da2fdf6f2f5d1ed07d3ecd4eaf7f763b7ce2d0847fc41bf0db0e3e902a4f') { throw '過渡工具校驗失敗，停止更新。' }
+& $pythonPath -B $hotfixTool --version r120 --apply
+if ($LASTEXITCODE -ne 0) { throw '更新未完成；請保留程式與備份，不要重複執行。' }
+```
+
 ## r119 更新命令
+
+> 此版已由 [r120](#r120-更新命令) 接替。已使用的安裝版可能因正常快取／日誌而被 r119 工具阻擋；不要刪除檔案或重複使用下方歷史命令，請改用上方 r120 命令。原發布資產保持不變。
 
 [r119 累積差量候選](https://github.com/kinostudio/MeowKeeperPlus/releases/tag/r119) 包含 r118 的修正與 Telegram 接收器退避恢復。完整 1,086 項／回歸 185 項零略過、真實套件重建、原 r116 runtime 準備與隔離 HTTP 啟動通過；三個公開資產重新下載後簽章、SHA-256 與內容核對通過。ZIP 1,374,716 bytes、31 個變更檔、零刪除、無 runtime／vendor／models 變更下載。
 

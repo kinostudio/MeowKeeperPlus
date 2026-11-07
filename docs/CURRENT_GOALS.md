@@ -1,5 +1,12 @@
 # 目前進度與目標（2026-10-21）
 
+## 2026-11-08｜r120 已使用安裝基準修正
+
+- r119 以乾淨套件驗收，漏掉正常使用產生的字型快取、Ultralytics 設定及 go2rtc 日誌。[r120 候選已公開](https://github.com/kinostudio/MeowKeeperPlus/releases/tag/r120)，只辨識精確已知產物及 JSON 格式／大小；未知檔案、重新解析點或程式雜湊差異仍阻擋，不刪檔繞過、不混入新 App。[規格](R120_RUNTIME_BASELINE.md)。
+- 完整 1,089 項／故障回歸 188 項零略過、Ruff／compileall／公開掃描通過；來源指紋 `e025d304918e800cbad4b656fdedd2245eb18444245fee70cad3eb7bde88b9c6`。21,358 檔候選、帶合成執行期產物的實際重建及原 r116 runtime 準備、包內 4 項新增邊界測試、HTTP 與公開下載／簽章驗證均通過。
+- ZIP 1,375,468 bytes、31 檔、零刪除／大型依賴；保留 r119 全部修正，不覆寫既有資產。r116 請改用 [r120 更新命令](DELTA_HOTFIX.md#r120-更新命令)，不再使用 r119 過渡工具。
+- 正式 Host 未自動安裝／重啟、未刪除快取、未變更資料或憑證；正式 SYSTEM 換版、資料回復與斷電恢復仍為 `not_checked`。
+
 ## 2026-11-07｜r119 Telegram 接收器恢復與累積差量
 
 - [r119 候選已公開](https://github.com/kinostudio/MeowKeeperPlus/releases/tag/r119)：直接由精確 r116 基準更新，包含 r118 全部修正及本次接收器退避恢復。差量 ZIP 1,374,716 bytes、31 個變更檔、零刪除、無大型依賴下載；僅發布 ZIP、簽章清單及 6,457 bytes 過渡工具。
