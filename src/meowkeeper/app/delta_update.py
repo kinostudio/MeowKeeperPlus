@@ -128,6 +128,31 @@ def verifier(app_root: Path):
     return module.verify_portable
 
 
+def _runtime_generated(file: Path, name: str) -> bool:
+    """Recognize only installed runtime output; assemble never copies these files."""
+    if name in {"logs/go2rtc.log", "logs/go2rtc.log.1"}:
+        return file.is_file()
+    font_cache = re.fullmatch(r"data/matplotlib/fontlist-v([0-9]{1,5})\.json", name)
+    settings = name in {"data/ultralytics/settings.json", "data/ultralytics/Ultralytics/settings.json"}
+    if not font_cache and not settings:
+        return False
+    if not file.is_file() or file.stat().st_size > (4 * 1024**2 if font_cache else 65536):
+        raise ValueError("執行期快取大小無效；已停止更新。")
+    payload = json.loads(file.read_text(encoding="utf-8-sig"))
+    valid = isinstance(payload, dict)
+    if font_cache:
+        valid = (valid and type(payload.get("_version")) is int
+                 and payload["_version"] == int(font_cache[1])
+                 and isinstance(payload.get("afmlist"), list) and isinstance(payload.get("ttflist"), list))
+    else:
+        valid = (valid and isinstance(payload.get("settings_version"), str)
+                 and bool(re.fullmatch(r"[0-9]+(?:\.[0-9]+){1,3}", payload["settings_version"]))
+                 and all(isinstance(payload.get(key), str) for key in ("datasets_dir", "weights_dir", "runs_dir")))
+    if not valid:
+        raise ValueError("執行期快取格式無效；已停止更新。")
+    return True
+
+
 def validate_base(app_root: Path, manifest: dict) -> dict:
     """Before any ZIP download, reject other versions and modified installed bytes."""
     app_root = wide(app_root)
@@ -166,6 +191,8 @@ def validate_base(app_root: Path, manifest: dict) -> dict:
             elif file != path and file.suffix.lower() != ".pyc" and "__pycache__" not in file.parts:
                 name = file.relative_to(app_root).as_posix()
                 if name not in files:
+                    if _runtime_generated(file, name):
+                        continue
                     if not re.fullmatch(r"data/locks/MeowKeeperPlus(?:Host|Tray|Go2Rtc)\.json", name):
                         raise ValueError("已安裝程式含有基準外檔案；不會自動改抓完整包。")
                     if file.stat().st_size > 16384:

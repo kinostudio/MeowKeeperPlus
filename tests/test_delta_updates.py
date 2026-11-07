@@ -17,6 +17,7 @@ from Crypto.Signature import eddsa
 from meowkeeper.app.delta_update import (
     assemble,
     digest,
+    plain,
     validate_base,
     validate_manifest,
     verify_delta,
@@ -218,6 +219,81 @@ class DeltaUpdateTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             verify_delta(tampered, self.key.public_key().export_key(format="PEM").encode())
 
+    def _runtime_files(self):
+        return {
+            "data/matplotlib/fontlist-v390.json": json.dumps({"_version": 390, "afmlist": [], "ttflist": []}),
+            "data/ultralytics/Ultralytics/settings.json": json.dumps({
+                "settings_version": "0.0.6", "datasets_dir": "local", "weights_dir": "local", "runs_dir": "local"}),
+            "logs/go2rtc.log": "local runtime diagnostic",
+            "logs/go2rtc.log.1": "previous runtime diagnostic",
+        }
+
+    def test_known_runtime_outputs_are_preserved_but_not_reused_or_downloaded(self):
+        runtime = self._runtime_files()
+        for name, content in runtime.items():
+            path = self.base / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(content, encoding="utf-8")
+        downloads = self.root / "runtime-downloads"
+        downloads.mkdir()
+        calls = []
+        def fetch(url, path, _limit):
+            calls.append(url.rsplit("/", 1)[1])
+            shutil.copy2(self.out / calls[-1], path)
+        prepare(self.base, downloads, self.root / "runtime-payload", "r118", fetch)
+        self.assertEqual(calls, ["update-manifest.json", self.delta["asset"]])
+        destination = self.root / "runtime-assembled"
+        assemble(self.base, self.archive, self.delta, destination)
+        for name, content in runtime.items():
+            self.assertEqual((self.base / name).read_text(encoding="utf-8"), content)
+            self.assertFalse((destination / name).exists())
+
+    def test_unknown_and_malformed_runtime_files_still_block_before_zip(self):
+        bad = {
+            "data/matplotlib/plugin.py": "code",
+            "data/matplotlib/fontlist-v390.json": "{}",
+            "data/ultralytics/Ultralytics/settings.json": "{}",
+            "logs/unknown.log": "unknown",
+            "logs/go2rtc.log.py": "code",
+            "data/ultralytics/Ultralytics/other.json": "{}",
+            "data/ultralytics/Ultralytics/settings.json.bak": "{}",
+        }
+        for index, (name, content) in enumerate(bad.items()):
+            with self.subTest(name=name):
+                path = self.base / name
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(content, encoding="utf-8")
+                downloads = self.root / f"bad-downloads-{index}"
+                downloads.mkdir()
+                calls = []
+                def fetch(url, destination, _limit, *, calls=calls):
+                    calls.append(url)
+                    shutil.copy2(self.out / "update-manifest.json", destination)
+                with self.assertRaises(ValueError):
+                    prepare(self.base, downloads, self.root / f"bad-payload-{index}", "r118", fetch)
+                self.assertEqual(len(calls), 1)
+                path.unlink()
+
+    def test_runtime_file_limits_links_and_modified_program_still_fail_closed(self):
+        path = self.base / "data/ultralytics/Ultralytics/settings.json"
+        path.parent.mkdir(parents=True)
+        path.write_bytes(b" " * 65537)
+        with self.assertRaises(ValueError):
+            validate_base(self.base, self.delta)
+        path.unlink()
+        log = self.base / "logs/go2rtc.log"
+        log.parent.mkdir()
+        log.write_text("runtime", encoding="utf-8")
+        def reject_link(candidate):
+            if Path(candidate).name == "go2rtc.log":
+                raise ValueError("reparse fixture")
+            plain(candidate)
+        with patch("meowkeeper.app.delta_update.plain", side_effect=reject_link), self.assertRaises(ValueError):
+            validate_base(self.base, self.delta)
+        (self.base / "src/demo.py").write_bytes(b"modified")
+        with self.assertRaises(ValueError):
+            validate_base(self.base, self.delta)
+
     def test_update_manager_checks_and_downloads_only_small_delta(self):
         manager = UpdateManager(self.base, self.root / "Data")
         calls = []
@@ -311,6 +387,10 @@ class DeltaUpdateTests(unittest.TestCase):
             validate_base(self.base, manifest)
 
     def test_protected_worker_reverifies_and_stages_delta(self):
+        for name, content in self._runtime_files().items():
+            path = self.base / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(content, encoding="utf-8")
         stage = self.root / "work-fixture"
         stage.mkdir()
         archive = stage / "package.zip"
@@ -323,6 +403,7 @@ class DeltaUpdateTests(unittest.TestCase):
         self.assertEqual(Path(result["package_path"]).name, "a")
         self.assertEqual(digest(Path(result["package_path"]) / "build_manifest.json"), digest(self.target / "build_manifest.json"))
         self.assertEqual((self.base / "src/demo.py").read_bytes(), b"old")
+
 
 
 if __name__ == "__main__":
