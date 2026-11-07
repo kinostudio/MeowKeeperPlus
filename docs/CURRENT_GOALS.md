@@ -1,5 +1,11 @@
 # 目前進度與目標（2026-10-21）
 
+## 2026-11-07｜r119 Telegram 接收器恢復與累積差量
+
+- [r119 候選已公開](https://github.com/kinostudio/MeowKeeperPlus/releases/tag/r119)：直接由精確 r116 基準更新，包含 r118 全部修正及本次接收器退避恢復。差量 ZIP 1,374,716 bytes、31 個變更檔、零刪除、無大型依賴下載；僅發布 ZIP、簽章清單及 6,457 bytes 過渡工具。
+- 固定來源完整 1,086 項、故障回歸 185 項通過，零略過；來源指紋 `78d8de9dbafd02d9c66af5e9f8cbd84b99061d7b6dcf212272803e8ec6952fd0`。候選 21,358 檔完整性、實際差量重建、原 r116 runtime 準備、包內接收器 8 項回歸及隔離 HTTP 啟動通過；公開下載／簽章／SHA-256 再驗通過。
+- 正式 Host 未由本次發布流程升級；由使用者自行執行[更新命令](DELTA_HOTFIX.md#r119-更新命令)。正式 SYSTEM 更新、自動恢復修正版的 Bot 實機故障注入、正式資料回滾與斷電恢復仍為 `not_checked`。[修正與限制](R119_DELTA_HOTFIX.md)。
+
 ## 2026-11-05｜真正檔案差量 hotfix
 
 - [r118 候選已公開](https://github.com/kinostudio/MeowKeeperPlus/releases/tag/r118)：完整1078／回歸177零略過、實際重建21358檔、r116內附Python準備流程與包內HTTP smoke通過，公開下載／簽章／SHA-256再驗通過。差量1367346 bytes，30檔、無大型依賴；正式Host未由開發流程安裝，正式SYSTEM換版／資料回滾／斷電恢復仍為not_checked。

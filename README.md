@@ -26,7 +26,7 @@ Windows 本地寵物監控：共用攝影機影音來源、事件影片、Telegr
 私人設定、金鑰、資料庫、攝影機畫面、實機量測與操作紀錄只保存在使用者本機。安全管理見 [安全規範](docs/SECURITY.md)。
 # 安全更新整合候選
 
-已發布 [r118 差量 hotfix 候選](https://github.com/kinostudio/MeowKeeperPlus/releases/tag/r118)：差量 ZIP 約 1.37 MB，不重新下載未變 runtime／CUDA／FFmpeg／模型。完整測試 1,078 項、發布回歸 177 項、實際包重建與包內 HTTP 啟動通過；正式換版／回滾仍待使用者實機驗收。[適用基準與更新命令](docs/DELTA_HOTFIX.md#r118-更新命令)。
+已發布 [r119 累積差量 hotfix 候選](https://github.com/kinostudio/MeowKeeperPlus/releases/tag/r119)：包含 r118 修正及 Telegram 接收器衝突後自動退避恢復，r116 可直接更新。差量 ZIP 約 1.37 MB，不重新下載未變 runtime／CUDA／FFmpeg／模型。完整測試 1,086 項、發布回歸 185 項、實際包重建、原 r116 runtime 準備與包內 HTTP 啟動通過；公開資產下載／簽章／雜湊再驗通過。正式換版／回滾仍待使用者實機驗收。[適用基準與更新命令](docs/DELTA_HOTFIX.md#r119-更新命令)。
 
 r118 新增真正的簽章檔案差量：未變 runtime／CUDA／FFmpeg／模型不下載，精確基準不符即停止、不自動改抓完整包。[差量更新契約與驗收邊界](docs/DELTA_HOTFIX.md)。套用仍會短暫中斷；正式 Host 升級由使用者執行。
 

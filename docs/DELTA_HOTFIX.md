@@ -10,13 +10,13 @@
 
 ## r116 的一次性過渡
 
-舊版更新器不認識新協定，因此提供小型 `MeowKeeperPlus-r118-delta-bootstrap.pyz`。使用者在主機本機管理員 PowerShell 核對其固定 SHA-256，使用**現有內附 Python**執行；不需要安裝 Python、pip 或重新下載 runtime。
+舊版更新器不認識新協定，因此提供對應目標版本的小型 `MeowKeeperPlus-r119-delta-bootstrap.pyz`。使用者在主機本機管理員 PowerShell 核對其固定 SHA-256，使用**現有內附 Python**執行；不需要安裝 Python、pip 或重新下載 runtime。
 
 過渡工具只接受固定官方版本網址，使用已安裝的官方公鑰驗證差量簽章；先驗基準，再下載 ZIP。已驗證的新 worker／驗證器置於 Administrators／SYSTEM 保護的 Updater 目錄，只有使用者明確 `--apply` 才呼叫受控換版流程。不自行觸發 UAC。
 
 過渡工具的更新要求、差量封存及 verifier 也全部位於受保護的 Updater 子目錄；不以管理員權限向一般帳號可寫的 Data 更新暫存複製檔案。固定 SYSTEM 的日常 Dashboard 路徑仍會先複製至受保護目錄並重新驗證。
 
-本次 r116→r118 包的基準為官方 r116 加上一份已知、已公開的 `src/meowkeeper/app/web/state.py` 修正；該檔案的確切大小與 SHA-256 另列於簽章 `base_overrides`。這不是允許任意修改：其他內容或未包含該修正的 r116 會拒絕套用。基準不符需另外製作對應的簽章差量，不自動下載完整包。
+r116→r118 與 r116→r119 包的基準為官方 r116 加上一份已知、已公開的 `src/meowkeeper/app/web/state.py` 修正；該檔案的確切大小與 SHA-256 另列於簽章 `base_overrides`。這不是允許任意修改：其他內容或未包含該修正的 r116 會拒絕套用。基準不符需另外製作對應的簽章差量，不自動下載完整包。
 
 後續版本由既有固定 SYSTEM 更新工作處理新協定；Dashboard 仍須本機登入、CSRF 與明確中斷確認。不接受任意下載網址、命令或 verifier 路徑。
 
@@ -35,6 +35,26 @@
 `tests/test_delta_updates.py` 驗證僅變更檔案、簽章／基準／路徑／ZIP 防護、已知修正基準、無完整包回退、下載前拒絕及 worker 重建；`tests/test_hotfix_transaction.py` 驗證隔離檔案與 SQLite 回復。發布前另做真實候選包重建、逐檔完整性與包內 HTTP smoke。
 
 上述不等於正式 Host 的 SYSTEM 排程、UAC、真實停止／啟動、斷電恢復或正式資料回滾驗收。正式安裝由使用者執行，未實測項目必須標記 `not_checked`。
+
+## r119 更新命令
+
+[r119 累積差量候選](https://github.com/kinostudio/MeowKeeperPlus/releases/tag/r119) 包含 r118 的修正與 Telegram 接收器退避恢復。完整 1,086 項／回歸 185 項零略過、真實套件重建、原 r116 runtime 準備與隔離 HTTP 啟動通過；三個公開資產重新下載後簽章、SHA-256 與內容核對通過。ZIP 1,374,716 bytes、31 個變更檔、零刪除、無 runtime／vendor／models 變更下載。
+
+只適用本頁所述的精確 r116 基準，無需先安裝 r118。請由使用者在要更新的電腦開啟**管理員 Windows PowerShell**執行；會短暫停止監控，仍需本機重建／快照磁碟空間。不會自動觸發 UAC，開發流程不代為安裝。正式 SYSTEM 更新、正式資料回滾及斷電恢復仍待實機驗收。
+
+```powershell
+$ErrorActionPreference = 'Stop'
+[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+$hotfixTool = Join-Path $env:TEMP 'MeowKeeperPlus-r119-delta-bootstrap.pyz'
+$pythonPath = Join-Path $env:ProgramData 'MeowKeeperPlus\App\runtime\python\python.exe'
+if (-not (Test-Path -LiteralPath $pythonPath)) { throw '找不到既有安裝版 Python；未開始更新。' }
+Invoke-WebRequest -UseBasicParsing -Uri 'https://github.com/kinostudio/MeowKeeperPlus/releases/download/r119/MeowKeeperPlus-r119-delta-bootstrap.pyz' -OutFile $hotfixTool
+if ((Get-FileHash -LiteralPath $hotfixTool -Algorithm SHA256).Hash.ToLowerInvariant() -ne '8851e71b766ff8c08318fefaf776f7cd15210b5bebe00952ce43ad703c5f1a9b') { throw '過渡工具校驗失敗，停止更新。' }
+& $pythonPath -B $hotfixTool --version r119 --apply
+if ($LASTEXITCODE -ne 0) { throw '差量更新未完成；請保留程式與備份，不要改抓完整包或重複執行。' }
+```
+
+工具先核對簽章與精確基準，再下載差量；不符即停止，沒有完整包回退。不要將 ZIP 直接覆蓋 App，也不要平行執行多個更新。另一台電腦若持續使用同一 Bot 輪詢，仍需排除重複接收端；自動退避不會替你關閉其他程式。
 
 ## r118 更新命令
 
