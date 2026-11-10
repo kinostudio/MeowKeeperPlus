@@ -4,6 +4,7 @@ All fixtures are synthetic; nothing here touches an installed Host, real Data or
 """
 from __future__ import annotations
 
+import ctypes
 import hashlib
 import json
 import os
@@ -275,8 +276,10 @@ class CoordinatorLifetimeTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder)
             marker = root / "worker-finished.txt"
+            worker_pid = root / "worker.pid"
             worker = root / "worker.ps1"
-            worker.write_text("Start-Sleep -Seconds 3\nSet-Content -LiteralPath '" + str(marker).replace("'", "''") + "' -Value done\n",
+            worker.write_text("Set-Content -LiteralPath '" + str(worker_pid).replace("'", "''") + "' -Value $PID\n"
+                              "Start-Sleep -Seconds 3\nSet-Content -LiteralPath '" + str(marker).replace("'", "''") + "' -Value done\n",
                               encoding="utf-8-sig")
             coordinator = root / "coordinator.py"
             coordinator.write_text(
@@ -294,9 +297,26 @@ class CoordinatorLifetimeTests(unittest.TestCase):
                 while time.monotonic() < deadline and not marker.exists():
                     time.sleep(0.25)
                 self.assertTrue(marker.exists(), "worker died with its coordinator")
+                kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+                kernel32.OpenProcess.argtypes = (ctypes.c_uint32, ctypes.c_int, ctypes.c_uint32)
+                kernel32.OpenProcess.restype = ctypes.c_void_p
+                kernel32.WaitForSingleObject.argtypes = (ctypes.c_void_p, ctypes.c_uint32)
+                kernel32.WaitForSingleObject.restype = ctypes.c_uint32
+                kernel32.CloseHandle.argtypes = (ctypes.c_void_p,)
+                handle = kernel32.OpenProcess(0x00100000, False, int(worker_pid.read_text(encoding="utf-8")))
+                if handle:
+                    try:
+                        self.assertEqual(kernel32.WaitForSingleObject(handle, 10000), 0, "worker retained temp files after timeout")
+                    finally:
+                        kernel32.CloseHandle(handle)
+                else:
+                    self.assertEqual(ctypes.get_last_error(), 87, "worker process could not be awaited")
             finally:
                 if process.poll() is None:
                     process.kill()
+                    process.wait(10)
+                if process.stdout:
+                    process.stdout.close()
 
 
 class RollbackStateContractTests(unittest.TestCase):

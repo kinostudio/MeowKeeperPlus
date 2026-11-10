@@ -420,7 +420,7 @@ AI 尺寸比較需固定模型／影格／後端，正反交錯多輪，合併�
 
 - 安裝器排程明確傳入 `ProgramData\MeowKeeperPlus\Data`，但舊／直接 Host 啟動可能仍明確帶有 `App\data` 參數；不能因新程式預設解析到 Data 就假定舊任務也已換路徑。Tray 開事件資料夾／匯出診斷時，必須依已登入 Host 的 `/api/v1/status.metrics.disk.path` 核對實際 `events` 根目錄，且只接受本安裝的 `Data` 或 `App\data`；不能自行依目錄是否存在猜測。安裝圖形入口依 Core 排程工作實際的 `--event-directory`／`--dashboard-config` 選擇等待的 Dashboard 設定，禁止硬寫 `Data`。升級仍先封存 App，再把舊 `App\data` 與根目錄 `config.json` 安全移入 Data；cache／locks／install-history 不搬，同名衝突 fail-closed、不覆寫，預驗證失敗依交易紀錄回復。開始功能表捷徑提供非 CLI 圖形重啟入口。回歸由 `INSTALLED-DATA-ROOT-CONSISTENCY` 強制。
 - SQLite 事件若保存的是舊電腦絕對 clip_path，資料庫與目前資料夾可能同時有影片，但 UI 仍判定不可播放。只允許在設定事件根目錄依安全事件 ID 回退到 `event_<id>.mp4`；不可照 DB 任意外部路徑送檔。見 `EVENT-VIDEO-RELOCATED-DATA`。
-- 2026-10-19 SHRIMP-ASUS 實機證明舊 r98 路徑的檔案甚至仍存在，但 r107 依目前事件根目錄限制回報不可播放。可用 `tools/repair_event_media_paths.py` 在 SHA-256 比對、SQLite 線上備份後條件更新路徑；不得關閉檔案路徑限制來繞過。745 筆修復、最新真實事件人工回報影片完整播放；另 95 筆缺少對應 MP4 仍如實保留。詳見 `C701_EVENT_DATA_REPAIR_2026-10-19.md`；回歸另含備份／冪等及錯誤雜湊不改寫。
+- 實機驗收證明，舊版本的事件檔案可能仍存在，但新版事件根目錄限制會阻止以舊絕對路徑播放。以安全事件 ID 在設定根目錄定位同名影片，先 SHA-256 比對並線上備份 SQLite 後條件修復；缺少影片時仍如實保留不可播放狀態。回歸涵蓋備份、冪等及錯誤雜湊不改寫。
 - `/api/v1/status` 的 `dashboard.firewall` 是 Dashboard TCP 入站規則狀態，不是 Xiaomi go2rtc UDP 影格診斷。來源 running／連線數與 HTTP 200 均不能證明收到影格；必須分開檢查 frame timestamp、JPEG/影片解碼與防火牆診斷。小米頁「連線遇到問題？」中的唯讀按鈕需把完整安全結果呈現在頁面，不能只把摘要塞進提示列後丟棄回應；回歸 `XIAOMI-FIREWALL-REPORT-VISIBLE`。
 - 實機狀態 JSON 中 `last_frame_at/resolution/fps=null`、preview 無新影格及 ring buffer 0，僅證明該快照未有可用影格，不能單憑此判定就是防火牆。實機 Host／當前封包路徑仍需另外驗證。
 

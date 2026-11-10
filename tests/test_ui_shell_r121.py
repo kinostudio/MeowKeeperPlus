@@ -83,7 +83,7 @@ class StatusClassifyTests(unittest.TestCase):
             + script
             + f";console.log(JSON.stringify(window.MeowKeeperStatusTag.classify({json.dumps(payload)})));"
         )
-        out = subprocess.run(["node", "-e", harness], capture_output=True, text=True, check=True, timeout=30)
+        out = subprocess.run(["node", "-e", harness], capture_output=True, text=True, encoding="utf-8", check=True, timeout=30)
         return json.loads(out.stdout)["state"]
 
     def test_four_states(self):
