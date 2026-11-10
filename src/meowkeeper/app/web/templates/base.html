@@ -43,8 +43,8 @@
       <span class="sr-only" id="monitor-help">停止監控會停止來源接收、AI、環形錄影與新增事件通知；Dashboard 與 Tray 仍可操作。關閉程式則停止整個服務。</span>
       <span class="sr-only" id="restart-help">重新啟動服務會短暫中斷監控，並載入已保存的設定。</span>
       <button class="button" id="monitor-toggle" type="button" disabled aria-describedby="monitor-help">正在確認監控</button>
-      <a class="button secondary topbar-guide" href="/help">{{ icon('review') }}<span>使用說明</span></a>
-      <details class="service-menu"><summary class="button secondary">更多操作</summary><div class="service-menu-items"><a class="button secondary" href="/?guide=1" data-guide-reopen>重新顯示新手引導</a><button class="button secondary" id="host-restart" type="button" aria-describedby="restart-help">重啟服務</button><button class="button danger" id="host-close" type="button">關閉程式</button></div></details>
+      <button class="button secondary topbar-guide" type="button" data-guide-open aria-haspopup="dialog" aria-controls="home-guide">{{ icon('review') }}<span>使用說明</span></button>
+      <details class="service-menu"><summary class="button secondary">更多操作</summary><div class="service-menu-items"><button class="button secondary" id="host-restart" type="button" aria-describedby="restart-help">重啟服務</button><button class="button danger" id="host-close" type="button">關閉程式</button></div></details>
       <button class="button secondary nav-toggle" id="nav-toggle" type="button" aria-controls="primary-nav" aria-expanded="true" hidden>收合選單</button>
     </div>
   </header>
@@ -79,6 +79,16 @@
       {% block content %}{% endblock %}
       <footer class="footer"><span>MeowKeeper+ · 本地 AI 全天候守護每一隻貓咪</span><span id="release-version">{{ release_info.version }} · {{ release_info.date }} · {{ release_info.mode }}</span><span>關閉網頁，背景服務仍會繼續執行。</span></footer>
     </main>
+  <dialog id="home-guide" class="home-guide guide-dialog" aria-labelledby="home-guide-title">
+    <div class="home-guide-head"><div><p class="eyebrow">使用說明</p><h3 id="home-guide-title" tabindex="-1">五步驟開始守護貓咪</h3><p id="home-guide-progress" class="field-help">正在確認設定進度</p></div><div class="actions"><a class="button secondary" href="/help">完整說明與常見問題</a><button id="home-guide-dismiss" class="button" type="button" autofocus>開始使用</button><button class="guide-close" type="button" data-guide-close aria-label="關閉使用說明">×</button></div></div>
+    <ol class="home-guide-steps">
+      <li data-guide-check="camera"><span class="guide-num" aria-hidden="true">1</span><div><strong>連接攝影機</strong><p>輸入 RTSP 位址或用小米精靈連線，看到畫面就算完成。</p><a href="/settings/source">前往來源與攝影機 →</a></div></li>
+      <li data-guide-check="monitor"><span class="guide-num" aria-hidden="true">2</span><div><strong>啟動監控</strong><p>按右上角「啟動監控」，狀態標籤變成「監控中」就代表畫面和 AI 都在運作。</p></div></li>
+      <li><span class="guide-num" aria-hidden="true">3</span><div><strong>建立貓咪檔案</strong><p>為每隻貓取名並上傳幾張照片，事件裡才能分辨是誰。</p><a href="/settings/pets">前往貓咪檔案 →</a></div></li>
+      <li><span class="guide-num" aria-hidden="true">4</span><div><strong>圈出飯碗、水盆、貓砂盆</strong><p>在畫面上拖曳圈選位置，系統才能推斷吃飯、喝水和如廁。</p><a href="/settings/ai#scene-registry-panel">前往場景標記 →</a></div></li>
+      <li data-guide-check="notify"><span class="guide-num" aria-hidden="true">5</span><div><strong>開啟手機通知（選用）</strong><p>連接 Telegram，有事件時手機會收到照片與短片。</p><a href="/settings/telegram">前往通知設定 →</a></div></li>
+    </ol>
+  </dialog>
   </div>
   <script src="/static/app.js?v={{ ui_cache_key }}" defer></script>
   <script src="/static/js/experience.js?v={{ ui_cache_key }}" defer></script>

@@ -36,7 +36,7 @@ class ShellTests(unittest.TestCase):
         self.assertEqual(primaries, ["首頁", "即時畫面", "事件", "貓咪", "設定"])
         self.assertIn('href="/help"', html)
         self.assertIn("使用說明", html)
-        self.assertIn("data-guide-reopen", html)
+        self.assertIn("data-guide-open", html)
         self.assertEqual(html.count('class="active"'), 1)
         self.assertIn("in-section", html)
 
@@ -47,16 +47,28 @@ class ShellTests(unittest.TestCase):
         for state in ("ok", "warn", "alert", "off"):
             self.assertIn(f"[data-state={state}]", css)
 
-    def test_home_guide_has_five_steps_with_real_routes(self):
-        html = (TEMPLATES / "dashboard.html").read_text(encoding="utf-8")
-        guide = html[html.index('id="home-guide"'):html.index("</section>", html.index('id="home-guide"'))]
+    def test_usage_guide_is_popup_not_on_home(self):
+        base = (TEMPLATES / "base.html").read_text(encoding="utf-8")
+        start = base.index('<dialog id="home-guide"')
+        guide = base[start:base.index("</dialog>", start)]
         self.assertEqual(guide.count("<li"), 5)
         for route in ("/settings/source", "/settings/pets", "/settings/ai#scene-registry-panel", "/settings/telegram", "/help"):
             self.assertIn(f'href="{route}"', guide)
-        self.assertIn('id="home-guide-dismiss"', guide)
-        self.assertIn('id="home-status-hero"', html)
+        self.assertIn("data-guide-close", guide)
+        self.assertIn("data-guide-open", base)
+        dashboard = (TEMPLATES / "dashboard.html").read_text(encoding="utf-8")
+        self.assertNotIn("home-guide", dashboard)  # 不常駐在主畫面
+        self.assertIn('id="home-status-hero"', dashboard)
         settings = (TEMPLATES / "settings.html").read_text(encoding="utf-8")
         self.assertIn('id="scene-registry-panel"', settings)
+
+    def test_guide_auto_opens_once_after_registration(self):
+        setup = (TEMPLATES / "setup.html").read_text(encoding="utf-8")
+        self.assertIn("meowkeeper.guide.pending", setup)
+        js = (STATIC / "js" / "status-tag.js").read_text(encoding="utf-8")
+        self.assertIn("meowkeeper.guide.pending", js)
+        self.assertIn("removeItem(PENDING_KEY)", js)  # 只顯示一次
+        self.assertIn("showModal", js)
 
     def test_field_tooltips_are_accessible(self):
         js = (STATIC / "js" / "field-tooltips.js").read_text(encoding="utf-8")

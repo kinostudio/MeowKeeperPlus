@@ -61,6 +61,8 @@ document.getElementById('setup-form').addEventListener('submit', async (event) =
     });
     if (response.ok) {
       message.textContent = '管理者已建立，正在前往登入頁…';
+      // First page after login opens the usage guide popup once.
+      try { window.localStorage.setItem('meowkeeper.guide.pending', '1'); } catch (_error) { /* storage unavailable: guide stays manual */ }
       window.location.href = '/login';
       return;
     }

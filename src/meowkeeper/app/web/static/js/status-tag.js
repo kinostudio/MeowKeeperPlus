@@ -36,14 +36,14 @@
     }
   }
 
-  const GUIDE_KEY = "meowkeeper.guide.dismissed";
-  function storage(action, value) {
+  // Guide popup opens once after the admin account is first created (flag set by setup.html), or on demand.
+  const PENDING_KEY = "meowkeeper.guide.pending";
+  function takePending() {
     try {
-      if (action === "get") return window.localStorage.getItem(GUIDE_KEY);
-      if (action === "set") window.localStorage.setItem(GUIDE_KEY, value);
-      if (action === "clear") window.localStorage.removeItem(GUIDE_KEY);
-    } catch (_error) { /* Storage can be unavailable; the guide simply stays visible. */ }
-    return null;
+      const pending = window.localStorage.getItem(PENDING_KEY) === "1";
+      if (pending) window.localStorage.removeItem(PENDING_KEY);
+      return pending;
+    } catch (_error) { return false; }
   }
 
   function guideChecks(payload) {
@@ -71,23 +71,36 @@
     if (counter) counter.textContent = `已完成 ${done}／${total} 項自動檢查`;
   }
 
+  function openGuide() {
+    const guide = document.getElementById("home-guide");
+    if (!guide || guide.open) return;
+    if (typeof guide.showModal === "function") guide.showModal();
+    else guide.setAttribute("open", "");
+  }
+
+  function closeGuide() {
+    const guide = document.getElementById("home-guide");
+    if (!guide) return;
+    if (typeof guide.close === "function") guide.close();
+    else guide.removeAttribute("open");
+  }
+
   function wireGuide() {
     const guide = document.getElementById("home-guide");
-    if (new URLSearchParams(window.location.search).has("guide")) storage("clear");
-    if (guide && storage("get") === "1") guide.hidden = true;
-    document.getElementById("home-guide-dismiss")?.addEventListener("click", () => {
-      storage("set", "1");
-      if (guide) guide.hidden = true;
-    });
-    document.querySelectorAll("[data-guide-reopen]").forEach((button) => button.addEventListener("click", (event) => {
-      storage("clear");
-      if (guide) {
-        event.preventDefault();
-        guide.hidden = false;
-        guide.scrollIntoView({ behavior: "smooth", block: "start" });
-        guide.querySelector("h3")?.focus();
+    if (!guide) return;
+    document.querySelectorAll("[data-guide-open]").forEach((button) => button.addEventListener("click", openGuide));
+    guide.querySelectorAll("#home-guide-dismiss, [data-guide-close]").forEach((button) => button.addEventListener("click", closeGuide));
+    // Click on the dimmed backdrop closes too.
+    guide.addEventListener("click", (event) => { if (event.target === guide) closeGuide(); });
+    const params = new URLSearchParams(window.location.search);
+    if (takePending() || params.has("guide")) {
+      if (params.has("guide")) {
+        params.delete("guide");
+        const query = params.toString();
+        window.history.replaceState(null, "", window.location.pathname + (query ? `?${query}` : "") + window.location.hash);
       }
-    }));
+      openGuide();
+    }
   }
 
   document.addEventListener("meowkeeper:status", (event) => {
@@ -97,5 +110,5 @@
   });
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", wireGuide, { once: true });
   else wireGuide();
-  window.MeowKeeperStatusTag = { classify };
+  window.MeowKeeperStatusTag = { classify, openGuide };
 })();

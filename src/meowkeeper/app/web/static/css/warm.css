@@ -83,9 +83,15 @@ legend{font-family:var(--hand);font-weight:700;font-size:1.05rem;padding:0 6px}
 .status-legend li[data-state=alert] .status-tag-shape{border-radius:2px;transform:rotate(45deg);width:9px;height:9px}
 .status-legend li[data-state=off] .status-tag-shape{background:transparent;border:2px dashed currentColor}
 
-/* Home: first-use guide */
-.home-guide{margin:0 0 16px;padding:20px 22px;background:var(--panel);border:2px solid var(--line-strong);border-radius:var(--wobble);box-shadow:3px 4px 0 var(--line)}
-.home-guide[hidden]{display:none}
+/* Usage guide popup (dialog): opens once after registration, or from 使用說明 */
+.guide-dialog{width:min(980px,94vw);max-height:90vh;overflow:auto;margin:auto;color:var(--ink)}
+.guide-dialog:not([open]){display:none}
+.guide-dialog::backdrop{background:rgba(62,48,39,.45)}
+.guide-dialog .home-guide-head{padding-right:40px}
+.guide-close{position:absolute;top:12px;right:12px;width:36px;height:36px;min-height:0;padding:0;border:2px solid #d6c4ac;border-radius:50%;background:var(--panel);color:var(--ink);font-size:1.3rem;line-height:1;cursor:pointer}
+.guide-close:hover,.guide-close:focus-visible{border-color:var(--line-strong)}
+/* Guide content */
+.home-guide{position:relative;margin:auto;padding:20px 22px;background:var(--panel);border:2px solid var(--line-strong);border-radius:var(--wobble);box-shadow:3px 4px 0 var(--line)}
 .home-guide-head{display:flex;justify-content:space-between;align-items:flex-start;gap:14px;flex-wrap:wrap}
 .home-guide-head h3{margin:2px 0 4px;font-size:1.35rem}
 .home-guide-head .eyebrow{color:var(--accent-ink);font-weight:700}
@@ -107,3 +113,4 @@ legend{font-family:var(--hand);font-weight:700;font-size:1.05rem;padding:0 6px}
   .sidebar .nav-subpages{grid-column:1/-1;margin-left:8px}
 }
 @media(prefers-reduced-motion:reduce){[data-state=pending]>.status-tag-shape,[data-state=alert].status-tag{animation:none}}
+.guide-dialog .home-guide-steps{grid-template-columns:repeat(auto-fit,minmax(168px,1fr))}
