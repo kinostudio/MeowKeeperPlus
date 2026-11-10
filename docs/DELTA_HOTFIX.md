@@ -1,6 +1,6 @@
 # 真正的檔案差量更新
 
-> 2026-11-10 r121 候選：差量清單改名 `update-manifest-delta.json`；差量不適用時 Dashboard 列出原因與大小，**由使用者明確選擇**才下載完整簽章包（不自動回退）。過渡工具改為分離啟動 worker，修正更新器程序生命週期、執行期快取衝突與復原狀態確認。細節與一般操作請參閱 [線上更新說明](ONLINE_UPDATES.md)。下方 r118～r120 段落為歷史命令。
+> 2026-11-11 r121 發布：差量清單使用 `update-manifest-delta.json`；差量不適用時 Dashboard 列出原因與大小，**由使用者明確選擇**才下載完整簽章包（不自動回退）。過渡工具改為分離啟動 worker，修正更新器程序生命週期、執行期快取衝突與復原狀態確認。細節與一般操作請參閱 [線上更新說明](ONLINE_UPDATES.md)。下方 r118～r120 段落為歷史命令。
 
 ## 契約
 
@@ -12,7 +12,23 @@
 
 ## r116 的一次性過渡
 
-舊版更新器不認識新協定，因此提供對應目標版本的小型 `MeowKeeperPlus-r120-delta-bootstrap.pyz`。使用者在主機本機管理員 PowerShell 核對其固定 SHA-256，使用**現有內附 Python**執行；不需要安裝 Python、pip 或重新下載 runtime。
+舊版更新器不認識新協定，因此提供對應目標版本的小型 `MeowKeeperPlus-r121-delta-bootstrap.pyz`。使用者在主機本機管理員 PowerShell 核對其固定 SHA-256，使用**現有內附 Python**執行；不需要安裝 Python、pip 或重新下載 runtime。
+
+### r121（僅適用精確 r116 基準）
+
+r116→r121 差量為 1,980,634 bytes，含 72 個新增／修改檔及 3 個刪除項；過渡工具為 8,207 bytes，SHA-256：`6e2df2a036c5ef07780d6452c383eaed02d0f88af48e8ec0afaba2726995f83a`。工具先核對已安裝 r116 的 build manifest 與逐檔 hash；不符即停止，不會改抓 2.4 GB 完整包。更新會暫停監控並需要本機重建與資料備份空間。
+
+```powershell
+$ErrorActionPreference = 'Stop'
+[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+$hotfixTool = Join-Path $env:TEMP 'MeowKeeperPlus-r121-delta-bootstrap.pyz'
+$pythonPath = Join-Path $env:ProgramData 'MeowKeeperPlus\App\runtime\python\python.exe'
+if (-not (Test-Path -LiteralPath $pythonPath)) { throw '找不到既有安裝版 Python；未開始更新。' }
+Invoke-WebRequest -UseBasicParsing -Uri 'https://github.com/kinostudio/MeowKeeperPlus/releases/download/r121/MeowKeeperPlus-r121-delta-bootstrap.pyz' -OutFile $hotfixTool
+if ((Get-FileHash -LiteralPath $hotfixTool -Algorithm SHA256).Hash.ToLowerInvariant() -ne '6e2df2a036c5ef07780d6452c383eaed02d0f88af48e8ec0afaba2726995f83a') { throw '過渡工具校驗失敗，停止更新。' }
+& $pythonPath -B $hotfixTool --version r121 --apply
+if ($LASTEXITCODE -ne 0) { throw '差量更新未完成；請保留程式與備份，不要改抓完整包或重複執行。' }
+```
 
 過渡工具只接受固定官方版本網址，使用已安裝的官方公鑰驗證差量簽章；先驗基準，再下載 ZIP。已驗證的新 worker／驗證器置於 Administrators／SYSTEM 保護的 Updater 目錄，只有使用者明確 `--apply` 才呼叫受控換版流程。不自行觸發 UAC。
 
