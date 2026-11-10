@@ -30,6 +30,13 @@ $installerResultPath = $null
 $version = ''
 $updateSucceeded = $false
 $workerLock = $null
+$runtimeState = $null
+$failureCode = ''
+$failureDetail = ''
+$stepTotal = 8
+$currentStep = 0
+$currentStepName = ''
+$stepHistory = New-Object System.Collections.ArrayList
 
 function Enter-UpdateLock([string]$Root) {
     $path = Join-Path $Root 'apply.lock'
@@ -37,7 +44,7 @@ function Enter-UpdateLock([string]$Root) {
     return [IO.File]::Open($path, [IO.FileMode]::OpenOrCreate, [IO.FileAccess]::ReadWrite, [IO.FileShare]::None)
 }
 
-function Invoke-BoundedProcess([string]$Executable, [string[]]$Arguments, [int]$TimeoutSeconds) {
+function Invoke-BoundedProcess([string]$Executable, [string[]]$Arguments, [int]$TimeoutSeconds, [string]$ProgressPath = '') {
     $outputPath = Join-Path $workRoot ('process-' + [guid]::NewGuid().ToString('N') + '.txt')
     $errorPath = $outputPath + '.error'
     $quoted = @($Arguments | ForEach-Object {
@@ -47,7 +54,12 @@ function Invoke-BoundedProcess([string]$Executable, [string[]]$Arguments, [int]$
     $process = Start-Process -FilePath $Executable -ArgumentList ($quoted -join ' ') -PassThru -WindowStyle Hidden -RedirectStandardOutput $outputPath -RedirectStandardError $errorPath
     try {
         $null = $process.Handle
-        if (-not $process.WaitForExit($TimeoutSeconds * 1000)) {
+        $deadline = [DateTime]::UtcNow.AddSeconds($TimeoutSeconds)
+        while (-not $process.WaitForExit(1000) -and [DateTime]::UtcNow -lt $deadline) {
+            if ($ProgressPath) { Update-StepFromInstaller $ProgressPath }
+        }
+        if ($ProgressPath) { Update-StepFromInstaller $ProgressPath }
+        if (-not $process.HasExited) {
             $process.Kill()
             [void]$process.WaitForExit(10000)
             throw 'update_process_timeout'
@@ -55,6 +67,25 @@ function Invoke-BoundedProcess([string]$Executable, [string[]]$Arguments, [int]$
         if ($process.ExitCode -ne 0) { throw 'update_process_failed' }
         if (Test-Path -LiteralPath $outputPath -PathType Leaf) { Get-Content -LiteralPath $outputPath -Encoding UTF8 }
     } finally { $process.Dispose() }
+}
+
+function Set-UpdateStep([int]$Step, [string]$Name) {
+    if ($Step -lt 1 -or $Step -gt $stepTotal -or ($Step -eq $script:currentStep -and $Name -eq $script:currentStepName)) { return }
+    $script:currentStep = $Step
+    $script:currentStepName = $Name
+    [void]$script:stepHistory.Add([ordered]@{ step = $Step; name_zh_tw = $Name; started_at = [DateTime]::UtcNow.ToString('o') })
+    Write-Host ("[{0}/{1}] {2}" -f $Step, $stepTotal, $Name)
+    Write-UpdateStatus 'applying' ('第 {0}／{1} 步：{2}' -f $Step, $stepTotal, $Name) $version
+}
+
+function Update-StepFromInstaller([string]$ProgressPath) {
+    try {
+        if (-not (Test-Path -LiteralPath $ProgressPath -PathType Leaf)) { return }
+        $progress = Get-Content -Raw -LiteralPath $ProgressPath | ConvertFrom-Json
+        if ($progress.schema -eq 1 -and [int]$progress.step -ge 3 -and [string]$progress.step_name_zh_tw -match '^[^\r\n]{1,40}$') {
+            Set-UpdateStep ([int]$progress.step) ([string]$progress.step_name_zh_tw)
+        }
+    } catch { }
 }
 
 function Stop-UpdateProcesses {
@@ -87,10 +118,18 @@ function Stop-UpdateProcesses {
     }).Count -gt 0) { throw 'rollback_processes_remain' }
 }
 
-function Write-UpdateStatus([string]$Status, [string]$Message, [string]$Version = '') {
+function Write-UpdateStatus([string]$Status, [string]$Message, [string]$Version = '', [string]$ErrorCode = '', [string]$Detail = '') {
     try {
         Assert-PlainPath $updaterRoot
         $payload = [ordered]@{ schema = 1; status = $Status; message_zh_tw = $Message }
+        if ($ErrorCode -match '^[a-z][a-z0-9_]{2,63}$') { $payload.error_code = $ErrorCode }
+        if ($Detail -and $Detail.Length -le 400 -and $Detail -notmatch '[\r\n]') { $payload.detail_zh_tw = $Detail }
+        if ($script:currentStep -gt 0) {
+            $payload.step = $script:currentStep
+            $payload.step_total = $stepTotal
+            $payload.step_name_zh_tw = $script:currentStepName
+            $payload.steps = @($script:stepHistory)
+        }
         if ($Version -match '^r[1-9]\d*$') { $payload.version = $Version }
         if ($requestId -match '^[a-f0-9]{32}$') { $payload.request_id = $requestId }
         if ($preparedId -match '^prepared-[a-f0-9]{8,32}$') { $payload.prepared_id = $preparedId }
@@ -171,6 +210,61 @@ function Get-TaskRecord([string]$Name, [string]$ExpectedScript, [string]$Expecte
     [IO.File]::WriteAllText($xmlPath, [string]$task.Xml, [Text.UTF8Encoding]::new($true))
     [IO.File]::WriteAllText($sddlPath, [string]$security, [Text.UTF8Encoding]::new($false))
     [pscustomobject]@{ Name = $Name; Sid = $sid; DataRoot = $matchedDataRoot; WasRunning = ([int]$task.State -eq 4); XmlPath = $xmlPath; SddlPath = $sddlPath }
+}
+
+function Get-InstalledRoleProcesses([string]$Runtime, [string]$Script) {
+    $runtimePath = [IO.Path]::GetFullPath($Runtime)
+    $scriptPath = [IO.Path]::GetFullPath($Script)
+    @(Get-CimInstance Win32_Process -ErrorAction Stop | Where-Object {
+        $_.ExecutablePath -and [StringComparer]::OrdinalIgnoreCase.Equals([string]$_.ExecutablePath, $runtimePath) -and
+        $_.CommandLine -and ([string]$_.CommandLine).IndexOf($scriptPath, [StringComparison]::OrdinalIgnoreCase) -ge 0
+    })
+}
+
+function Get-RuntimeStateSnapshot {
+    # A task can report Ready while its Core keeps running (for example after the
+    # launcher restarted it). Rollback must restore what was actually running,
+    # not only the task state, so record process and health evidence as well.
+    $coreProcesses = @(Get-InstalledRoleProcesses (Join-Path $AppRoot 'runtime\python\python.exe') (Join-Path $AppRoot 'tools\run_host.py'))
+    $trayProcesses = @(Get-InstalledRoleProcesses (Join-Path $AppRoot 'runtime\python\pythonw.exe') (Join-Path $AppRoot 'tools\run_tray.py'))
+    $coreDataRoot = if ($taskRecords[0].DataRoot) { $taskRecords[0].DataRoot } else { $DataRoot }
+    $healthy = Wait-ForDashboard 4 $coreDataRoot
+    [pscustomobject]@{
+        schema = 1
+        core_task_running = [bool]$taskRecords[0].WasRunning
+        core_process_count = $coreProcesses.Count
+        dashboard_healthy = [bool]$healthy
+        core_was_active = ([bool]$taskRecords[0].WasRunning -or $coreProcesses.Count -gt 0 -or [bool]$healthy)
+        tray_task_running = [bool]$taskRecords[1].WasRunning
+        tray_process_count = $trayProcesses.Count
+        tray_was_active = ([bool]$taskRecords[1].WasRunning -or $trayProcesses.Count -gt 0)
+        core_principal_sid = [string]$taskRecords[0].Sid
+        tray_principal_sid = [string]$taskRecords[1].Sid
+        core_data_root = [string]$coreDataRoot
+    }
+}
+
+function Test-RestoredRuntime($Snapshot) {
+    # Rollback is complete only when the original task definitions, principals,
+    # App manifest and Data root are back and, if Core was running before,
+    # Core is running again with a healthy Dashboard.
+    $coreArguments = @(
+        ('--dashboard-config "' + (Join-Path $Snapshot.core_data_root 'config.json') + '"'),
+        ('--database-path "' + (Join-Path $Snapshot.core_data_root 'meowkeeper.db') + '"'),
+        ('--event-directory "' + (Join-Path $Snapshot.core_data_root 'events') + '"')
+    )
+    if (-not (Test-ExpectedTaskDefinition -Name $coreTaskName -ExpectedScript (Join-Path $AppRoot 'tools\run_host.py') -ExpectedRuntime (Join-Path $AppRoot 'runtime\python\python.exe') -RequiredArguments $coreArguments -ExpectedPrincipalSid $Snapshot.core_principal_sid)) {
+        return 'rollback_core_task_definition_mismatch'
+    }
+    if (-not (Test-ExpectedTaskDefinition -Name $trayTaskName -ExpectedScript (Join-Path $AppRoot 'tools\run_tray.py') -ExpectedRuntime (Join-Path $AppRoot 'runtime\python\pythonw.exe') -RequiredArguments @('--lock-root "' + $installRoot + '"') -ExpectedPrincipalSid $Snapshot.tray_principal_sid)) {
+        return 'rollback_tray_task_definition_mismatch'
+    }
+    if (-not $Snapshot.core_was_active) { return '' }
+    if (-not (Wait-ForDashboard 180 $Snapshot.core_data_root)) { return 'rollback_core_health_timeout' }
+    if (@(Get-InstalledRoleProcesses (Join-Path $AppRoot 'runtime\python\python.exe') (Join-Path $AppRoot 'tools\run_host.py')).Count -eq 0) {
+        return 'rollback_core_process_missing'
+    }
+    return ''
 }
 
 function Restore-TaskRecords {
@@ -385,7 +479,7 @@ try {
     New-Item -ItemType Directory -Path $workRoot | Out-Null
     & "$env:SystemRoot\System32\icacls.exe" $workRoot /inheritance:r /grant:r '*S-1-5-18:(OI)(CI)F' '*S-1-5-32-544:(OI)(CI)F' *> $null
     if ($LASTEXITCODE -ne 0) { throw 'work_acl_failed' }
-    Write-UpdateStatus 'applying' '正在將已下載套件複製到受保護暫存區。' $version
+    Set-UpdateStep 1 '複製並重新驗證更新套件'
     Copy-Item -LiteralPath $sourceArchive -Destination (Join-Path $workRoot 'package.zip')
     Copy-Item -LiteralPath $sourceEnvelope -Destination (Join-Path $workRoot 'update-manifest.json')
     if ((Get-Item -LiteralPath (Join-Path $workRoot 'package.zip')).Length -ne $archiveLength -or
@@ -399,6 +493,11 @@ try {
         (Get-TaskRecord $trayTaskName (Join-Path $AppRoot 'tools\run_tray.py') (Join-Path $AppRoot 'runtime\python\pythonw.exe') 'tray'),
         (Get-UpdaterTaskRecord)
     )
+    Set-UpdateStep 2 '確認目前監控運行狀態'
+    $runtimeState = Get-RuntimeStateSnapshot
+    $taskRecords[0].WasRunning = [bool]$runtimeState.core_was_active
+    $taskRecords[1].WasRunning = [bool]$runtimeState.tray_was_active
+    [IO.File]::WriteAllText((Join-Path $workRoot 'runtime-state.json'), ($runtimeState | ConvertTo-Json -Compress), [Text.UTF8Encoding]::new($false))
     $coreSid = $taskRecords[0].Sid
     $traySid = $taskRecords[1].Sid
     $systemSid = 'S-1-5-18'
@@ -419,13 +518,28 @@ try {
     $expectedNewManifestHash = (Get-FileHash -Algorithm SHA256 -LiteralPath (Join-Path $packageRoot 'build_manifest.json')).Hash.ToLowerInvariant()
     $installerResultPath = Join-Path $workRoot 'installer-result.json'
 
-    Write-UpdateStatus 'applying' '套件已再次驗證；正在短暫停止監控並切換程式版本。' $version
     $powershell = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
     $installer = Join-Path $packageRoot 'scripts\Install-MeowKeeperPlus.ps1'
     $installerArgs = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $installer, '-Upgrade', '-HotfixManaged', '-SkipCpuTemperature', '-TrayUserSid', $traySid, '-HotfixResultPath', $installerResultPath, '-HotfixOldManifestSha256', $oldManifestHash)
     if ($coreSid -ne $systemSid) { $installerArgs += @('-UserHost', '-HostUserSid', $coreSid) }
     $updateStarted = $true
-    Invoke-BoundedProcess $powershell $installerArgs 1800 | Out-Null
+    try { Invoke-BoundedProcess $powershell $installerArgs 1800 (Join-Path $workRoot 'installer-progress.json') | Out-Null }
+    catch {
+        $blocked = $null
+        if (Test-Path -LiteralPath $installerResultPath -PathType Leaf) {
+            try { $blocked = Get-Content -Raw -LiteralPath $installerResultPath | ConvertFrom-Json } catch { $blocked = $null }
+        }
+        if ($blocked -and $blocked.schema -eq 1 -and $blocked.status -eq 'preflight_blocked' -and
+            $blocked.old_manifest_sha256 -eq $oldManifestHash.ToLowerInvariant() -and
+            (Get-FileHash -Algorithm SHA256 -LiteralPath (Join-Path $AppRoot 'build_manifest.json')).Hash -eq $oldManifestHash) {
+            # The installer stopped before ending tasks or moving files.
+            $updateStarted = $false
+            $failureCode = 'data_migration_preflight_blocked'
+            $failureDetail = '同名項目：' + ((@($blocked.blocking_entries) | ForEach-Object { [string]$_ }) -join '、')
+            throw 'data_migration_preflight_blocked'
+        }
+        throw
+    }
     if (-not (Test-Path -LiteralPath $installerResultPath -PathType Leaf)) { throw 'installer_result_missing' }
     $installerResult = Get-Content -Raw -LiteralPath $installerResultPath | ConvertFrom-Json
     if ($installerResult.schema -ne 1 -or $installerResult.status -ne 'installed_health_passed' -or
@@ -456,7 +570,17 @@ try {
     }
     $residualData = Join-Path $backupApp 'data'
     $dataItems = if (Test-Path -LiteralPath $residualData -PathType Container) { @(Get-ChildItem -LiteralPath $residualData -Force) } else { @() }
-    $hasUnmigratedData = @($dataItems | Where-Object { $_.Name -notin @('cache', 'locks', 'install-history') }).Count -gt 0
+    $candidateItems = @($dataItems | Where-Object { $_.Name -notin @('cache', 'locks', 'install-history') })
+    $hasUnmigratedData = $candidateItems.Count -gt 0
+    if ($hasUnmigratedData) {
+        # Verified runtime caches left behind on purpose do not count as data;
+        # anything else (or a failed check) keeps the old App backup.
+        try {
+            $residualOutput = Invoke-BoundedProcess (Join-Path $AppRoot 'runtime\python\python.exe') @((Join-Path $AppRoot 'tools\migrate_legacy_app_data.py'), '--mode', 'residual', '--source', $residualData) 300
+            $residual = ($residualOutput | Select-Object -Last 1) | ConvertFrom-Json
+            $hasUnmigratedData = -not ($residual.status -eq 'passed' -and @($residual.persistent_entries).Count -eq 0)
+        } catch { $hasUnmigratedData = $true }
+    }
     $backupRetained = $hasUnmigratedData -or -not (Test-TreeWithoutReparsePoints $backupApp)
     if (-not $backupRetained) {
         try { Remove-Item -LiteralPath $backupApp -Recurse -Force -ErrorAction Stop }
@@ -481,8 +605,12 @@ try {
 }
 catch {
     $rollbackOk = -not $updateStarted
+    $caught = [string]$_.Exception.Message
+    if (-not $failureCode -and $caught -match '^[a-z][a-z0-9_]{2,63}$') { $failureCode = $caught }
+    $rollbackCode = ''
     try {
         if ($updateStarted -and $taskRecords.Count -gt 0) {
+            Write-UpdateStatus 'applying' ('第 {0}／{1} 步失敗；正在回復原版本、資料與排程，請勿關機。' -f $script:currentStep, $stepTotal) $version
             Stop-UpdateProcesses
             if ($installerResultPath -and (Test-Path -LiteralPath $installerResultPath -PathType Leaf)) {
                 [void](Restore-PreviousApp $installerResultPath $oldManifestHash)
@@ -498,17 +626,26 @@ catch {
                 (Get-FileHash -Algorithm SHA256 -LiteralPath $currentManifest).Hash.ToLowerInvariant() -ne $oldManifestHash.ToLowerInvariant()) {
                 throw 'old_app_manifest_not_restored'
             }
-            $restoreDataRoot = if ($taskRecords.Count -gt 0 -and $taskRecords[0].DataRoot) { $taskRecords[0].DataRoot } else { $DataRoot }
-            if (-not (Wait-ForDashboard 75 $restoreDataRoot)) { throw 'old_dashboard_health_failed' }
+            if ($null -eq $runtimeState) { throw 'rollback_runtime_state_missing' }
+            $rollbackCode = Test-RestoredRuntime $runtimeState
+            if ($rollbackCode) { throw $rollbackCode }
             $rollbackOk = $true
         }
-    } catch { $rollbackOk = $false }
-    if ($rollbackOk -and -not $updateStarted) {
-        Write-UpdateStatus 'failed' '套件或更新前置驗證未通過；尚未切換版本，原有程式與資料維持不變。' $version
+    } catch {
+        $rollbackOk = $false
+        $rollbackMessage = [string]$_.Exception.Message
+        if (-not $rollbackCode -and $rollbackMessage -match '^[a-z][a-z0-9_]{2,63}$') { $rollbackCode = $rollbackMessage }
+        if (-not $rollbackCode) { $rollbackCode = 'rollback_unclassified_error' }
+    }
+    if ($rollbackOk -and -not $updateStarted -and $failureCode -eq 'data_migration_preflight_blocked') {
+        Write-UpdateStatus 'failed' '舊 App\data 與 Data 有同名持久資料；尚未停止監控、未切換版本，所有資料保持原狀。' $version $failureCode $failureDetail
+    } elseif ($rollbackOk -and -not $updateStarted) {
+        Write-UpdateStatus 'failed' '套件或更新前置驗證未通過；尚未切換版本，原有程式與資料維持不變。' $version $failureCode
     } elseif ($rollbackOk) {
-        Write-UpdateStatus 'failed' '更新未完成；已恢復原版本、資料及排程，並確認 Dashboard 重新啟動。失敗現場與快照已保留。' $version
+        $restoredText = if ($runtimeState -and $runtimeState.core_was_active) { '並確認監控核心與 Dashboard 重新啟動' } else { '原本未執行的監控核心維持停止' }
+        Write-UpdateStatus 'failed' ('更新未完成；已恢復原版本、資料及排程，' + $restoredText + '。失敗現場與快照已保留。') $version $failureCode
     } else {
-        Write-UpdateStatus 'rollback_failed' '更新或自動復原未能完成。請保留程式與資料，使用開始功能表啟動入口檢查狀態；不要再次套用。' $version
+        Write-UpdateStatus 'rollback_failed' '更新或自動復原未能完成。請保留程式與資料，使用開始功能表啟動入口檢查狀態；不要再次套用。' $version $rollbackCode ('更新失敗原因：' + $failureCode)
     }
     Remove-OwnedRequest
 }

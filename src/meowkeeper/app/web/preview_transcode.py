@@ -39,9 +39,11 @@ def transcode_command(ffmpeg: str, port: int, stream: str, encoder: str) -> list
     scale = f"scale='min({width},iw)':'min({height},ih)':force_original_aspect_ratio=decrease:force_divisible_by=2"
     args = [ffmpeg, "-nostdin", "-hide_banner", "-loglevel", "error", "-threads", "2",
             "-rtsp_transport", "tcp", "-timeout", "5000000", "-i", f"rtsp://127.0.0.1:{port}/{stream}",
-            "-map", "0:v:0", "-an", "-sn", "-dn", "-vf", scale+f",fps={fps},format=yuv420p",
+            "-map", "0:v:0", "-map", "0:a:0?", "-sn", "-dn", "-vf", scale+f",fps={fps},format=yuv420p",
             "-c:v", encoder, "-threads", "2", "-g", str(fps), "-bf", "0", "-b:v", "2500k",
-            "-maxrate", "3000k", "-bufsize", "3000k"]
+            "-maxrate", "3000k", "-bufsize", "3000k",
+            # Optional camera sound for the compatibility preview: small mono AAC.
+            "-c:a", "aac", "-ac", "1", "-ar", "16000", "-b:a", "48k"]
     if not hardware:
         args += ["-preset", "ultrafast", "-tune", "zerolatency"]
     args += ["-f", "mpegts", "-"]

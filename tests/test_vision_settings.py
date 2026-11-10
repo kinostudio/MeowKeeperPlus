@@ -549,20 +549,24 @@ class VisionSettingsTests(unittest.TestCase):
 
     @unittest.skipUnless(os.name == "nt", "需要 Windows Credential Manager")
     def test_actual_windows_credential_manager_roundtrip_and_cleanup(self):
-        store = VisionSettingsStore(self.root / "credential-manager-test", credential_store=TelegramCredentialStore())
-        store.save(self.settings(model_id=f"credential-test-{uuid4().hex}"))
-        key = "TEST_ONLY_CREDENTIAL_PROBE_NOT_REAL"
-        store.save_key(key)
-        self.assertEqual(store.read_key(), key)
-        self.assertTrue(store.status()["key_configured"])
-        backend = store.status()["credential_backend"]
-        self.assertIn(backend, {"windows_credential_manager", "windows_dpapi_fallback"})
-        if backend == "windows_dpapi_fallback":
-            self.assertNotIn(key.encode(), store._secret_path(store.read()).read_bytes())
-        else:
-            self.assertFalse(store._secret_path(store.read()).exists())
-        store.clear_key()
-        self.assertIsNone(store.read_key())
+        with patch.dict(os.environ, {"PROGRAMDATA": str(self.root / "programdata")}):
+            store = VisionSettingsStore(
+                self.root / "credential-manager-test", credential_store=TelegramCredentialStore()
+            )
+            store.save(self.settings(model_id=f"credential-test-{uuid4().hex}"))
+            key = "TEST_ONLY_CREDENTIAL_PROBE_NOT_REAL"
+            store.save_key(key)
+            self.addCleanup(store.clear_key)
+            self.assertEqual(store.read_key(), key)
+            self.assertTrue(store.status()["key_configured"])
+            backend = store.status()["credential_backend"]
+            self.assertIn(backend, {"windows_credential_manager", "windows_dpapi_fallback"})
+            if backend == "windows_dpapi_fallback":
+                self.assertNotIn(key.encode(), store._secret_path(store.read()).read_bytes())
+            else:
+                self.assertFalse(store._secret_path(store.read()).exists())
+            store.clear_key()
+            self.assertIsNone(store.read_key())
 
 
     def test_multiple_keys_management_and_sequential_fallback(self):

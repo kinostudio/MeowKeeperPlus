@@ -3,7 +3,23 @@
   "short_name": "MeowKeeper+",
   "start_url": "/",
   "display": "standalone",
-  "theme_color": "#18263d",
-  "background_color": "#f4f7fb",
-  "icons": []
+  "theme_color": "#4A3A2E",
+  "background_color": "#FBF5EC",
+  "icons": [
+    {
+      "src": "/static/icons/meowkeeper-192.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "/static/icons/meowkeeper-512.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    },
+    {
+      "src": "/static/icons/meowkeeper-logo.svg",
+      "sizes": "any",
+      "type": "image/svg+xml"
+    }
+  ]
 }

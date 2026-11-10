@@ -76,13 +76,41 @@ def _asset_path(status: str = "ready") -> Path:
     return candidate if candidate.is_file() else fallback
 
 
+def _tray_icon_size() -> int:
+    """Notification-area icon size (16 px at 100 % scaling) on Windows."""
+    if sys.platform != "win32":
+        return 64
+    try:
+        import ctypes
+
+        size = int(ctypes.windll.user32.GetSystemMetrics(49))  # SM_CXSMICON
+    except (AttributeError, OSError, ValueError):
+        return 16
+    return size if 16 <= size <= 64 else 16
+
+
+def _icon_frame(image: Any, size: int) -> Any:
+    """Pick the hand-tuned ICO frame instead of shrinking the 256 px artwork.
+
+    Frames up to 24 px use the simplified two-tone cat-head design; pystray
+    re-encodes whatever image it receives, so the right frame must be chosen here.
+    """
+    sizes = sorted(getattr(image, "info", {}).get("sizes") or ())
+    if not sizes:
+        return image
+    chosen = next(((width, height) for width, height in sizes if width >= size), sizes[-1])
+    image.size = chosen
+    image.load()
+    return image.copy().convert("RGBA")
+
+
 def _load_image(status: str = "ready") -> Any:
     try:
         from PIL import Image, ImageDraw
 
         path = _asset_path(status)
         if path.is_file():
-            return Image.open(path)
+            return _icon_frame(Image.open(path), _tray_icon_size())
         image = Image.new("RGBA", (64, 64), (73, 55, 40, 255))
         ImageDraw.Draw(image).ellipse((10, 10, 54, 54), fill=(206, 214, 164, 255))
         return image

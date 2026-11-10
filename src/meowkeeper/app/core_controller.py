@@ -13,7 +13,7 @@ import threading
 import time
 import traceback
 import uuid
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import asdict
 from datetime import datetime, timezone
 from pathlib import Path
@@ -122,6 +122,8 @@ class RepositoryCoreController(CoreController):
         event_pre_seconds: float = 5.0,
         event_post_seconds: float = 10.0,
         cooldown_seconds: float = 180.0,
+        behavior_thresholds: Mapping[str, float] | None = None,
+        adaptive_thresholds: Mapping[str, float] | None = None,
         analyzer_mode: str = "yolo",
         telegram_enabled: bool = False,
         telegram_notifier: Any | None = None,
@@ -173,6 +175,8 @@ class RepositoryCoreController(CoreController):
         self.event_pre_seconds = float(event_pre_seconds)
         self.event_post_seconds = float(event_post_seconds)
         self.cooldown_seconds = float(cooldown_seconds)
+        self.behavior_thresholds = dict(behavior_thresholds or {})
+        self.adaptive_thresholds = dict(adaptive_thresholds or {})
         self.analyzer_mode = analyzer_mode
         self.telegram_enabled = bool(telegram_enabled)
         self.telegram_notifier = telegram_notifier
@@ -972,7 +976,8 @@ class RepositoryCoreController(CoreController):
                 semantic_wait_seconds=self.semantic_wait_seconds,
             )
             analyzer = AdaptiveAnalyzer(self._create_analyzer(), fps=self.analysis_fps,
-                                        input_size=self.analysis_width, logger=self._log)
+                                        input_size=self.analysis_width, logger=self._log,
+                                        thresholds=self.adaptive_thresholds)
             if hasattr(analyzer, "set_clip_service"):
                 analyzer.set_clip_service(clip_service)
             semantic_service.pressure_probe = self.semantic_pressure
@@ -1230,6 +1235,24 @@ class RepositoryCoreController(CoreController):
             if restart_log:
                 self._log(restart_log)
 
+    def _behavior_config(self) -> Any:
+        """Saved behaviour thresholds; invalid values fall back to the defaults."""
+        from meowkeeper.core.behavior.models import BehaviorConfig
+
+        mapping = {"behavior_eating_seconds": "minimum_eating_seconds",
+                   "behavior_drinking_seconds": "minimum_drinking_seconds",
+                   "behavior_litter_seconds": "minimum_litter_seconds",
+                   "behavior_sleep_seconds": "sleeping_minimum_seconds"}
+        values = {field: float(self.behavior_thresholds[key]) for key, field in mapping.items()
+                  if key in self.behavior_thresholds}
+        try:
+            config = BehaviorConfig(**values)
+            config.validate()
+            return config
+        except (TypeError, ValueError):
+            self._log("⚠️ 行為門檻設定無效，改用預設值。")
+            return BehaviorConfig()
+
     def _create_analyzer(self) -> Any:
         if self.analyzer_mode.lower() not in {"yolo", "v02"}:
             return NoopFrameAnalyzer()
@@ -1267,6 +1290,7 @@ class RepositoryCoreController(CoreController):
                                                 input_size=self.analysis_width, device=self.inference_device),
                         identity_thresholds=th,
                         native_snapshot_provider=snap_prov,
+                        behavior_config=self._behavior_config(),
                     )
                 except (OSError, RuntimeError, ValueError, ImportError) as error:
                     self._log(f"⚠️ V0.2 尚未可用，降級單一 YOLO 偵測：{type(error).__name__}。")

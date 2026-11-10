@@ -9,6 +9,7 @@ import re
 import shutil
 import subprocess
 import sys
+import time
 import uuid
 from pathlib import Path
 
@@ -16,12 +17,26 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 from meowkeeper.app import delta_update as delta
 
+DELTA_MANIFEST = "update-manifest-delta.json"
+LEGACY_DELTA_MANIFEST = "update-manifest.json"
+CREATE_NO_WINDOW = 0x08000000
+CREATE_NEW_PROCESS_GROUP = 0x00000200
+CREATE_BREAKAWAY_FROM_JOB = 0x01000000
+FINAL_STATES = {"applied", "failed", "rollback_failed"}
+
 
 def prepare(app: Path, downloads: Path, payload: Path, version: str, fetch) -> dict:
     """No ZIP request until signature, exact signed baseline and files are valid."""
     base_url = f"https://github.com/kinostudio/MeowKeeperPlus/releases/download/{version}/"
     envelope_path = downloads / "update-manifest.json"
-    fetch(base_url + "update-manifest.json", envelope_path, 65536)
+    # r121+ publish the delta under its own name so `update-manifest.json`
+    # can carry the full signed package that older Dashboards understand.
+    try:
+        fetch(base_url + DELTA_MANIFEST, envelope_path, 65536)
+    except Exception:  # noqa: BLE001 - older releases only published one manifest name.
+        if envelope_path.exists():
+            envelope_path.unlink()
+        fetch(base_url + LEGACY_DELTA_MANIFEST, envelope_path, 65536)
     envelope = json.loads(envelope_path.read_text(encoding="utf-8"))
     manifest = delta.verify_delta(envelope, (app / "configs/update-public.pem").read_bytes())
     if manifest["version"] != version:
@@ -33,6 +48,49 @@ def prepare(app: Path, downloads: Path, payload: Path, version: str, fetch) -> d
     fetch(base_url + manifest["asset"], archive, manifest["size"])
     delta.extract_payload(archive, manifest, payload)
     return manifest
+
+
+def launch_worker(worker: Path, payload: Path, log_path: Path, *, popen=None) -> str:
+    """Start the protected worker as its own process tree and return immediately.
+
+    This interpreter lives inside App\\runtime\\python, which the installer must
+    stop (with every other bundled-Python process) before it can swap App.  The
+    coordinator therefore never waits from inside that runtime: the worker runs
+    without a console window and in a new process group, broken away from the
+    caller's job when Windows allows it. DETACHED_PROCESS makes PowerShell exit
+    without running its -File script, so use CREATE_NO_WINDOW instead.
+    """
+    popen = popen or subprocess.Popen
+    system_root = Path(os.environ.get("SystemRoot", r"C:\Windows"))
+    powershell = system_root / "System32/WindowsPowerShell/v1.0/powershell.exe"
+    arguments = [str(powershell), "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass",
+                 "-File", str(worker), "-VerifierRoot", str(payload)]
+    base_flags = CREATE_NO_WINDOW | CREATE_NEW_PROCESS_GROUP
+    with log_path.open("xb") as log:
+        for flags, mode in ((base_flags | CREATE_BREAKAWAY_FROM_JOB, "breakaway"), (base_flags, "new-process-group")):
+            try:
+                popen(arguments, stdin=subprocess.DEVNULL, stdout=log, stderr=subprocess.STDOUT,
+                      creationflags=flags, close_fds=True, shell=False, cwd=str(payload))
+                return mode
+            except OSError:
+                if mode == "new-process-group":
+                    raise
+    raise RuntimeError("worker_not_started")
+
+
+def wait_for_worker_start(status_path: Path, request_id: str, *, timeout: float = 120.0,
+                          sleep=time.sleep, clock=time.monotonic) -> dict | None:
+    """Wait only until the worker owns the request; never through the App swap."""
+    deadline = clock() + timeout
+    while clock() < deadline:
+        try:
+            status = json.loads(status_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            status = None
+        if isinstance(status, dict) and status.get("request_id") == request_id:
+            return status
+        sleep(1.0)
+    return None
 
 
 def main() -> int:
@@ -73,12 +131,15 @@ def main() -> int:
         with request.open("x", encoding="utf-8") as stream:
             json.dump({"schema": 1, "request_id": request_id, "prepared_id": prepared.name, "version": args.version}, stream)
         worker = payload / "scripts/Apply-MeowKeeperPlusUpdate.ps1"
-        subprocess.run(["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(worker),
-                        "-VerifierRoot", str(payload)], check=True, timeout=3600, shell=False)
-        status = json.loads((updater / "hotfix-status.json").read_text(encoding="utf-8"))
-        if status.get("request_id") != request_id or status.get("status") != "applied":
-            raise ValueError("差量更新未完成；請查看更新狀態，失敗現場與備份仍保留。")
-        print("差量更新完成，簽章／完整性與啟動檢查通過。")
+        mode = launch_worker(worker, payload, payload / "worker-output.log")
+        status = wait_for_worker_start(updater / "hotfix-status.json", request_id)
+        if status is None:
+            raise ValueError("更新工作沒有在時限內開始；尚未切換版本。請保留 Updater 目錄並查看 worker-output.log。")
+        if status.get("status") == "failed" or status.get("status") == "rollback_failed":
+            raise ValueError(str(status.get("message_zh_tw") or "差量更新未完成；失敗現場與備份仍保留。"))
+        print("已啟動受保護的更新工作（" + mode + "）；它不依賴本視窗或舊版 Python，換版時本程式會先結束。", flush=True)
+        print("REQUEST_ID=" + request_id, flush=True)
+        print("進度與結果：" + str(updater / "hotfix-status.json"), flush=True)
         return 0
     except Exception as error:  # noqa: BLE001 - network/OS errors must not expose signed redirect URLs.
         print("差量更新停止（" + type(error).__name__ + "）；不會改抓完整包。")

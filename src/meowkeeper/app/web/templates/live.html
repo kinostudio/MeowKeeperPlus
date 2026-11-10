@@ -17,7 +17,7 @@
       <button type="button" data-ptz-action="stop" aria-label="停止移動" title="停止（Esc）">■</button>
     </div>
     <output id="ptz-position-hud" class="ptz-position-hud" role="status" aria-live="polite" hidden>
-      <svg id="ptz-position-hud-map" class="ptz-position-hud-map ptz-coordinate-map" viewBox="0 0 132 88" tabindex="-1" role="img" aria-label="鏡頭位置讀回參考圖；定位尚未經此型號實機驗證" aria-disabled="true" hidden>
+      <svg id="ptz-position-hud-map" class="ptz-position-hud-map ptz-coordinate-map" viewBox="0 0 132 88" tabindex="-1" role="img" aria-label="鏡頭位置讀回參考圖；尚未讀取位置" aria-disabled="true" hidden>
         <rect x="10" y="8" width="100" height="64" rx="7" fill="rgba(255,255,255,.12)" stroke="rgba(255,255,255,.55)"/>
         <path d="M60 8V72 M10 40H110" stroke="rgba(255,255,255,.34)" stroke-dasharray="3 3"/>
         <circle id="ptz-position-hud-dot" cx="60" cy="40" r="5" fill="#f0b36f" stroke="#fff" stroke-width="1.5" visibility="hidden"/>
@@ -97,9 +97,9 @@
     <button class="button secondary" type="button" data-privacy-action="show">恢復監控</button>
   </div>
   <p id="ptz-position-result" role="status" aria-live="polite">目前位置：尚未讀取。</p>
-  <p id="ptz-position-help" class="muted">載入時自動讀取一次初始位置；每次短步移動前後查詢裝置，成功讀回後會在畫面疊加半透明座標圖 4 秒，並標示位置變化。讀取失敗或數字未變時會明確標示，不推算位置。水平與垂直數字是裝置座標，不是角度；圖點不代表房間方向或實際視野。僅在有效位置與絕對定位能力確認後，才能使用位置隱私操作。</p>
+  <p id="ptz-position-help" class="muted">載入時自動讀取一次初始位置；每次短步移動前後查詢裝置，成功讀回後會在畫面疊加半透明座標圖 4 秒，並標示位置變化。讀取失敗或數字未變時會明確標示，不推算位置。水平與垂直數字是裝置座標，不是角度；圖點不代表房間方向或實際視野。保存隱私位置與「轉到指定位置」需先成功讀取位置；移動時每一步都讀回座標確認，誤差約 2 單位內視為到位。</p>
   <figure aria-labelledby="ptz-map-caption" style="max-width:480px;margin:1rem 0">
-    <svg id="ptz-coordinate-map" class="ptz-coordinate-map" viewBox="0 0 320 180" tabindex="-1" role="img" aria-label="鏡頭位置讀回參考圖；定位尚未經此型號實機驗證" aria-disabled="true" style="width:100%;height:auto">
+    <svg id="ptz-coordinate-map" class="ptz-coordinate-map" viewBox="0 0 320 180" tabindex="-1" role="img" aria-label="鏡頭位置讀回參考圖；尚未讀取位置" aria-disabled="true" style="width:100%;height:auto">
       <rect x="30" y="15" width="260" height="140" rx="10" fill="#eee7dc" stroke="#85765f"/>
       <path d="M160 15V155 M30 85H290" stroke="#b8aa95" stroke-dasharray="4 4"/>
       <text x="160" y="12" text-anchor="middle" font-size="10">垂直座標 101</text>
@@ -108,7 +108,7 @@
       <path class="ptz-position-trail" fill="none" stroke="#99451e" stroke-width="2" stroke-dasharray="4 4"/>
       <circle class="ptz-target-dot" r="7" fill="none" stroke="#99451e" stroke-width="2" visibility="hidden"/>
     </svg>
-    <figcaption id="ptz-map-caption" class="field-help">位置讀回參考圖：尚未讀取。圖示線性映射裝置 0～101 座標，不代表角度、房間方向或實際視野。此型號尚未實機驗證絕對定位，圖面僅供查看，不能點擊移動；方向鍵仍可用。</figcaption>
+    <figcaption id="ptz-map-caption" class="field-help">位置讀回參考圖：尚未讀取。圖示線性映射裝置 0～101 座標，不代表角度、房間方向或實際視野。成功讀取位置後可點選目標：系統以短步移動並讀回確認逐步定位（不使用未驗證的絕對定位指令）；方向鍵仍可用。</figcaption>
   </figure>
   <p class="field-help">畫面旁 ↑ ↓ ← → 每按一次短步移動並自動送出停止。此頁可使用鍵盤方向鍵，Esc 停止；輸入文字、選單操作時不控制鏡頭。若左右馬達異常，請只使用上下；命令送出不代表鏡頭已實際移動。</p>
 </section>
@@ -183,7 +183,8 @@
       if (!valid) throw new Error("未取得可驗證的座標");
       positionDeviceId = deviceId;
       positionReadbackVerified = true;
-      absoluteMoveVerified = data.state?.capabilities?.absolute_move === true;
+      // Positioning: verified absolute move, or short pulses checked by readback (closed loop).
+      absoluteMoveVerified = data.state?.capabilities?.absolute_move === true || data.state?.capabilities?.closed_loop_position === true;
       const limits = data.state?.limits || {};
       for (const axis of ["angle", "elevation"]) {
         const low=limits[axis+"_min"],high=limits[axis+"_max"];
@@ -226,7 +227,7 @@
       dot.setAttribute("cy", String(155 - position.elevation / 101 * 140));
     }
     caption.textContent = valid
-      ? `本次裝置讀回：水平 ${position.angle}／垂直 ${position.elevation}。圖點按裝置座標比例呈現，不是角度或實際視野。${absoluteMoveVerified ? "此型號已驗證絕對定位，可點選目標。" : "目前只有位置讀回證據，沒有此型號絕對移動的實機證據；點選定位已停用，方向鍵仍可用。"}`
+      ? `本次裝置讀回：水平 ${position.angle}／垂直 ${position.elevation}。圖點按裝置座標比例呈現，不是角度或實際視野。${absoluteMoveVerified ? "可點選目標：以短步移動並讀回確認逐步定位，最多約 45 秒；讀回失敗或馬達不動會立即停止。" : "目前沒有可驗證的定位方式；點選定位已停用，方向鍵仍可用。"}`
       : "裝置座標參考圖：沒有本次有效讀回，不顯示位置點。不是角度或實際視野。";
   }
   let nativeStandbyAvailable = false;
@@ -239,7 +240,7 @@
       map.setAttribute('tabindex',enabled?'0':'-1');
       map.setAttribute('aria-label',enabled
         ? '點選鏡頭裝置座標；方向鍵選點，Enter 定位，Esc 停止'
-        : '鏡頭位置讀回參考圖；此型號絕對定位尚未實機驗證，請使用方向鍵');
+        : '鏡頭位置讀回參考圖；需先成功讀取位置才能點選定位，請使用方向鍵');
     });
     const standby = document.getElementById("privacy-mode").value === "standby";
     ptzControls.querySelectorAll("[data-privacy-action]").forEach((button) => {
@@ -752,7 +753,7 @@
     try{
       setPtzMessage('正在移動至選取座標，等待裝置讀回…','定位中');
       const requestBody={action:'position',...target};if(operationId)requestBody.operation_id=operationId;
-      const response=await fetch(`/api/v1/cameras/xiaomi/devices/${encodeURIComponent(device)}/ptz`,{method:'POST',cache:'no-store',signal:AbortSignal.timeout(12000),headers:{'Content-Type':'application/json','X-MeowKeeper-CSRF':csrfToken()},body:JSON.stringify(requestBody)});
+      const response=await fetch(`/api/v1/cameras/xiaomi/devices/${encodeURIComponent(device)}/ptz`,{method:'POST',cache:'no-store',signal:AbortSignal.timeout(60000),headers:{'Content-Type':'application/json','X-MeowKeeper-CSRF':csrfToken()},body:JSON.stringify(requestBody)});
       const data=await response.json();if(!response.ok||data.success!==true)throw new Error(data.message_zh_tw||'定位指令未確認。');
       const deadline=performance.now()+12000;let actual=null;
       while(performance.now()<deadline&&device===activePtzDeviceId&&version===ptzStopVersion){

@@ -91,7 +91,12 @@
       if (audioEnabled) video.volume = 1.0;
       updateAudioButton();
       if (audioEnabled) {
-        if (mode === "smooth") {
+        if (mode === "smooth" && activeTransport === "webrtc" && !rtcAudioCompatible()) {
+          // WebRTC here only forwards Opus/G.711 packets; other camera audio
+          // (for example AAC) is carried by the MSE path, so reconnect there.
+          say("正在切換為含聲音的 MSE 串流；仍使用同一個本機來源。");
+          setMode("smooth", { persist: false });
+        } else if (mode === "smooth") {
           video.play?.().catch?.(() => {});
           say("已開啟即時現場收音。");
         } else {
@@ -208,6 +213,11 @@
     let objectUrl = null, msePlayer = null, disposed = false, visible = !document.hidden;
     let fallbackReason = null;
     let connectedStream = null;
+    let activeTransport = null;
+    function rtcAudioCompatible() {
+      const codec = String(metadata?.original_source?.audio_codec || "").toLowerCase();
+      return ["opus", "pcma", "pcmu", "pcm_alaw", "pcm_mulaw", "g711a", "g711u"].includes(codec);
+    }
     let generation = 0;
     let displayCount = 0, bytesTotal = 0, bytesWindow = 0, byteWindowAt = performance.now(), frameWindowAt = performance.now();
 
@@ -389,7 +399,9 @@
       video.muted = !audioEnabled;
       say(compatibility ? "正在準備共用 H.264 相容影片；只讀取本機 go2rtc，會增加主機負載。" : hevcSource ? "瀏覽器支援 HEVC，直接使用原碼 MSE；不另做 H.264 轉碼。" : "正在連接同一個 go2rtc 串流；不建立第二個攝影機來源。" );
       stats.textContent = "流暢播放｜正在協商媒體格式";
-      const useRtc = !useMse && !hevcSource && Boolean(window.MeowKeeperRTC && window.RTCPeerConnection);
+      const audioNeedsMse = audioEnabled && !rtcAudioCompatible();
+      const useRtc = !useMse && !hevcSource && !audioNeedsMse && Boolean(window.MeowKeeperRTC && window.RTCPeerConnection);
+      activeTransport = useRtc ? "webrtc" : "mse";
       const player = useRtc ? window.MeowKeeperRTC : window.MeowKeeperMSE;
       let encodingHint = "共用 H.264 相容轉碼";
       msePlayer = player.create({

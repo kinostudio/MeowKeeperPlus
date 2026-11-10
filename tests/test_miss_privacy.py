@@ -85,7 +85,7 @@ class MissPrivacyTests(unittest.TestCase):
             }},
             move=self.move,
         )
-        with self.assertRaisesRegex(ValueError, "尚無實機絕對定位"):
+        with self.assertRaisesRegex(ValueError, "沒有可驗證的定位方式"):
             adapter.capture_private_pose()
         adapter.set_mode("standby")
         self.assertFalse(PrivacyService(adapter).hide()["success"])

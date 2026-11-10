@@ -46,3 +46,14 @@
 .term-help-card strong,.term-help-card span,.term-help-card small{display:block;margin-bottom:.28rem}
 .term-help-card strong{color:#794120;font-size:.88rem;font-weight:700}
 .term-help-card small{margin-bottom:0;color:#685949}
+/* Field help tooltips (field-tooltips.js): ⓘ beside the label, bubble on hover / focus / tap. */
+.field-tip-anchor{position:relative;display:inline-flex;vertical-align:middle;margin:0 .3rem;line-height:1}
+.field-tip-button{display:inline-grid;place-items:center;width:18px;height:18px;min-height:0;margin:0;padding:0;border:1.5px solid #b98a62;border-radius:50%;background:#fffaf2;color:#794120;font:italic 700 11px/1 Georgia,"Times New Roman",serif;cursor:help;box-shadow:none}
+.field-tip-button:hover,.field-tip-button:focus-visible,.field-tip-anchor.open .field-tip-button{background:#794120;border-color:#794120;color:#fffaf2;outline:none}
+.field-tip-button:focus-visible{box-shadow:0 0 0 3px rgba(153,69,30,.25)}
+label small.field-tip,label .field-help.field-tip{position:absolute;left:50%;bottom:calc(100% + 8px);z-index:90;display:block;width:max-content;max-width:min(300px,78vw);margin:0;padding:.6rem .75rem;border:1px solid #d5c3ad;border-radius:10px;background:#fffaf2;color:#2b241d;box-shadow:0 10px 24px rgba(43,36,29,.18);font-size:.8rem;font-weight:400;font-style:normal;line-height:1.55;text-align:left;white-space:normal;transform:translateX(calc(-50% + var(--tip-shift,0px)));opacity:0;visibility:hidden;pointer-events:none;transition:opacity .12s ease,visibility .12s}
+.field-tip-anchor.open .field-tip{opacity:1;visibility:visible;pointer-events:auto}
+.field-tip::after{content:"";position:absolute;left:calc(50% - var(--tip-shift,0px));top:100%;width:10px;height:10px;background:#fffaf2;border-right:1px solid #d5c3ad;border-bottom:1px solid #d5c3ad;transform:translate(-50%,-5px) rotate(45deg)}
+@media (hover:none){.field-tip-button{width:24px;height:24px;font-size:13px}}
+.field-tip-title{display:inline-flex;align-items:center;flex-wrap:wrap;gap:0 2px}
+.field-tip-title:empty{display:none}

@@ -2,6 +2,17 @@
 {% from '_icons.html' import icon %}
 {% block content %}
 <div class="content-heading dashboard-heading"><div><h2>今天的守護概況</h2><span id="service-state" class="status-pill status-unknown" role="status">正在確認監控狀態</span><span id="overview-source-name" class="source-chip">單一來源尚未確認</span></div></div>
+<section id="home-status-hero" class="home-status-hero" data-state="pending" aria-label="目前整體狀態"><span class="status-tag-shape" aria-hidden="true"></span><div><strong id="home-status-label">正在確認目前狀態</strong><p id="home-status-detail">讀取背景服務後，這裡會用一句話說明現在是否正常。</p></div><ul class="status-legend" aria-label="狀態圖例"><li data-state="ok"><span class="status-tag-shape" aria-hidden="true"></span>正常</li><li data-state="warn"><span class="status-tag-shape" aria-hidden="true"></span>注意</li><li data-state="alert"><span class="status-tag-shape" aria-hidden="true"></span>需要處理</li><li data-state="off"><span class="status-tag-shape" aria-hidden="true"></span>未啟用</li></ul></section>
+<section id="home-guide" class="home-guide" aria-labelledby="home-guide-title">
+  <div class="home-guide-head"><div><p class="eyebrow">新手引導</p><h3 id="home-guide-title" tabindex="-1">五步驟開始守護貓咪</h3><p id="home-guide-progress" class="field-help">正在確認設定進度</p></div><div class="actions"><a class="button secondary" href="/help">完整使用說明</a><button id="home-guide-dismiss" class="button secondary" type="button">我知道了，先收起</button></div></div>
+  <ol class="home-guide-steps">
+    <li data-guide-check="camera"><span class="guide-num" aria-hidden="true">1</span><div><strong>連接攝影機</strong><p>輸入 RTSP 位址或用小米精靈連線，看到畫面就算完成。</p><a href="/settings/source">前往來源與攝影機 →</a></div></li>
+    <li data-guide-check="monitor"><span class="guide-num" aria-hidden="true">2</span><div><strong>啟動監控</strong><p>按右上角「啟動監控」，狀態標籤變成「監控中」就代表畫面和 AI 都在運作。</p></div></li>
+    <li><span class="guide-num" aria-hidden="true">3</span><div><strong>建立貓咪檔案</strong><p>為每隻貓取名並上傳幾張照片，事件裡才能分辨是誰。</p><a href="/settings/pets">前往貓咪檔案 →</a></div></li>
+    <li><span class="guide-num" aria-hidden="true">4</span><div><strong>圈出飯碗、水盆、貓砂盆</strong><p>在畫面上拖曳圈選位置，系統才能推斷吃飯、喝水和如廁。</p><a href="/settings/ai#scene-registry-panel">前往場景標記 →</a></div></li>
+    <li data-guide-check="notify"><span class="guide-num" aria-hidden="true">5</span><div><strong>開啟手機通知（選用）</strong><p>連接 Telegram，有事件時手機會收到照片與短片。</p><a href="/settings/telegram">前往通知設定 →</a></div></li>
+  </ol>
+</section>
 <section class="dashboard-notice" aria-label="監控提示"><strong>通知提示：</strong><span id="overview-runtime-note">影音、辨識與錄影共用同一來源；程序啟動不代表影格或推論已成功。</span></section>
 <section class="cards primary-cards dashboard-primary" aria-label="即時狀態">
 <article class="card"><div class="status-card-heading"><span class="feature-mark" aria-hidden="true">{{ icon('camera') }}</span><div><h3>攝影機畫面</h3><small>Camera Ingest</small></div><strong id="source-status" class="status-pill status-unknown">正在確認…</strong></div><dl class="status-rows"><div><dt>傳輸率</dt><dd id="overview-bitrate">來源尚未提供</dd></div><div><dt>影格距今</dt><dd id="overview-frame-age">尚未取得</dd></div><div><dt>最新影格標記</dt><dd id="overview-frame-time">尚未取得</dd></div></dl><p class="field-help">「快取估算」以近期壓縮影音分段大小與時長計算，包含容器與可能的轉碼；不是整台電腦的上下傳速率。</p><p id="source-detail" class="card-footnote">正在確認是否持續收到新影格。距今不是網路延遲。</p></article>

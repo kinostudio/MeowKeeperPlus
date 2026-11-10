@@ -110,7 +110,7 @@ class V02HostAnalyzer:
     def create(
         cls, *, model_path, confidence, store, data_root, logger,
         notifier=None, chat_ids=(), notification_dispatcher=None, feedback_preferences=None,
-        tracker=None, identity_thresholds=None, native_snapshot_provider=None,
+        tracker=None, identity_thresholds=None, native_snapshot_provider=None, behavior_config=None,
     ):
         registry = PetRegistry(Path(data_root) / "pets")
         identity = LazyIdentityClassifier(registry, thresholds=identity_thresholds)
@@ -128,6 +128,7 @@ class V02HostAnalyzer:
             feedback_preferences=feedback_preferences,
             identity_thresholds=identity_thresholds,
             native_snapshot_provider=native_snapshot_provider,
+            behavior_config=behavior_config,
         )
 
     def set_clip_service(self, clip_service: object) -> None:

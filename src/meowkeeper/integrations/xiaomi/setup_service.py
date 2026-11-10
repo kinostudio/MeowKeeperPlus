@@ -36,6 +36,7 @@ from .login_diagnostics import (
 from .miot_power import MiotPowerClient
 from .miss_privacy import MissPrivacyAdapter
 from .models import XiaomiQualityProfile
+from .ptz_closed_loop import move_to as closed_loop_move_to
 from .quality_options import LIVE_PROFILE_OPTIONS, PROFILE_LABELS
 from .quality_probe import choose_highest_stable_profile, probe_profile_names
 from .relay_control import (
@@ -188,6 +189,7 @@ class XiaomiSetupService:
         self._relay_control_cache: dict[str, tuple[float, dict[str, Any]]] = {}
         self._relay_control_pending: set[str] = set()
         self._relay_control_lock = threading.Lock()
+        self._closed_loop_lock = threading.Lock()
         from .relay_provider import RelayProvider
         self.relay_provider = RelayProvider(self)
         self.miot_power = MiotPowerClient(self.root, getattr(self.go2rtc, "config_path", self.root / "data/go2rtc/config.yaml"),
@@ -1365,6 +1367,45 @@ class XiaomiSetupService:
         capabilities["absolute_move"] = bool(
             capabilities.get("absolute_move") is True and model in VERIFIED_ABSOLUTE_MOVE_MODELS
         )
+        # Saved/target positions are reached by short relative pulses checked
+        # against fresh readback (ptz_closed_loop), not by trusting the
+        # unverified absolute command. Every use still requires a readback.
+        capabilities["closed_loop_position"] = bool(
+            capabilities.get("relative_move", True) is not False and capabilities.get("position", True) is not False
+        )
+
+    @staticmethod
+    def _positioning_ready(state: Mapping[str, Any]) -> bool:
+        capabilities = state.get("state", {}).get("capabilities", {}) if isinstance(state.get("state"), Mapping) else {}
+        return bool(state.get("position_readback_verified") and isinstance(capabilities, Mapping)
+                    and (capabilities.get("absolute_move") is True or capabilities.get("closed_loop_position") is True))
+
+    def _closed_loop_position(self, device_id: str, angle: int | None, elevation: int | None) -> dict[str, Any]:
+        """Bounded pulse → stop → readback loop; succeeds only on verified arrival."""
+        if type(angle) is not int or type(elevation) is not int or not (1 <= angle <= 101 and 1 <= elevation <= 101):
+            return {"status": "invalid", "success": False, "ptz_available": True,
+                    "message_zh_tw": "目標座標不在 1～101；未移動鏡頭。"}
+        if not self._closed_loop_lock.acquire(blocking=False):
+            return {"status": "busy", "success": False, "ptz_available": True,
+                    "message_zh_tw": "鏡頭正在定位中；請稍候再操作。"}
+        try:
+            def read() -> Mapping[str, Any] | None:
+                state = self.ptz_status(device_id, refresh=True)
+                if not state.get("position_readback_verified"):
+                    return None
+                return state.get("state", {}).get("position")
+
+            def pulse(direction: str) -> bool:
+                return self._ptz_action_impl(device_id, action="move", direction=direction).get("success") is True
+
+            outcome = closed_loop_move_to({"angle": angle, "elevation": elevation}, read=read, pulse=pulse)
+        finally:
+            self._closed_loop_lock.release()
+        return {"status": "ok" if outcome.success else "failed", "success": outcome.success,
+                "ptz_available": True, "movement_verified": outcome.success,
+                "positioning": "closed_loop", "pulses": outcome.pulses, "reason": outcome.reason,
+                "state": {"position": outcome.position} if outcome.position else {},
+                "message_zh_tw": outcome.message_zh_tw}
 
     def _record_ptz_readback(self, operation_id: str, device_id: str,
                              verified: bool, position: Mapping[str, Any] | None) -> None:
@@ -1466,9 +1507,11 @@ class XiaomiSetupService:
                 client = self._relay_control_client(internal_id, device)
                 if action == "position":
                     state = self.ptz_status(device_id, refresh=True)
-                    if not state.get("position_readback_verified") or state.get("state", {}).get("capabilities", {}).get("absolute_move") is not True:
+                    if not self._positioning_ready(state):
                         return {"status": "unsupported", "success": False,
-                                "message_zh_tw": "此攝影機尚無實機絕對定位成功證據；座標定位已停用，請使用方向鍵。"}
+                                "message_zh_tw": "目前沒有可驗證的位置讀回；座標定位已停用，請使用方向鍵。"}
+                    if state.get("state", {}).get("capabilities", {}).get("absolute_move") is not True:
+                        return self._closed_loop_position(device_id, angle, elevation)
                     result = client.request("ptz_position", angle=angle, elevation=elevation)
                 else:
                     result = client.request("ptz_move" if action == "move" else "ptz_stop", direction=direction)
@@ -1499,10 +1542,11 @@ class XiaomiSetupService:
             return {"status": "unavailable", "success": False, "ptz_available": False, "message_zh_tw": "目前 go2rtc 執行檔沒有 Xiaomi MISS PTZ API。"}
         if action == "position":
             state = self.ptz_status(device_id, refresh=True)
-            if (not state.get("position_readback_verified")
-                    or state.get("state", {}).get("capabilities", {}).get("absolute_move") is not True):
+            if not self._positioning_ready(state):
                 return {"status": "unsupported", "success": False, "ptz_available": True,
-                        "message_zh_tw": "此攝影機尚無實機絕對定位成功證據；座標定位已停用，請使用方向鍵。"}
+                        "message_zh_tw": "目前沒有可驗證的位置讀回；座標定位已停用，請使用方向鍵。"}
+            if state.get("state", {}).get("capabilities", {}).get("absolute_move") is not True:
+                return self._closed_loop_position(device_id, angle, elevation)
         try:
             if action == "move":
                 # Keep the motor pulse bounded even if the browser closes.

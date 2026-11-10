@@ -182,11 +182,13 @@ class MvpStabilityTests(unittest.TestCase):
             ):
                 packaging.build_portable(python_runtime=root / "runtime", output=output)
 
-            for name in ("MeowKeeperPlus.cmd", "MeowKeeperPlusDashboard.cmd", "MeowKeeperPlusTray.cmd"):
-                content = (output / name).read_text(encoding="utf-8")
-                self.assertIn("runtime\\python", content)
-                self.assertIn('cd /d "%MEOWKEEPER_ROOT%"', content)
-                self.assertNotIn(".venv", content)
+            content = (output / "MeowKeeperPlus.cmd").read_text(encoding="utf-8")
+            self.assertIn("runtime\\python", content)
+            self.assertIn('cd /d "%MEOWKEEPER_ROOT%"', content)
+            self.assertNotIn(".venv", content)
+            # Single entry: no separate Dashboard / Tray launchers in the package.
+            self.assertFalse((output / "MeowKeeperPlusDashboard.cmd").exists())
+            self.assertFalse((output / "MeowKeeperPlusTray.cmd").exists())
             self.assertFalse((output / "Start-MeowKeeperPlus.cmd").exists())
             self.assertFalse((output / "Start-MeowKeeperPlus-Tray.cmd").exists())
             self.assertTrue((output / "Install-MeowKeeperPlus.cmd").is_file())

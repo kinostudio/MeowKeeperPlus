@@ -10,7 +10,7 @@ SYSTEM 升級的媒體程序清理與 UAC 驗收，見 [Xiaomi SG／JPEG 與 SYS
 
 傳統 Windows PowerShell 若標題出現「選取」，QuickEdit 會暫停主控台輸出，連帶讓安裝器等待子程序；在該視窗按一次 Esc 可恢復原流程。安裝器原始碼現在於執行期間暫停 QuickEdit，結束（包含錯誤）時恢復原 console mode，並在複製後顯示安裝目錄校驗進度。已建好的 r32 不包含此後續修正；勿直接修改已驗證發布包。
 
-可攜版不需安裝：複製完整資料夾至另一台 Windows 電腦，執行 `MeowKeeperPlus.cmd`，會啟動／沿用 Tray，由 Tray 啟動／沿用核心，健康檢查後開啟 Dashboard。重複執行只重新開啟頁面，不新增 Tray。入口使用內附 runtime，不需要 venv 或 pip。進階的核心單獨入口為 `MeowKeeperPlusDashboard.cmd`；Tray 單獨入口為 `MeowKeeperPlusTray.cmd`。SYSTEM 安裝版的 Tray 呼叫既有 `MeowKeeperPlus Core` 排程，不啟動另一個使用者身分的 Host。Tray 選單沒有獨立「結束 Tray」操作；24H 背景核心仍獨立於登入工作階段，異常關閉 Tray 不會停止核心。
+可攜版不需安裝：複製完整資料夾至另一台 Windows 電腦，執行 `MeowKeeperPlus.cmd`，會啟動／沿用 Tray，由 Tray 啟動／沿用核心，健康檢查後開啟 Dashboard。重複執行只重新開啟頁面，不新增 Tray。入口使用內附 runtime，不需要 venv 或 pip。r121 起只保留這一個入口，不再提供分開的核心／Tray 啟動檔，避免兩者被分開控制。SYSTEM 安裝版的 Tray 呼叫既有 `MeowKeeperPlus Core` 排程，不啟動另一個使用者身分的 Host。Tray 選單沒有獨立「結束 Tray」操作；24H 背景核心仍獨立於登入工作階段，異常關閉 Tray 不會停止核心。
 
 Dashboard「進階設定」提供密碼保護的完整 ZIP 備份，包含一般設定、SQLite 事件／回饋、寵物資料／照片／embeddings、事件影片／截圖，以及目前 Host 身分 Windows 憑證庫中的 Telegram 憑證。備份採 scrypt 與 AES-256-GCM，匯入需明確確認並重啟 Host；密碼至少 6 個字元。暫存 ring／preview cache、模型、FFmpeg、Python runtime 與 Xiaomi/go2rtc 登入 Session 不放入備份。使用環境變數提供的 Telegram Token 不會被匯出。舊版設定 JSON 仍保留作相容用途，但不包含事件、寵物或影片。請妥善保管備份密碼與檔案；另一台電腦上需重新完成 Xiaomi 登入與實機來源檢查。
 
@@ -95,8 +95,7 @@ repository `.venv` 的 pip 對**內附 runtime** 執行：
 - `vendor/ffmpeg`：FFmpeg／FFprobe 與授權資料。
 - `vendor/javascript`：只含 Node `node.exe` 與 `LICENSE`；不複製 npm 工具鏈。
 - `models/yolo11n.pt`、`models/model_manifest.json`。
-- `src`、`tools`、繁體中文文件與 `MeowKeeperPlus.cmd`、`MeowKeeperPlusDashboard.cmd`、
-  `MeowKeeperPlusTray.cmd`、`Install-MeowKeeperPlus.cmd`、`Uninstall-MeowKeeperPlus.cmd`。
+- `src`、`tools`、繁體中文文件與單一入口 `MeowKeeperPlus.cmd`、`Install-MeowKeeperPlus.cmd`、`Uninstall-MeowKeeperPlus.cmd`。
   小米攝影機 UDP 診斷／修復工具隨包提供於 `scripts/Xiaomi-Firewall-Wizard.cmd`；預設只診斷，使用者明確同意後才透過 UAC 建立限縮規則。完整範圍與復原方式見 `docs/XIAOMI_UDP_FIREWALL_COMPAT.md`。
 - `build_manifest.json`：建置日期、模型 hash、每個檔案的大小與 SHA-256。
 
@@ -104,7 +103,7 @@ repository `.venv` 的 pip 對**內附 runtime** 執行：
 `data/torch/hub/trusted_list` metadata。它已列入 manifest；啟動 DINOv2 時不會因此被視為
 未知私人資料。其他未列入 manifest 的 `data` 檔案仍會使驗證失敗。
 
-專案原始碼目錄的 `Start-MeowKeeperPlus.cmd`、`Start-MeowKeeperPlus-Tray.cmd` 與
+專案原始碼目錄的 `Start-MeowKeeperPlus.cmd`（開發用單一入口，會一併啟動 Tray）與
 `scripts/Start-MeowKeeperPlus*.ps1` 固定使用開發期 `.venv`，**不得複製進可攜式包**。
 發布包只提供使用 `runtime/python` 的執行入口與上述安裝／解除安裝入口，
 避免終端使用者誤點無法啟動的開發器。
@@ -177,8 +176,7 @@ python tools\create_task_scheduler_xml.py `
 
 可攜式建置除了 headless `MeowKeeperPlus.cmd`，還會產生：
 
-- `MeowKeeperPlusDashboard.cmd`：啟動只綁 localhost 的 FastAPI Dashboard。
-- `MeowKeeperPlusTray.cmd`：啟動只呼叫 localhost API 的輕量 Tray。
+- r121 起已移除分開的 Dashboard／Tray 啟動檔；統一由 `MeowKeeperPlus.cmd` 開啟。
 
 建置 runtime 必須由建置者事先準備 FastAPI、Uvicorn、Pydantic、Jinja2、python-multipart、
 itsdangerous、httpx、pystray、Pillow 與 psutil；`tools/build_portable.py` 只驗證與複製，不偷偷執行 pip、修改 Python、驅動或

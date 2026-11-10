@@ -18,8 +18,14 @@ ALLOWED_CODECS = frozenset(
         "avc1.4D401F",
         "avc1.42E01E",
         "hvc1.1.6.L153.B0",
+        # Audio is optional; go2rtc includes the camera sound only if offered.
+        "mp4a.40.2",
+        "mp4a.40.5",
+        "flac",
+        "opus",
     }
 )
+VIDEO_CODEC_PREFIXES = ("avc1.", "hvc1.")
 STREAM_NAME = re.compile(r"^xiaomi_camera_[A-Za-z0-9_-]{1,64}$")
 MIME_CODEC = re.compile(
     r"^(?:avc1\.[0-9A-Fa-f]{6}|hvc1\.[0-9]+\.[0-9]+\.L[0-9]+\.B[0-9]+|"
@@ -58,6 +64,8 @@ def validate_codec_offer(value: object) -> str:
     codecs = value.split(",")
     if not 1 <= len(codecs) <= len(ALLOWED_CODECS):
         raise PreviewMseError("瀏覽器提供的播放格式數量不正確。")
+    if not any(codec.startswith(VIDEO_CODEC_PREFIXES) for codec in codecs):
+        raise PreviewMseError("瀏覽器未提供可用的影片播放格式。")
     if any(codec not in ALLOWED_CODECS for codec in codecs) or len(set(codecs)) != len(codecs):
         raise PreviewMseError("瀏覽器提供了未允許的播放格式。")
     return ",".join(codecs)
@@ -219,7 +227,10 @@ async def proxy_mse_preview(
             if type(compatibility) is not bool:
                 raise PreviewMseError("相容播放選項無效。")
             if compatibility:
-                codecs = ",".join(c for c in codecs.split(",") if c.startswith("avc1."))
+                offered = codecs.split(",")
+                video_only = [c for c in offered if c.startswith("avc1.")]
+                # The compatibility encoder emits H.264 + AAC; keep AAC if offered.
+                codecs = ",".join(video_only + [c for c in offered if c.startswith("mp4a.")]) if video_only else ""
                 if transcode is None or not codecs:
                     raise PreviewMseError("此環境沒有可用的 H.264 相容播放。")
                 compat_stream = await transcode.acquire(api_url, getattr(go2rtc, "rtsp_port", None), stream, metadata.get("source_epoch"))

@@ -30,6 +30,8 @@ class ClipAssemblyResult:
 class ClipAssembler:
     """bounded、可驗證的 concat 組片器。"""
 
+    PROCESS_FAILED = "FFmpeg stream copy／轉碼組片失敗。"
+
     def __init__(
         self,
         *,
@@ -52,7 +54,7 @@ class ClipAssembler:
         *,
         prefer_stream_copy: bool = True,
     ) -> ClipAssemblyResult:
-        ordered = tuple(sorted(records, key=lambda item: item.start_at))
+        ordered = self._write_order(records)
         destination = Path(output_path).resolve()
         destination.parent.mkdir(parents=True, exist_ok=True)
         if not ordered:
@@ -63,14 +65,28 @@ class ClipAssembler:
             return ClipAssemblyResult(None, "failed", None, False, "事件引用的影音分段已不存在。")
 
         with tempfile.TemporaryDirectory(prefix="meowkeeper-clip-") as temporary:
-            list_path = Path(temporary) / "concat.txt"
-            list_path.write_text(self._concat_manifest(ordered), encoding="utf-8")
+            if all(record.path.suffix.lower() == ".ts" for record in ordered):
+                # MPEG-TS segments are joined byte-for-byte in write order.
+                # The concat *demuxer* re-times every file from an estimated
+                # duration and leaves a 2–3 frame gap at each boundary (visible
+                # skips); a joined transport stream keeps the original packet
+                # timing, and FFmpeg's TS discontinuity handling stitches any
+                # reset timestamps back to back.
+                list_path = Path(temporary) / "joined.ts"
+                self._join_transport_streams(ordered, list_path)
+            else:
+                list_path = Path(temporary) / "concat.txt"
+                list_path.write_text(self._concat_manifest(ordered), encoding="utf-8")
             copy_result = self._run_mode(list_path, destination, stream_copy=True) if prefer_stream_copy else None
             if copy_result is not None and copy_result.valid:
                 return self._success(destination, copy_result, used_stream_copy=True)
             if destination.exists():
                 destination.unlink(missing_ok=True)
             transcoded = self._run_mode(list_path, destination, stream_copy=False)
+            if not transcoded.valid and transcoded.error == self.PROCESS_FAILED:
+                # FFmpeg older than 5.1 has no -fps_mode; retry once without it.
+                destination.unlink(missing_ok=True)
+                transcoded = self._run_mode(list_path, destination, stream_copy=False, passthrough_timing=False)
             if transcoded.valid:
                 return self._success(destination, transcoded, used_stream_copy=False)
             error = transcoded.error or (copy_result.error if copy_result is not None else None)
@@ -164,6 +180,33 @@ class ClipAssembler:
         return self._success(destination, validation, used_stream_copy=False)
 
     @staticmethod
+    def _write_order(records: Iterable[SegmentRecord]) -> tuple[SegmentRecord, ...]:
+        """Order by recorder session, then zero-padded segment number.
+
+        Real-time segment start times come from file mtimes minus duration, so a
+        long-GOP segment can look older than the one written before it.  The
+        segment muxer's file number is the true write order inside a session.
+        """
+        unique: dict[Path, SegmentRecord] = {}
+        for record in records:
+            unique.setdefault(Path(record.path), record)
+        sessions: dict[Path, list[SegmentRecord]] = {}
+        for record in unique.values():
+            sessions.setdefault(Path(record.path).parent, []).append(record)
+        ordered: list[SegmentRecord] = []
+        for _parent, items in sorted(sessions.items(), key=lambda pair: min(item.start_at for item in pair[1])):
+            ordered.extend(sorted(items, key=lambda item: (len(item.path.name), item.path.name)))
+        return tuple(ordered)
+
+    @staticmethod
+    def _join_transport_streams(records: tuple[SegmentRecord, ...], destination: Path) -> None:
+        with destination.open("xb") as output:
+            for record in records:
+                with record.path.open("rb") as source:
+                    for chunk in iter(lambda source=source: source.read(1024 * 1024), b""):
+                        output.write(chunk)
+
+    @staticmethod
     def _concat_manifest(records: tuple[SegmentRecord, ...]) -> str:
         lines: list[str] = []
         for record in records:
@@ -178,6 +221,7 @@ class ClipAssembler:
         destination: Path,
         *,
         stream_copy: bool,
+        passthrough_timing: bool = True,
     ) -> MediaValidationResult:
         command = [
             self.ffmpeg_path or "ffmpeg",
@@ -185,16 +229,19 @@ class ClipAssembler:
             "-loglevel",
             "error",
             "-y",
-            "-f",
-            "concat",
-            "-safe",
-            "0",
-            "-i",
-            str(list_path),
         ]
-        if stream_copy:
-            command.extend(["-c", "copy", "-movflags", "+faststart"])
+        if list_path.suffix == ".ts":
+            command.extend(["-f", "mpegts", "-i", str(list_path)])
         else:
+            command.extend(["-f", "concat", "-safe", "0", "-i", str(list_path)])
+        if stream_copy:
+            command.extend(["-map", "0:v:0", "-map", "0:a:0?", "-c", "copy",
+                            "-avoid_negative_ts", "make_zero", "-movflags", "+faststart"])
+        else:
+            if passthrough_timing:
+                # Keep source frame timing: never duplicate or drop frames to
+                # force a constant frame rate in the saved clip.
+                command.extend(["-fps_mode", "passthrough"])
             command.extend(
                 [
                     "-map",
@@ -238,7 +285,7 @@ class ClipAssembler:
         except (OSError, subprocess.TimeoutExpired) as exc:
             return MediaValidationResult(destination, False, False, False, None, f"FFmpeg 組片失敗：{type(exc).__name__}")
         if completed.returncode != 0:
-            return MediaValidationResult(destination, False, False, False, None, "FFmpeg stream copy／轉碼組片失敗。")
+            return MediaValidationResult(destination, False, False, False, None, self.PROCESS_FAILED)
         return validate_media(destination, ffprobe_path=self.ffprobe_path)
 
     @staticmethod

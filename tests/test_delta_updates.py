@@ -28,6 +28,7 @@ from tools.apply_verified_update import verify_and_stage
 from tools.bootstrap_delta import main as bootstrap_main
 from tools.bootstrap_delta import prepare
 from tools.prepare_delta_release import build_delta
+from tools.verify_portable import verify_portable
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -77,27 +78,32 @@ class DeltaUpdateTests(unittest.TestCase):
         shutil.copytree(self.base, app)
         data.mkdir()
         updater.mkdir()
-        commands = []
+        commands, launched = [], []
         def fetch(_manager, url, destination, _limit):
             shutil.copy2(self.out / url.rsplit("/", 1)[1], destination)
         def execute(arguments, **_options):
             commands.append(arguments)
-            if arguments[0] == "powershell.exe":
-                payload = Path(arguments[arguments.index("-VerifierRoot") + 1])
-                self.assertEqual(payload.parent, updater)
-                request = json.loads((payload / "apply-request.json").read_text())
-                prepared = payload / request["prepared_id"]
-                self.assertEqual(digest(prepared / "package.zip"), digest(self.archive))
-                self.assertFalse((data / "updates/apply-request.json").exists())
-                (updater / "hotfix-status.json").write_text(json.dumps({"request_id": request["request_id"], "status": "applied"}))
             return subprocess.CompletedProcess(arguments, 0)
+        def launch(arguments, **options):
+            launched.append((arguments, options))
+            self.assertTrue(arguments[0].lower().endswith("powershell.exe"))
+            payload = Path(arguments[arguments.index("-VerifierRoot") + 1])
+            self.assertEqual(payload.parent, updater)
+            request = json.loads((payload / "apply-request.json").read_text())
+            prepared = payload / request["prepared_id"]
+            self.assertEqual(digest(prepared / "package.zip"), digest(self.archive))
+            self.assertFalse((data / "updates/apply-request.json").exists())
+            (updater / "hotfix-status.json").write_text(json.dumps({"request_id": request["request_id"], "status": "applying"}))
+            return Mock()
         with patch.dict(os.environ, {"ProgramData": str(self.root)}), \
                 patch("sys.argv", ["bootstrap", "--version", "r118", "--apply"]), \
                 patch("tools.bootstrap_delta.ctypes.windll.shell32.IsUserAnAdmin", return_value=True), \
                 patch.object(UpdateManager, "_download", fetch), \
-                patch("tools.bootstrap_delta.subprocess.run", side_effect=execute):
+                patch("tools.bootstrap_delta.subprocess.run", side_effect=execute), \
+                patch("tools.bootstrap_delta.subprocess.Popen", side_effect=launch):
             self.assertEqual(bootstrap_main(), 0)
-        self.assertEqual(len(commands), 2)
+        self.assertEqual(len(commands), 1)  # icacls only; the worker is never awaited from App Python
+        self.assertEqual(len(launched), 1)
         self.assertEqual(list(data.rglob("*")), [])
         worker = (ROOT / "scripts/Apply-MeowKeeperPlusUpdate.ps1").read_text(encoding="utf-8")
         self.assertIn("$updatesRoot = $VerifierRoot", worker)
@@ -165,7 +171,7 @@ class DeltaUpdateTests(unittest.TestCase):
         self.out = self.root / "output"
         with patch("tools.prepare_delta_release.verify_package_evidence", return_value={}):
             self.report = build_delta(self.base, self.target, self.out, self.key)
-        self.envelope = json.loads((self.out / "update-manifest.json").read_text(encoding="utf-8"))
+        self.envelope = json.loads((self.out / "update-manifest-delta.json").read_text(encoding="utf-8"))
         self.delta = self.envelope["manifest"]
         self.archive = self.out / self.delta["asset"]
 
@@ -190,6 +196,28 @@ class DeltaUpdateTests(unittest.TestCase):
         self.assertFalse((assembled / "src/deleted.py").exists())
         self.assertEqual((self.base / "src/demo.py").read_bytes(), b"old")
 
+    def test_r116_delta_base_allows_only_retired_launchers(self):
+        retired = {"MeowKeeperPlusDashboard.cmd", "MeowKeeperPlusTray.cmd"}
+        for name in retired:
+            (self.base / name).write_text("legacy entry", encoding="utf-8")
+        self.manifest(self.base, "r116")
+        with self.assertRaisesRegex(ValueError, "不得安裝"):
+            verify_portable(self.base)
+
+        output = self.root / "r116-delta"
+        with patch("tools.prepare_delta_release.verify_package_evidence", return_value={}):
+            result = build_delta(self.base, self.target, output, self.key)
+        manifest = json.loads((output / "update-manifest-delta.json").read_text(encoding="utf-8"))["manifest"]
+        self.assertEqual(set(manifest["deleted"]) & retired, retired)
+        self.assertTrue(result["status"] == "passed")
+
+        untrusted = self.root / "untrusted-r116"
+        shutil.copytree(self.base, untrusted)
+        (untrusted / ".env").write_text("not a release input", encoding="utf-8")
+        self.manifest(untrusted, "r116")
+        with self.assertRaisesRegex(ValueError, "不得安裝"):
+            build_delta(untrusted, self.target, self.root / "untrusted-output", self.key)
+
     def test_baseline_mismatch_blocks_before_zip_and_never_falls_back(self):
         (self.base / "src/demo.py").write_bytes(b"modified")
         manager = UpdateManager(self.base, self.root / "Data")
@@ -203,11 +231,11 @@ class DeltaUpdateTests(unittest.TestCase):
         downloads.mkdir()
         def fetch(url, path, _limit):
             calls.append(url)
-            shutil.copy2(self.out / "update-manifest.json", path)
+            shutil.copy2(self.out / "update-manifest-delta.json", path)
         with self.assertRaises(ValueError):
             prepare(self.base, downloads, self.root / "payload", "r118", fetch)
         self.assertEqual(len(calls), 1)
-        self.assertTrue(calls[0].endswith("update-manifest.json"))
+        self.assertTrue(calls[0].endswith("update-manifest-delta.json"))
 
     def test_wrong_base_manifest_and_wrong_signature_are_refused(self):
         bad = copy.deepcopy(self.delta)
@@ -241,7 +269,7 @@ class DeltaUpdateTests(unittest.TestCase):
             calls.append(url.rsplit("/", 1)[1])
             shutil.copy2(self.out / calls[-1], path)
         prepare(self.base, downloads, self.root / "runtime-payload", "r118", fetch)
-        self.assertEqual(calls, ["update-manifest.json", self.delta["asset"]])
+        self.assertEqual(calls, ["update-manifest-delta.json", self.delta["asset"]])
         destination = self.root / "runtime-assembled"
         assemble(self.base, self.archive, self.delta, destination)
         for name, content in runtime.items():
@@ -268,7 +296,7 @@ class DeltaUpdateTests(unittest.TestCase):
                 calls = []
                 def fetch(url, destination, _limit, *, calls=calls):
                     calls.append(url)
-                    shutil.copy2(self.out / "update-manifest.json", destination)
+                    shutil.copy2(self.out / "update-manifest-delta.json", destination)
                 with self.assertRaises(ValueError):
                     prepare(self.base, downloads, self.root / f"bad-payload-{index}", "r118", fetch)
                 self.assertEqual(len(calls), 1)
@@ -298,7 +326,9 @@ class DeltaUpdateTests(unittest.TestCase):
         manager = UpdateManager(self.base, self.root / "Data")
         calls = []
         def fetch(url, destination, limit, on_chunk=None):
-            name = "update-manifest.json" if url.endswith("update-manifest.json") else self.delta["asset"]
+            if url.endswith("update-manifest.json"):
+                raise OSError("fixture: full manifest not published")
+            name = "update-manifest-delta.json" if url.endswith("update-manifest-delta.json") else self.delta["asset"]
             calls.append(name)
             data = (self.out / name).read_bytes()
             self.assertLessEqual(len(data), limit)
@@ -310,22 +340,52 @@ class DeltaUpdateTests(unittest.TestCase):
         self.assertEqual(manager.state["status"], "available")
         manager.prepare()
         self.assertEqual(manager.state["status"], "prepared", manager.state)
-        self.assertEqual(calls, ["update-manifest.json", self.delta["asset"]])
+        self.assertEqual(calls, ["update-manifest-delta.json", self.delta["asset"]])
 
-    def test_full_release_is_not_an_automatic_fallback(self):
+    def test_full_release_is_offered_but_never_downloaded_without_explicit_choice(self):
         manifest = {"schema": 1, "repository": "kinostudio/MeowKeeperPlus", "version": "r120", "tag": "r120",
                     "asset": "MeowKeeperPlus-r120-windows-x64.zip", "size": 10, "sha256": "a" * 64}
         envelope = {"manifest": manifest, "signature": base64.b64encode(eddsa.new(self.key, "rfc8032").sign(canonical(manifest))).decode()}
         manager = UpdateManager(self.base, self.root / "Data")
         calls = []
-        def fetch(url, destination, _limit):
-            calls.append(url)
-            destination.write_text(json.dumps(envelope))
+        def fetch(url, destination, _limit, on_chunk=None):
+            calls.append(url.rsplit("/", 1)[1])
+            if url.endswith("update-manifest-delta.json"):
+                raise OSError("fixture: no delta asset")
+            if url.endswith("update-manifest.json"):
+                destination.write_text(json.dumps(envelope))
+                return
+            destination.write_bytes(b"0123456789")
         manager._download = fetch
         manager.check()
-        self.assertEqual(manager.state.get("reason"), "delta_unavailable")
+        self.assertEqual(manager.state["status"], "available")
+        self.assertEqual(manager.state["package_kind"], "full")
+        self.assertTrue(manager.state["full_available"])
+        self.assertEqual(manager.state["reason"], "delta_unavailable")
         manager.prepare()
-        self.assertEqual(len(calls), 1)
+        self.assertEqual(manager.state["status"], "failed")
+        self.assertEqual(calls, ["update-manifest-delta.json", "update-manifest.json"])
+        manager.prepare(allow_full=True)
+        self.assertEqual(calls[-1], manifest["asset"])
+        self.assertEqual(manager.state["status"], "failed")  # fixture bytes fail SHA-256: never installed
+
+    def test_delta_base_mismatch_offers_full_package_with_reason(self):
+        full = {"schema": 1, "repository": "kinostudio/MeowKeeperPlus", "version": "r118", "tag": "r118",
+                "asset": "MeowKeeperPlus-r118-windows-x64.zip", "size": 1_900_000_000, "sha256": "a" * 64}
+        full_envelope = {"manifest": full, "signature": base64.b64encode(eddsa.new(self.key, "rfc8032").sign(canonical(full))).decode()}
+        (self.base / "src/demo.py").write_bytes(b"locally modified")
+        manager = UpdateManager(self.base, self.root / "Data")
+        def fetch(url, destination, _limit, on_chunk=None):
+            if url.endswith("update-manifest-delta.json"):
+                shutil.copy2(self.out / "update-manifest-delta.json", destination)
+            else:
+                destination.write_text(json.dumps(full_envelope))
+        manager._download = fetch
+        manager.check()
+        self.assertEqual(manager.state["package_kind"], "full")
+        self.assertEqual(manager.state["reason"], "delta_base_mismatch")
+        self.assertEqual(manager.state["download_bytes"], 1_900_000_000)
+        self.assertIn("不會被覆蓋", manager.state["message_zh_tw"])
 
     def test_traversal_case_alias_and_data_secret_paths_are_refused(self):
         for name in ("../escape.py", "C:/escape", "src/CON.py", "src/demo.py.", "data/secrets/key.dpapi"):
@@ -359,7 +419,7 @@ class DeltaUpdateTests(unittest.TestCase):
             self.assertLessEqual(file.stat().st_size, limit)
             shutil.copy2(file, destination)
         prepare(self.base, downloads, self.root / "bootstrap", "r118", fetch)
-        self.assertEqual(calls, ["update-manifest.json", self.delta["asset"]])
+        self.assertEqual(calls, ["update-manifest-delta.json", self.delta["asset"]])
         self.assertEqual((self.base / "src/demo.py").read_bytes(), b"old")
 
     def test_copy_failure_never_changes_installed_files(self):
@@ -373,7 +433,7 @@ class DeltaUpdateTests(unittest.TestCase):
         with patch("tools.prepare_delta_release.verify_package_evidence", return_value={}):
             build_delta(self.base, self.target, self.root / "variant", self.key,
                         base_overrides={"src/demo.py": self.target / "src/demo.py"})
-        envelope = json.loads((self.root / "variant/update-manifest.json").read_text(encoding="utf-8"))
+        envelope = json.loads((self.root / "variant/update-manifest-delta.json").read_text(encoding="utf-8"))
         manifest = envelope["manifest"]
         with self.assertRaises(ValueError):
             validate_base(self.base, manifest)
@@ -396,7 +456,7 @@ class DeltaUpdateTests(unittest.TestCase):
         archive = stage / "package.zip"
         envelope = stage / "update-manifest.json"
         shutil.copy2(self.archive, archive)
-        shutil.copy2(self.out / "update-manifest.json", envelope)
+        shutil.copy2(self.out / "update-manifest-delta.json", envelope)
         result = verify_and_stage(archive, envelope, app_root=self.base, stage_root=stage)
         self.assertEqual(result["status"], "staged")
         self.assertEqual(result["version"], "r118")

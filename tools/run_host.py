@@ -547,6 +547,10 @@ def _build_runtime(
         event_pre_seconds=float(runtime_settings["event_pre_seconds"]),
         event_post_seconds=float(runtime_settings["event_post_seconds"]),
         cooldown_seconds=float(runtime_settings["cooldown_seconds"]),
+        behavior_thresholds={key: float(runtime_settings[key]) for key in (
+            "behavior_eating_seconds", "behavior_drinking_seconds", "behavior_litter_seconds", "behavior_sleep_seconds")},
+        adaptive_thresholds={key: float(runtime_settings[key]) for key in (
+            "ai_load_target_percent", "cpu_warning_c", "cpu_critical_c", "gpu_warning_c", "gpu_critical_c")},
         analyzer_mode=effective_analyzer,
         telegram_enabled=telegram_enabled,
         telegram_notifier=telegram_notifier,

@@ -14,6 +14,8 @@ from pathlib import Path
 from threading import RLock
 from typing import Any
 
+from .ptz_closed_loop import near
+
 
 class MissPrivacyAdapter:
     def __init__(self, path: Path, *, device: Callable[[], str | None],
@@ -49,10 +51,12 @@ class MissPrivacyAdapter:
 
     @staticmethod
     def _require_absolute_move(response: Mapping[str, Any]) -> None:
+        """Require a way back to a saved pose: verified absolute move or readback closed loop."""
         state = response.get("state")
         capabilities = state.get("capabilities") if isinstance(state, Mapping) else None
-        if not isinstance(capabilities, Mapping) or capabilities.get("absolute_move") is not True:
-            raise ValueError("此攝影機尚無實機絕對定位成功證據；隱私位置操作未執行。")
+        if not isinstance(capabilities, Mapping) or (
+                capabilities.get("absolute_move") is not True and capabilities.get("closed_loop_position") is not True):
+            raise ValueError("此攝影機沒有可驗證的定位方式；隱私位置操作未執行。")
 
     def _context(self) -> tuple[str, str]:
         device = self.device()
@@ -91,7 +95,7 @@ class MissPrivacyAdapter:
             raise ValueError("恢復原位置未確認；原位置紀錄仍保留。")
         while True:
             try:
-                if self._position(self.read(device)) == pose:
+                if near(self._position(self.read(device)), pose):
                     return
             except (ValueError, OSError, RuntimeError):
                 pass
@@ -158,13 +162,13 @@ class MissPrivacyAdapter:
             if config.get("device_hash") != reference or not config.get("target"):
                 return {"verified": False, "privacy_mode": None}
             pose = self._position(self.read(device))
-            if pose == config["target"]:
+            if near(pose, config["target"]):
                 # A pose alone is not a reversible hide if no original pose
                 # was saved (e.g. right after configuration).
                 return {"verified": bool(config.get("restore")), "privacy_mode": True}
-            if config.get("restore") and pose != config["restore"]:
+            if config.get("restore") and not near(pose, config["restore"]):
                 return {"verified": False, "privacy_mode": None}
-            if config.get("restore") and pose == config["restore"]:
+            if config.get("restore") and near(pose, config["restore"]):
                 config["restore"] = None
                 self._save(config)
             return {"verified": True, "privacy_mode": False}
@@ -193,7 +197,7 @@ class MissPrivacyAdapter:
             reading = self.read(device)
             self._require_absolute_move(reading)
             current = self._position(reading)
-            if current == config["target"]:
+            if near(current, config["target"]):
                 return {"success": bool(config.get("restore"))}
             if config.get("restore"):
                 raise ValueError("既有隱私操作尚未完成恢復，沒有覆蓋原位置。")
@@ -234,7 +238,7 @@ class MissPrivacyAdapter:
                 result = self.move(device, **config["restore"])
                 if result.get("success") is not True:
                     return {"success": False}
-                if self._position(self.read(device)) != config["restore"]:
+                if not near(self._position(self.read(device)), config["restore"]):
                     return {"success": False}
                 config["restore"] = None
                 self._save(config)

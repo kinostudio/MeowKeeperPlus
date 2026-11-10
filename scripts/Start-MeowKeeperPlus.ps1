@@ -4,6 +4,12 @@ if ($args.Count -eq 0) {
     $installedRoot = Join-Path $env:ProgramData 'MeowKeeperPlus'
     $installedApp = Join-Path $installedRoot 'App'
     if (Test-Path -LiteralPath (Join-Path $installedApp 'build_manifest.json') -PathType Leaf) {
+        # Same single entry as the Start-menu shortcut: Core, Tray and Dashboard together.
+        $installedLauncher = Join-Path $installedApp 'scripts\Launch-Installed-MeowKeeperPlus.ps1'
+        if (Test-Path -LiteralPath $installedLauncher -PathType Leaf) {
+            & (Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe') -NoProfile -ExecutionPolicy Bypass -File $installedLauncher
+            exit $LASTEXITCODE
+        }
         $port = 8000
         $configPath = Join-Path $installedRoot 'Data\config.json'
         if (Test-Path -LiteralPath $configPath -PathType Leaf) {

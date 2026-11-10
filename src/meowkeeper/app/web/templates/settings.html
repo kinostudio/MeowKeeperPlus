@@ -46,7 +46,7 @@
 <section class="panel">
   <div class="panel-heading"><h3>AI 與行為參數</h3><span id="ai-runtime-status" class="muted">設定讀取中…</span></div>
     <div id="ai-adaptive-status" class="muted" role="status" aria-live="polite">正在讀取 AI 負載與回退狀態…</div>
-    <p class="field-help">長期負載目標 40%，不是瞬間硬限制。CPU：85°C 持續降級／95°C 暫停；GPU：80°C 持續降級／85°C 暫停。這是保守初始值，尚未逐硬體驗收；讀不到溫度不視為低溫。AI 降級不修改攝影機畫質。</p>
+    <p class="field-help">負載目標與溫度門檻可在下方「AI 負載保護」調整；超過時 AI 先降低張數或畫面大小，不會改攝影機畫質。讀不到溫度不視為低溫。</p>
     <button id="ai-adaptive-retry" class="button secondary" type="button">依已保存的分析上限重新嘗試 AI</button>
     <p class="field-help">降階後不會自動提高負載。確認溫度與記憶體正常後，可按此重試原本的解析度／FPS 上限；這不保證達到設定 FPS，若處理仍太慢或持續超載，保護機制會再次降階。</p>
   <p>第一次使用可保留預設值。若誤報太多，再調整信心門檻與通知間隔。保存後，請按上方「重新啟動服務」套用；監控會短暫中斷。</p>
@@ -120,6 +120,54 @@
     <label>環形快取上限（MB）
       <input id="ai-ring-maximum-size-mb" type="number" min="16" max="4096" step="1" required>
       {{ hint('ai-ring-maximum-size-mb', '暫存影音最多使用多少磁碟空間。建議 512 MB；高畫質來源若先達容量上限，實際可預錄時間可能變短。') }}
+    </label>
+    <label>事件影片保存天數
+      <input id="ai-event-video-max-age-days" type="number" min="1" max="3650" step="1" required>
+      {{ hint('ai-event-video-max-age-days', '事件影片保留多少天，超過會自動清除最舊的。建議 30 天；手動保存的截圖／影片不受影響。') }}
+    </label>
+    <label>事件影片總容量上限（GB）
+      <input id="ai-event-video-max-gb" type="number" min="1" max="200" step="1" required>
+      {{ hint('ai-event-video-max-gb', '事件影片最多佔用多少磁碟空間，超過時先刪最舊的事件影片。建議 3 GB；請依磁碟剩餘空間調整。') }}
+    </label>
+    </fieldset>
+    <fieldset class="fieldset-group settings-grid"><legend>行為判斷門檻（試驗中，追蹤＋行為模式才使用）</legend>
+    <label>算作「吃飯」至少停留（秒）
+      <input id="ai-behavior-eating-seconds" type="number" min="1" max="120" step="1" required>
+      {{ hint('ai-behavior-eating-seconds', '貓咪在你圈出的飯碗區靜止超過這個秒數，才記成吃飯。建議 10 秒；太短會把路過算成吃飯，太長會漏掉快速吃幾口。需要先在「場景標記」圈出飯碗區。') }}
+    </label>
+    <label>算作「喝水」至少停留（秒）
+      <input id="ai-behavior-drinking-seconds" type="number" min="1" max="120" step="1" required>
+      {{ hint('ai-behavior-drinking-seconds', '在水盆區靜止超過這個秒數才記成喝水。建議 5 秒。需要先圈出水盆區。') }}
+    </label>
+    <label>算作「上廁所」至少停留（秒）
+      <input id="ai-behavior-litter-seconds" type="number" min="1" max="300" step="1" required>
+      {{ hint('ai-behavior-litter-seconds', '在貓砂盆區停留超過這個秒數才記成上廁所。建議 10 秒。') }}
+    </label>
+    <label>算作「睡覺」至少靜止（秒）
+      <input id="ai-behavior-sleep-seconds" type="number" min="10" max="1800" step="10" required>
+      {{ hint('ai-behavior-sleep-seconds', '在睡覺區幾乎不動超過這個秒數才記成睡覺，較短的算休息。建議 60 秒。') }}
+    </label>
+    </fieldset>
+    <fieldset class="fieldset-group settings-grid"><legend>AI 負載保護</legend>
+    <label>長期負載目標（%）
+      <input id="ai-load-target-percent" type="number" min="10" max="90" step="5" required>
+      {{ hint('ai-load-target-percent', '電腦長時間忙碌超過這個比例時，AI 會先降低每秒張數或畫面大小。建議 40%；不是瞬間上限，提高會讓電腦較吵、較熱。') }}
+    </label>
+    <label>處理器：開始降速（°C）
+      <input id="ai-cpu-warning-c" type="number" min="40" max="110" step="1" required>
+      {{ hint('ai-cpu-warning-c', '處理器溫度持續高於這個值時，AI 先降一階。建議 85°C；必須低於下方暫停溫度。') }}
+    </label>
+    <label>處理器：暫停 AI（°C）
+      <input id="ai-cpu-critical-c" type="number" min="40" max="110" step="1" required>
+      {{ hint('ai-cpu-critical-c', '超過這個溫度時暫停 AI 分析；錄影與預覽照常。建議 95°C。') }}
+    </label>
+    <label>顯示卡：開始降速（°C）
+      <input id="ai-gpu-warning-c" type="number" min="40" max="110" step="1" required>
+      {{ hint('ai-gpu-warning-c', '顯示卡溫度持續高於這個值時，AI 先降一階。建議 80°C；筆電顯示卡較容易熱。') }}
+    </label>
+    <label>顯示卡：暫停 AI（°C）
+      <input id="ai-gpu-critical-c" type="number" min="40" max="110" step="1" required>
+      {{ hint('ai-gpu-critical-c', '超過這個溫度時暫停 AI 分析。建議 85°C。') }}
     </label>
     </fieldset>
     <div class="actions settings-actions">
@@ -446,7 +494,9 @@
   <div class="panel-heading"><h3>程式更新</h3><span>下載期間監控持續</span></div>
   <p>只從 kinostudio／MeowKeeperPlus 官方發布區下載，並驗證簽章與完整性。安裝版首次升級會以一次 UAC 註冊固定、受限的更新工作；之後可由這裡套用更新，不必每次開安裝器。可攜版仍使用手動更新。</p>
   <p class="notice">套用更新會短暫停止監控、錄影、通知與 Dashboard；程式設定、事件與其他資料不會隨更新覆寫。更新前會再次驗證官方套件，啟動失敗時會嘗試恢復舊版。</p>
-  <div class="actions"><button class="button" id="update-check" type="button">檢查新版</button><button class="button secondary" id="update-prepare" type="button" disabled>下載並驗證</button><button class="button" id="update-apply" type="button" hidden>套用更新</button></div>
+  <div class="actions"><button class="button" id="update-check" type="button">檢查新版</button><button class="button secondary" id="update-prepare" type="button" disabled>下載並驗證</button><button class="button secondary" id="update-prepare-full" type="button" hidden>改下載完整安裝包</button><button class="button" id="update-apply" type="button" hidden>套用更新</button></div>
+  <label class="checkbox-line"><input type="checkbox" id="update-auto-apply"> 下載驗證完成後自動套用（仍會先詢問一次可否短暫中斷監控）</label>
+  <p class="field-help">差量更新只下載變更檔案（通常幾 MB）。若目前安裝與差量基準不同，可改下載完整安裝包（數 GB）；兩種方式都只替換程式，設定、寵物、事件影片、記錄與 Log 保存在 Data，不會被覆蓋。</p>
   <p id="update-message" role="status">尚未檢查。</p>
   <div id="update-progress-region" class="update-progress-region" role="status" hidden>
     <progress id="update-progress" max="100" value="0" aria-label="更新準備進度"></progress>

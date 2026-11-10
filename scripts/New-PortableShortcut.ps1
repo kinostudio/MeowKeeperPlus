@@ -3,7 +3,7 @@ $ErrorActionPreference = 'Stop'
 $packageRoot = Split-Path -Parent $PSScriptRoot
 $python = Join-Path $packageRoot 'runtime\python\pythonw.exe'
 $launcher = Join-Path $packageRoot 'tools\portable_start.py'
-$icon = Join-Path $packageRoot 'assets\tray\meowkeeper-earth-ready.ico'
+$icon = Join-Path $packageRoot 'assets\tray\meowkeeper.ico'
 foreach ($required in @($python, $launcher, $icon)) {
     if (-not (Test-Path -LiteralPath $required -PathType Leaf)) { throw 'Portable launcher file missing.' }
 }

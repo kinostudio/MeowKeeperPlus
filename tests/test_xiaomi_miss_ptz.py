@@ -110,8 +110,12 @@ class XiaomiMissPtzTests(unittest.TestCase):
             self.assertTrue(state["position_readback_verified"])
             self.assertFalse(state["state"]["capabilities"]["absolute_move"])
             absolute = service.ptz_action(device_id, action="position", angle=51, elevation=50)
-            self.assertEqual(absolute["status"], "unsupported")
-            self.assertFalse(absolute["success"])
+            # Unverified absolute move stays unused; the readback closed loop
+            # confirms the camera is already within tolerance of the target.
+            self.assertEqual(absolute["status"], "ok")
+            self.assertTrue(absolute["movement_verified"])
+            self.assertEqual(absolute["positioning"], "closed_loop")
+            self.assertTrue(state["state"]["capabilities"]["closed_loop_position"])
             self.assertFalse(any(action == "position" for _, action, _ in ptz.action_calls))
             with patch.object(ptz, "xiaomi_ptz_state", return_value={
                 "connected": True, "position": {"angle": 48, "elevation": 0, "ret": 0},
@@ -195,7 +199,7 @@ class XiaomiMissPtzTests(unittest.TestCase):
         self.assertIn('position_readback_verified === true', template)
         self.assertIn('tabindex="-1" role="img"', template)
         self.assertIn("map.setAttribute('tabindex',enabled?'0':'-1')", template)
-        self.assertIn("此型號尚未實機驗證絕對定位", template)
+        self.assertIn("短步移動並讀回確認", template)
         self.assertIn('id="privacy-diagnostics-link"', template)
         self.assertIn('diagnosticLink.hidden = response.ok && data.success === true', template)
         self.assertIn("preview-metadata", template)
@@ -208,6 +212,76 @@ class XiaomiMissPtzTests(unittest.TestCase):
         self.assertIn('qualityProfile.disabled = true', template)
         self.assertIn("/api/v1/cameras/xiaomi/devices", template)
 
+
+class SimulatedMotorPtzClient(FakePtzClient):
+    """Fixture motor: right lowers angle (inverted axis), up raises elevation."""
+
+    def __init__(self, angle: int = 70, elevation: int = 30) -> None:
+        super().__init__()
+        self.position = {"angle": angle, "elevation": elevation}
+        self.pending: str | None = None
+
+    def xiaomi_ptz_state(self, stream_name: str, *, refresh: bool = False) -> dict[str, object]:
+        self.state_calls.append((stream_name, refresh))
+        return {"connected": True, "position": {**self.position, "ret": 0},
+                "capabilities": {"relative_move": True, "absolute_move": True, "position": True}}
+
+    def xiaomi_ptz_action(self, stream_name: str, action: str, **kwargs: object) -> dict[str, object]:
+        self.action_calls.append((stream_name, action, kwargs))
+        if action == "move":
+            self.pending = str(kwargs.get("direction"))
+        elif action == "stop" and self.pending:
+            step = {"right": ("angle", -4), "left": ("angle", 4), "up": ("elevation", 3), "down": ("elevation", -3)}[self.pending]
+            axis, delta = step
+            self.position[axis] = max(1, min(101, self.position[axis] + delta))
+            self.pending = None
+        return {"connected": True}
+
+
+class ClosedLoopServiceTests(unittest.TestCase):
+    def _service(self, directory: str, ptz: FakePtzClient) -> tuple[XiaomiSetupService, str]:
+        discovery = lambda: [{"device_id": "opaque-device", "source_url": "xiaomi://private-source",
+                              "source_reference_present": True, "display_name": "測試攝影機",
+                              "model": "chuangmi.camera.026c02", "region": "sg"}]
+        probe = lambda _device, _names: [XiaomiQualityProfile("subtype=sd", 640, 360, 20, "hevc", None, True)]
+        service = XiaomiSetupService(directory, state_path=Path(directory) / "state.json", discovery=discovery,
+                                     profile_probe=probe, source_manager=SimpleNamespace(client=ptz),
+                                     source_switch=lambda _url, _device, _profile: {"status": "connected"},
+                                     experimental_ptz_enabled=True)
+        service.refresh()
+        device_id = service.devices()[0]["internal_id"]
+        service.probe_device(device_id)
+        service.activate(device_id)
+        return service, device_id
+
+    def test_saved_position_is_reached_by_pulses_and_readback_never_absolute(self) -> None:
+        ptz = SimulatedMotorPtzClient(angle=70, elevation=30)
+        with tempfile.TemporaryDirectory() as directory, \
+                patch("meowkeeper.integrations.xiaomi.setup_service.time.sleep"):
+            service, device_id = self._service(directory, ptz)
+            result = service.ptz_action(device_id, action="position", angle=40, elevation=45)
+        self.assertTrue(result["success"], result)
+        self.assertTrue(result["movement_verified"])
+        self.assertLessEqual(abs(ptz.position["angle"] - 40), 2)
+        self.assertLessEqual(abs(ptz.position["elevation"] - 45), 2)
+        actions = [action for _, action, _ in ptz.action_calls]
+        self.assertNotIn("position", actions)
+        # Every pulse is followed by stop.
+        self.assertEqual(actions.count("move"), actions.count("stop"))
+
+    def test_privacy_capture_hide_and_show_round_trip_with_closed_loop(self) -> None:
+        ptz = SimulatedMotorPtzClient(angle=20, elevation=80)
+        with tempfile.TemporaryDirectory() as directory, \
+                patch("meowkeeper.integrations.xiaomi.setup_service.time.sleep"):
+            service, device_id = self._service(directory, ptz)
+            self.assertTrue(service.privacy_action(device_id, "capture")["success"])
+            ptz.position = {"angle": 60, "elevation": 40}
+            self.assertTrue(service.privacy_action(device_id, "hide")["success"])
+            self.assertLessEqual(abs(ptz.position["angle"] - 20), 2)
+            self.assertLessEqual(abs(ptz.position["elevation"] - 80), 2)
+            self.assertTrue(service.privacy_action(device_id, "show")["success"])
+            self.assertLessEqual(abs(ptz.position["angle"] - 60), 2)
+            self.assertLessEqual(abs(ptz.position["elevation"] - 40), 2)
 
 if __name__ == "__main__":
     unittest.main()

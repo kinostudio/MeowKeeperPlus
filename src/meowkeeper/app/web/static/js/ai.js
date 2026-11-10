@@ -20,7 +20,16 @@
     event_post_seconds: document.getElementById("ai-event-post-seconds"),
     retention_seconds: document.getElementById("ai-retention-seconds"),
     ring_maximum_size_mb: document.getElementById("ai-ring-maximum-size-mb"),
-      event_video_max_age_days: document.getElementById("ai-event-video-max-age-days"),
+    event_video_max_age_days: document.getElementById("ai-event-video-max-age-days"),
+    behavior_eating_seconds: document.getElementById("ai-behavior-eating-seconds"),
+    behavior_drinking_seconds: document.getElementById("ai-behavior-drinking-seconds"),
+    behavior_litter_seconds: document.getElementById("ai-behavior-litter-seconds"),
+    behavior_sleep_seconds: document.getElementById("ai-behavior-sleep-seconds"),
+    ai_load_target_percent: document.getElementById("ai-load-target-percent"),
+    cpu_warning_c: document.getElementById("ai-cpu-warning-c"),
+    cpu_critical_c: document.getElementById("ai-cpu-critical-c"),
+    gpu_warning_c: document.getElementById("ai-gpu-warning-c"),
+    gpu_critical_c: document.getElementById("ai-gpu-critical-c"),
   };
   const csrfToken = () => {
     const item = document.cookie.split(";").map((value) => value.trim()).find((value) => value.startsWith("meowkeeper_csrf="));
@@ -82,10 +91,12 @@
     event.preventDefault();
     const payload = {};
     payload.inference_device = device.value;
-    Object.entries(fields).forEach(([name, input]) => { payload[name] = Number(input.value); });
+    // Only send fields that exist on this page; a missing input must never
+    // abort the save or overwrite a stored value with a default.
+    Object.entries(fields).forEach(([name, input]) => { if (input) payload[name] = Number(input.value); });
     if (!analyzer.disabled) payload.analyzer_mode = analyzer.value;
-    const gbVal = Number(document.getElementById("ai-event-video-max-gb")?.value || 3);
-    payload.event_video_max_bytes = Math.round(gbVal * 1024 * 1024 * 1024);
+    const gbInput = document.getElementById("ai-event-video-max-gb");
+    if (gbInput && Number(gbInput.value) > 0) payload.event_video_max_bytes = Math.round(Number(gbInput.value) * 1024 * 1024 * 1024);
     try {
       const data = await request("/api/v1/settings", {
         method: "PUT",

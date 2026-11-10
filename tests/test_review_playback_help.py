@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import subprocess
 import tempfile
 import unittest
@@ -194,13 +195,18 @@ class ReviewPlaybackHelpTests(unittest.TestCase):
             self.assertIn(client.get("/help", follow_redirects=False).status_code, (307, 401))
             response = client.get("/help", headers=headers)
             self.assertEqual(response.status_code, 200)
-            self.assertIn('href="/help">使用教學', response.text)
+            self.assertIn('href="/help">', response.text)
+            self.assertIn("使用說明", response.text)
             self.assertIn("人在外面用手機看家", response.text)
             self.assertIn("Apple Watch", response.text)
-            self.assertIn("守護日常", response.text)
-            self.assertIn("管理 · 設定", response.text)
-            self.assertIn("系統 · 維護", response.text)
-            self.assertGreaterEqual(response.text.count('viewBox="0 0 24 24"'), 12)
+            self.assertIn("喵喵守護", response.text)
+            self.assertIn('aria-label="貓咪"', response.text)
+            self.assertIn('aria-label="設定"', response.text)
+            self.assertIn('id="runtime-status-tag"', response.text)
+            nav = response.text.split('<nav class="sidebar"', 1)[1].split("</nav>", 1)[0]
+            primary_links = re.findall(r'<a\b[^>]*class="nav-primary[^\"]*"[^>]*>.*?</a>', nav, re.DOTALL)
+            self.assertEqual(len(primary_links), 5)
+            self.assertTrue(all('viewBox="0 0 24 24"' in link for link in primary_links))
 
 
 if __name__ == "__main__":

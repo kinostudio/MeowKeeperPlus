@@ -41,6 +41,15 @@ RUNTIME_SETTING_DEFAULTS: dict[str, Any] = {
     "ring_maximum_size_mb": 512.0,
     "event_video_max_age_days": 30,
     "event_video_max_bytes": 3 * 1024 ** 3,
+    "behavior_eating_seconds": 10.0,
+    "behavior_drinking_seconds": 5.0,
+    "behavior_litter_seconds": 10.0,
+    "behavior_sleep_seconds": 60.0,
+    "ai_load_target_percent": 40.0,
+    "cpu_warning_c": 85.0,
+    "cpu_critical_c": 95.0,
+    "gpu_warning_c": 80.0,
+    "gpu_critical_c": 85.0,
     "dashboard_auto_open": False,
     "telegram_startup_notice": False,
 }
@@ -61,6 +70,15 @@ _RUNTIME_SETTING_RANGES: dict[str, tuple[float, float]] = {
     "ring_maximum_size_mb": (16.0, 4096.0),
     "event_video_max_age_days": (1.0, 3650.0),
     "event_video_max_bytes": (104857600.0, 214748364800.0),
+    "behavior_eating_seconds": (1.0, 120.0),
+    "behavior_drinking_seconds": (1.0, 120.0),
+    "behavior_litter_seconds": (1.0, 300.0),
+    "behavior_sleep_seconds": (10.0, 1800.0),
+    "ai_load_target_percent": (10.0, 90.0),
+    "cpu_warning_c": (40.0, 110.0),
+    "cpu_critical_c": (40.0, 110.0),
+    "gpu_warning_c": (40.0, 110.0),
+    "gpu_critical_c": (40.0, 110.0),
 }
 
 

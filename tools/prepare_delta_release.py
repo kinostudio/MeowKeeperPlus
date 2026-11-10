@@ -17,16 +17,17 @@ from meowkeeper.app.delta_update import digest, records, validate_manifest, vers
 
 
 def build_delta(base: Path, target: Path, output: Path, key, *, base_overrides=None) -> dict:
-    verify_portable(base)
+    old_manifest = json.loads((base / "build_manifest.json").read_text(encoding="utf-8"))
+    base_version = version(old_manifest)
+    verify_portable(base, allow_retired_r116_launchers=base_version == "r116")
     verify_portable(target)
     verify_package_evidence(target)
-    old = records(json.loads((base / "build_manifest.json").read_text(encoding="utf-8")))
+    old = records(old_manifest)
     overrides = [{"path": name, "size_bytes": path.stat().st_size, "sha256": digest(path)}
                  for name, path in (base_overrides or {}).items()]
     if overrides:
         old.update(records({"files": overrides}))
     new = records(json.loads((target / "build_manifest.json").read_text(encoding="utf-8")))
-    base_version = version(json.loads((base / "build_manifest.json").read_text(encoding="utf-8")))
     target_version = version(json.loads((target / "build_manifest.json").read_text(encoding="utf-8")))
     changed = sorted({name for name, record in new.items() if old.get(name) != record} | {"build_manifest.json"})
     deleted = sorted(set(old) - set(new))
@@ -50,7 +51,8 @@ def build_delta(base: Path, target: Path, output: Path, key, *, base_overrides=N
     from Crypto.Signature import eddsa
     canonical = json.dumps(manifest, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()
     envelope = {"manifest": manifest, "signature": base64.b64encode(eddsa.new(key, "rfc8032").sign(canonical)).decode()}
-    with (output / "update-manifest.json").open("x", encoding="utf-8") as destination:
+    # Separate name: `update-manifest.json` is reserved for the full signed package.
+    with (output / "update-manifest-delta.json").open("x", encoding="utf-8") as destination:
         json.dump(envelope, destination, ensure_ascii=False, indent=2)
     return {"status": "passed", "asset": asset, "bytes": manifest["size"], "changed_files": len(changed),
             "deleted_files": len(deleted), "heavy_files": [name for name in changed if name.startswith(("runtime/", "vendor/", "models/"))]}

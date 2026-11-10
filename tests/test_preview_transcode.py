@@ -72,7 +72,7 @@ class TranscodeTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(run.call_count,2)
             self.assertFalse(run.call_args.kwargs["shell"])
         command=" ".join(transcode_command(FFMPEG,8554,"xiaomi_camera_test","libx264"))
-        for required in ("rtsp://127.0.0.1:8554/xiaomi_camera_test","-an","yuv420p","mpegts","ultrafast","fps=15"):
+        for required in ("rtsp://127.0.0.1:8554/xiaomi_camera_test","-map 0:a:0?","-c:a aac","yuv420p","mpegts","ultrafast","fps=15"):
             self.assertIn(required,command)
         for stream in ("../api/config","rtsp://camera/private","xiaomi_camera_a&other"):
             with self.assertRaises(ValueError):transcode_command(FFMPEG,8554,stream,"libx264")

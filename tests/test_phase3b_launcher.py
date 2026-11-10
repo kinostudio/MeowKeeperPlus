@@ -57,7 +57,7 @@ class Phase3BLauncherContractTests(unittest.TestCase):
         bridge.start.assert_not_called()
 
     def test_cmd_files_are_ascii_crlf_without_bom_or_machine_paths(self) -> None:
-        for name in ("Start-MeowKeeperPlus.cmd", "Start-MeowKeeperPlus-Tray.cmd"):
+        for name in ("Start-MeowKeeperPlus.cmd",):
             data = (ROOT / name).read_bytes()
             self.assertFalse(data.startswith(b"\xef\xbb\xbf"))
             self.assertEqual(data.decode("ascii").encode("ascii"), data)
@@ -66,7 +66,7 @@ class Phase3BLauncherContractTests(unittest.TestCase):
             self.assertNotIn(b"\n", data.replace(b"\r\n", b""))
 
     def test_powershell_bridges_use_script_root(self) -> None:
-        for name in ("scripts/Start-MeowKeeperPlus.ps1", "scripts/Start-MeowKeeperPlus-Tray.ps1"):
+        for name in ("scripts/Start-MeowKeeperPlus.ps1",):
             text = (ROOT / name).read_text(encoding="utf-8-sig")
             self.assertIn("$PSScriptRoot", text)
             self.assertIn("Resolve-Path", text)
@@ -74,15 +74,23 @@ class Phase3BLauncherContractTests(unittest.TestCase):
 
     def test_formal_launchers_pin_both_windows_runtimes_to_repository_venv(self) -> None:
         host_text = (ROOT / "scripts/Start-MeowKeeperPlus.ps1").read_text(encoding="utf-8-sig")
-        tray_text = (ROOT / "scripts/Start-MeowKeeperPlus-Tray.ps1").read_text(encoding="utf-8-sig")
         self.assertIn(".venv\\Scripts\\python.exe", host_text)
-        self.assertIn(".venv\\Scripts\\python.exe", tray_text)
-        self.assertIn(".venv\\Scripts\\pythonw.exe", tray_text)
-        for text in (host_text, tray_text):
-            self.assertNotRegex(text, r"(?im)(?:&|-FilePath\s+)(?:python|py|pythonw)(?:\.exe)?(?:\s|$)")
-            self.assertNotIn("Get-Command python", text)
-            self.assertNotIn("Get-Command pythonw", text)
+        self.assertNotRegex(host_text, r"(?im)(?:&|-FilePath\s+)(?:python|py|pythonw)(?:\.exe)?(?:\s|$)")
+        self.assertNotIn("Get-Command python", host_text)
+        self.assertNotIn("Get-Command pythonw", host_text)
 
+    def test_single_entry_opens_core_tray_and_dashboard_together(self) -> None:
+        self.assertFalse((ROOT / "Start-MeowKeeperPlus-Tray.cmd").exists())
+        self.assertFalse((ROOT / "scripts/Start-MeowKeeperPlus-Tray.ps1").exists())
+        host_text = (ROOT / "scripts/Start-MeowKeeperPlus.ps1").read_text(encoding="utf-8-sig")
+        self.assertIn("Launch-Installed-MeowKeeperPlus.ps1", host_text)
+        installed = (ROOT / "scripts/Launch-Installed-MeowKeeperPlus.ps1").read_text(encoding="utf-8-sig")
+        self.assertIn("'MeowKeeperPlus Tray'", installed)
+        self.assertIn("Start-Process $baseUrl", installed)
+        portable = (ROOT / "tools/portable_start.py").read_text(encoding="utf-8")
+        self.assertIn('"--open-dashboard"', portable)
+        launcher = (ROOT / "tools/launcher.py").read_text(encoding="utf-8")
+        self.assertIn("tray_script = root / \"tools\" / \"run_tray.py\"", launcher)
     def test_verify_launcher_runs_without_starting_a_second_host(self) -> None:
         from tools import launcher as launcher_module
 

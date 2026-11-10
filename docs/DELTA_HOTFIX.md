@@ -1,5 +1,7 @@
 # 真正的檔案差量更新
 
+> 2026-11-10 r121 候選：差量清單改名 `update-manifest-delta.json`；差量不適用時 Dashboard 列出原因與大小，**由使用者明確選擇**才下載完整簽章包（不自動回退）。過渡工具改為分離啟動 worker，修正更新器程序生命週期、執行期快取衝突與復原狀態確認。細節與一般操作請參閱 [線上更新說明](ONLINE_UPDATES.md)。下方 r118～r120 段落為歷史命令。
+
 ## 契約
 
 - `schema=2 / kind=file_delta` 的 Ed25519 簽章清單綁定官方 repository、基準版本、基準 build manifest SHA-256、目標版本、差量 ZIP 雜湊及逐檔新增／修改／刪除清單。

@@ -52,6 +52,15 @@ def validate_settings_patch(values: Mapping[str, Any]) -> dict[str, Any]:
         "dashboard_port": (1024.0, 65535.0),
         "event_video_max_age_days": (1.0, 3650.0),
         "event_video_max_bytes": (104857600.0, 214748364800.0),
+        "behavior_eating_seconds": (1.0, 120.0),
+        "behavior_drinking_seconds": (1.0, 120.0),
+        "behavior_litter_seconds": (1.0, 300.0),
+        "behavior_sleep_seconds": (10.0, 1800.0),
+        "ai_load_target_percent": (10.0, 90.0),
+        "cpu_warning_c": (40.0, 110.0),
+        "cpu_critical_c": (40.0, 110.0),
+        "gpu_warning_c": (40.0, 110.0),
+        "gpu_critical_c": (40.0, 110.0),
     }
     allowed = set(ranges) | {
         "analyzer_mode",
@@ -97,6 +106,9 @@ def validate_settings_patch(values: Mapping[str, Any]) -> dict[str, Any]:
             if not isinstance(value, bool):
                 raise SettingsValidationError(f"設定欄位 {name} 必須是布林值。")
             cleaned[name] = value
+    for warning, critical, label in (("cpu_warning_c", "cpu_critical_c", "CPU"), ("gpu_warning_c", "gpu_critical_c", "GPU")):
+        if warning in cleaned and critical in cleaned and not cleaned[warning] < cleaned[critical]:
+            raise SettingsValidationError(f"{label} 降速溫度必須低於暫停溫度。")
     return cleaned
 
 
@@ -132,6 +144,15 @@ def validate_settings_with_pydantic(values: Mapping[str, Any]) -> dict[str, Any]
         analyzer_mode: str | None = None
         inference_device: str | None = None
         dashboard_auto_open: bool | None = None
+        behavior_eating_seconds: float | None = Field(default=None, ge=1.0, le=120.0)
+        behavior_drinking_seconds: float | None = Field(default=None, ge=1.0, le=120.0)
+        behavior_litter_seconds: float | None = Field(default=None, ge=1.0, le=300.0)
+        behavior_sleep_seconds: float | None = Field(default=None, ge=10.0, le=1800.0)
+        ai_load_target_percent: float | None = Field(default=None, ge=10.0, le=90.0)
+        cpu_warning_c: float | None = Field(default=None, ge=40.0, le=110.0)
+        cpu_critical_c: float | None = Field(default=None, ge=40.0, le=110.0)
+        gpu_warning_c: float | None = Field(default=None, ge=40.0, le=110.0)
+        gpu_critical_c: float | None = Field(default=None, ge=40.0, le=110.0)
         telegram_startup_notice: bool | None = None
         lan_access_enabled: bool | None = None
 

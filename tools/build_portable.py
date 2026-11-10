@@ -271,34 +271,6 @@ exit /b %errorlevel%
 """
 
 
-def _web_launcher_text() -> str:
-    return r"""@echo off
-setlocal
-set "MEOWKEEPER_ROOT=%~dp0"
-set "MEOWKEEPER_PYTHON=%MEOWKEEPER_ROOT%runtime\python\python.exe"
-set "PYTHONPATH=%MEOWKEEPER_ROOT%src"
-set "PYTHONDONTWRITEBYTECODE=1"
-if not exist "%MEOWKEEPER_PYTHON%" exit /b 2
-cd /d "%MEOWKEEPER_ROOT%" || exit /b 2
-"%MEOWKEEPER_PYTHON%" "%MEOWKEEPER_ROOT%tools\run_host.py" %*
-exit /b %errorlevel%
-"""
-
-
-def _tray_launcher_text() -> str:
-    return r"""@echo off
-setlocal
-set "MEOWKEEPER_ROOT=%~dp0"
-set "MEOWKEEPER_PYTHONW=%MEOWKEEPER_ROOT%runtime\python\pythonw.exe"
-set "PYTHONPATH=%MEOWKEEPER_ROOT%src"
-set "PYTHONDONTWRITEBYTECODE=1"
-if not exist "%MEOWKEEPER_PYTHONW%" exit /b 2
-cd /d "%MEOWKEEPER_ROOT%" || exit /b 2
-"%MEOWKEEPER_PYTHONW%" "%MEOWKEEPER_ROOT%tools\run_tray.py" %*
-exit /b %errorlevel%
-"""
-
-
 def _installer_launcher_text(script_name: str) -> str:
     return rf"""@echo off
 setlocal
@@ -322,6 +294,7 @@ def _required_files(include_experimental_models: bool) -> tuple[Path, ...]:
         ROOT / "vendor" / "ffmpeg" / "LICENSE",
         ROOT / "vendor" / "javascript" / "node.exe",
         ROOT / "vendor" / "javascript" / "LICENSE",
+        ROOT / "assets" / "tray" / "meowkeeper.ico",
         ROOT / "assets" / "tray" / "meowkeeper-earth-ready.ico",
         ROOT / "assets" / "tray" / "meowkeeper-earth-waiting.ico",
         ROOT / "assets" / "tray" / "meowkeeper-earth-error.ico",
@@ -493,12 +466,9 @@ def build_portable(
         (staging / "Create-Launcher-Icon.cmd").write_text(
             '@echo off\r\npowershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\\New-PortableShortcut.ps1"\r\n', encoding="utf-8")
         launcher.write_text(_launcher_text(), encoding="utf-8", newline="\r\n")
-        (staging / "MeowKeeperPlusDashboard.cmd").write_text(
-            _web_launcher_text(), encoding="utf-8", newline="\r\n"
-        )
-        (staging / "MeowKeeperPlusTray.cmd").write_text(
-            _tray_launcher_text(), encoding="utf-8", newline="\r\n"
-        )
+        # One entry only: MeowKeeperPlus.cmd starts/reuses Tray, Tray starts/
+        # reuses the Host and opens the Dashboard. No separate Dashboard/Tray
+        # launchers, so the two can never be controlled independently.
         _copy_powershell_script(
             ROOT / "scripts" / "Install-MeowKeeperPlus.ps1",
             staging / "scripts" / "Install-MeowKeeperPlus.ps1",

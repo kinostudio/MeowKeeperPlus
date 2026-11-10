@@ -90,6 +90,20 @@ class PreviewMseContractTests(unittest.TestCase):
             with self.subTest(value=value[:40]), self.assertRaises(ValueError):
                 validate_codec_offer(value)
 
+    def test_audio_codecs_are_offered_with_video_for_live_sound(self) -> None:
+        offer = "avc1.640029,mp4a.40.2,flac,opus"
+        self.assertEqual(validate_codec_offer(offer), offer)
+        for value in ("mp4a.40.2", "flac,opus", "avc1.640029,pcma"):
+            with self.subTest(value=value), self.assertRaises(ValueError):
+                validate_codec_offer(value)
+        self.assertEqual(safe_mse_mime('video/mp4; codecs="avc1.640029,flac"'), 'video/mp4; codecs="avc1.640029,flac"')
+        root = Path(__file__).resolve().parents[1]
+        player = (root / "src/meowkeeper/app/web/static/js/mse-player.js").read_text(encoding="utf-8")
+        self.assertIn('const audioCandidates = ["mp4a.40.2", "mp4a.40.5", "flac", "opus"];', player)
+        self.assertIn("[...videoCodecs, ...supportedAudioCodecs()]", player)
+        preview = (root / "src/meowkeeper/app/web/static/js/shared-preview.js").read_text(encoding="utf-8")
+        self.assertIn("const audioNeedsMse = audioEnabled && !rtcAudioCompatible();", preview)
+
     def test_mime_and_source_must_be_safe_and_fresh(self) -> None:
         self.assertEqual(safe_mse_mime('video/mp4; codecs="hvc1.1.6.L153.B0"'), 'video/mp4; codecs="hvc1.1.6.L153.B0"')
         self.assertIsNone(safe_mse_mime('video/mp4; codecs="hvc1.1.6.L153.B0\",rtsp://evil"'))

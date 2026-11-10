@@ -801,6 +801,9 @@ class EventSemanticService:
         self.dispatch_validator = dispatch_validator
 
         self.pressure_probe = None
+        # Short local pressure (an event clip being assembled, a load spike)
+        # is waited out instead of dropping the cloud job outright.
+        self.pressure_wait_seconds = 20.0
 
         self._jobs_lock = threading.Lock()
 
@@ -881,6 +884,21 @@ class EventSemanticService:
         return future
 
 
+
+    def _await_pressure(self, job_id, queued_mono):
+        """Return a pressure reason only if it lasts past the bounded wait."""
+        if not self.pressure_probe:
+            return None
+        reason = self.pressure_probe()
+        if not reason:
+            return None
+        budget = min(self.pressure_wait_seconds, self.job_ttl - (time.monotonic() - queued_mono) - self.timeout)
+        deadline = time.monotonic() + max(0.0, budget)
+        while reason and time.monotonic() < deadline:
+            if self._stop.wait(0.5) or self._cancelled(job_id):
+                return reason
+            reason = self.pressure_probe()
+        return reason
 
     def _cancelled(self, job_id):
 
@@ -1050,7 +1068,7 @@ class EventSemanticService:
 
                         raise VisionFailure("insufficient_evidence")
 
-                    self.pressure_reason = self.pressure_probe() if self.pressure_probe else None
+                    self.pressure_reason = self._await_pressure(job_id, queued_mono)
 
                     if self.pressure_reason:
 
@@ -1090,7 +1108,7 @@ class EventSemanticService:
 
                         raise VisionFailure("insufficient_evidence")
 
-                    self.pressure_reason = self.pressure_probe() if self.pressure_probe else None
+                    self.pressure_reason = self._await_pressure(job_id, queued_mono)
 
                     if self.pressure_reason:
 

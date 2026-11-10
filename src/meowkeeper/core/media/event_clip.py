@@ -270,6 +270,11 @@ class EventClipService:
             return False
         if self._is_cooled_down(request):
             self._safe_store_update(request.event_id, clip_status="merged_cooldown", last_error="同類事件仍在冷卻時間內。")
+            # The cooldown only limits clips and phone notifications. Cloud
+            # image analysis keeps its own daily/per-minute budget and track
+            # cooldown, so events inside the notification cooldown still get a
+            # description (no extra notification is sent).
+            self._submit_semantics(request)
             return False
         start = request.trigger_at - timedelta(seconds=request.pre_seconds)
         references = self.ring_buffer.acquire_window(start, request.trigger_at)
@@ -277,30 +282,7 @@ class EventClipService:
             with self._lock:
                 if self._clip_queue.full():
                     raise Full
-                semantics = None
-                if (self.semantic_service is not None
-                        and request.trigger_origin == "detector" and request.event_type == "cat_detected"):
-                    tracks = request.track_ids or ((request.track_id,) if request.track_id else ())
-                    try:
-                        pet_profiles = []
-                        try:
-                            from meowkeeper.core.identity.pet_registry import PetRegistry
-                            reg = PetRegistry(self.output_directory.parent / "pets")
-                            for p in reg.list_pets(enabled_only=True):
-                                pet_profiles.append({
-                                    "pet_id": p.pet_id,
-                                    "name": p.display_name,
-                                    "traits": p.effective_traits(),
-                                })
-                        except (OSError, RuntimeError, ValueError, TypeError, KeyError, AttributeError, sqlite3.Error):
-                            logging.getLogger(__name__).debug("選用資料處理未完成；沿用安全備援結果。")
-                        semantics = self.semantic_service.submit(SemanticRequest(
-                            request.event_id, request.screenshot_bytes or b"", tuple(str(t) for t in tracks),
-                            trigger_at=request.trigger_at,
-                            pet_profiles=tuple(pet_profiles),
-                        ))
-                    except Exception:  # noqa: BLE001 - API 排程不可使影片事件失敗
-                        self._log("事件 AI 候選排程失敗；繼續本機事件影片。")
+                semantics = self._submit_semantics(request)
                 job = _AssemblyJob(request, references, semantics, self._monotonic())
                 sequence = self._sequence
                 self._sequence += 1
@@ -312,6 +294,34 @@ class EventClipService:
             self._log("⚠️ 事件影片佇列已滿，保留事件紀錄但略過低優先影片。")
             return False
         return True
+
+    def _submit_semantics(self, request):
+        """Queue optional cloud analysis; never blocks or fails the local event."""
+        semantics = None
+        if (self.semantic_service is not None
+                and request.trigger_origin == "detector" and request.event_type == "cat_detected"):
+            tracks = request.track_ids or ((request.track_id,) if request.track_id else ())
+            try:
+                pet_profiles = []
+                try:
+                    from meowkeeper.core.identity.pet_registry import PetRegistry
+                    reg = PetRegistry(self.output_directory.parent / "pets")
+                    for p in reg.list_pets(enabled_only=True):
+                        pet_profiles.append({
+                            "pet_id": p.pet_id,
+                            "name": p.display_name,
+                            "traits": p.effective_traits(),
+                        })
+                except (OSError, RuntimeError, ValueError, TypeError, KeyError, AttributeError, sqlite3.Error):
+                    logging.getLogger(__name__).debug("選用資料處理未完成；沿用安全備援結果。")
+                semantics = self.semantic_service.submit(SemanticRequest(
+                    request.event_id, request.screenshot_bytes or b"", tuple(str(t) for t in tracks),
+                    trigger_at=request.trigger_at,
+                    pet_profiles=tuple(pet_profiles),
+                ))
+            except Exception:  # noqa: BLE001 - API 排程不可使影片事件失敗
+                self._log("事件 AI 候選排程失敗；繼續本機事件影片。")
+        return semantics
 
     def get_recent_clip(
         self,
@@ -1408,7 +1418,7 @@ class EventClipService:
         pet = cloud_pet_name or local_pet
         time_line, _sep2, _tail = rest.partition("\n") if separator else (rest, "", "")
 
-        # 1. 優先使用雲端開放性描述 (如「Saki現在躺在床上休息，好舒服～」)
+        # 1. 優先使用雲端開放性描述，避免將個別寵物名稱寫入程式範例。
         cloud_caption = getattr(semantics, "caption", None)
         if cloud_caption and isinstance(cloud_caption, str) and cloud_caption.strip():
             text = cloud_caption.strip()

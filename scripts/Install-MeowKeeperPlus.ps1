@@ -289,7 +289,7 @@ function New-StartMenuLauncherShortcut([string]$ShortcutPath, [string]$Applicati
         throw "開始功能表已有同名非 MeowKeeper+ 捷徑；為避免覆蓋，安裝已停止：$ShortcutPath"
     }
     $launcher = Join-Path $ApplicationRoot "scripts\Launch-Installed-MeowKeeperPlus.ps1"
-    $pythonIcon = Join-Path $ApplicationRoot "assets\tray\meowkeeper-earth-ready.ico"
+    $pythonIcon = Join-Path $ApplicationRoot "assets\tray\meowkeeper.ico"
     if (-not (Test-Path -LiteralPath $launcher -PathType Leaf) -or -not (Test-Path -LiteralPath $pythonIcon -PathType Leaf)) {
         throw "安裝版啟動入口或圖示缺少；未建立捷徑。"
     }
@@ -304,7 +304,7 @@ function New-StartMenuLauncherShortcut([string]$ShortcutPath, [string]$Applicati
         $shortcut.Arguments = '-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File "' + $launcher + '"'
         $shortcut.WorkingDirectory = $ApplicationRoot
         $shortcut.IconLocation = $pythonIcon + ',0'
-        $shortcut.Description = '啟動喵喵守護者+ 背景監控與 Dashboard'
+        $shortcut.Description = '一鍵開啟喵喵守護者+：背景監控、Tray 與 Dashboard'
         $shortcut.Save()
     }
     finally {
@@ -806,6 +806,20 @@ function Assert-NoInstalledMediaConsumers([string]$ApplicationRoot) {
     }
 }
 
+function Write-InstallStep([int]$Step, [string]$Name) {
+    # Progress shared with the update worker: "step n of 8 + name". Visible in
+    # this console and, for managed updates, in the Dashboard/PowerShell status.
+    Write-Host ("[{0}/8] {1}" -f $Step, $Name)
+    if (-not $HotfixManaged) { return }
+    try {
+        $progressPath = Join-Path $hotfixWorkRoot 'installer-progress.json'
+        $temporary = $progressPath + '.' + [guid]::NewGuid().ToString('N') + '.tmp'
+        $payload = [ordered]@{ schema = 1; step = $Step; step_total = 8; step_name_zh_tw = $Name; at = [DateTime]::UtcNow.ToString('o') }
+        [IO.File]::WriteAllText($temporary, ($payload | ConvertTo-Json -Compress), [Text.UTF8Encoding]::new($false))
+        Move-Item -LiteralPath $temporary -Destination $progressPath -Force
+    } catch { }
+}
+
 function Write-InstallOutcome {
     param(
         [string]$DataRoot,
@@ -969,6 +983,39 @@ if ($Upgrade -and (Test-Path -LiteralPath $appRoot)) {
     if ($HotfixManaged -and (Get-FileHash -Algorithm SHA256 -LiteralPath (Join-Path $resolvedUpgradeApp 'build_manifest.json')).Hash -ne $HotfixOldManifestSha256) {
         throw '更新前版本校驗與安全更新工作不符；未停止正式監控。'
     }
+    # Read-only preflight while monitoring still runs: a same-named persistent
+    # item in Data would stop the migration later, after downtime. Report the
+    # names now and leave every file untouched. Verified runtime caches
+    # (matplotlib/ultralytics/torch leaves) are retained in the old App only.
+    $preflightData = Join-Path $resolvedUpgradeApp "data"
+    if (Test-Path -LiteralPath $preflightData -PathType Container) {
+        $inspectArgs = @($dataMigrationTool, "--mode", "inspect", "--source", $preflightData, "--destination", $dataRoot)
+        $preflightConfig = Join-Path $resolvedUpgradeApp "config.json"
+        if (Test-Path -LiteralPath $preflightConfig -PathType Leaf) { $inspectArgs += @("--legacy-config", $preflightConfig) }
+        $inspectOutput = & $sourcePython @inspectArgs
+        if ($LASTEXITCODE -ne 0) { throw "舊版資料唯讀檢查未完成；尚未停止監控，未修改任何資料。" }
+        $inspection = ($inspectOutput | Select-Object -Last 1) | ConvertFrom-Json
+        if ($inspection.status -ne 'ready') {
+            $blockingNames = @($inspection.blocking_entries) -join '、'
+            Write-Host ("data_migration_preflight_blocked: " + $blockingNames)
+            if ($HotfixManaged) {
+                # Tell the worker nothing was stopped or moved, so it must not run
+                # a rollback that would interrupt the still-running monitor.
+                $blockedRecord = [ordered]@{
+                    schema = 1; status = 'preflight_blocked'; reason = 'data_migration_collision'
+                    old_manifest_sha256 = $HotfixOldManifestSha256.ToLowerInvariant()
+                    blocking_entries = @($inspection.blocking_entries | ForEach-Object { [string]$_ })
+                }
+                [IO.File]::WriteAllText($HotfixResultPath, ($blockedRecord | ConvertTo-Json -Compress), [Text.UTF8Encoding]::new($false))
+            }
+            throw ("舊 App\data 與 Data 有同名持久資料（" + $blockingNames + "）；尚未停止監控，沒有覆寫或刪除任何資料。")
+        }
+        $retainedCaches = @($inspection.items | Where-Object { $_.category -eq 'runtime_cache_retained' } | ForEach-Object { $_.name })
+        if ($retainedCaches.Count -gt 0) {
+            Write-Host ("執行期快取保留在舊 App 備份，不搬入 Data：" + ($retainedCaches -join '、'))
+        }
+    }
+    Write-InstallStep 3 '停止監控'
     if ($CurrentUser) {
         Stop-InstalledHostProcess $appRoot
         Stop-CurrentUserProcesses $appRoot
@@ -1017,6 +1064,7 @@ if ($CurrentUser) {
             Assert-NoInstalledMediaConsumers $resolvedApp
         }
         $resolvedInstallRoot = [IO.Path]::GetFullPath((Resolve-Path -LiteralPath $installRoot).Path)
+        Write-InstallStep 4 '資料快照'
         if ($HotfixManaged) {
             $snapshotTool = Join-Path $packageRoot 'tools\hotfix_data_snapshot.py'
             & $sourcePython $snapshotTool capture --data $dataRoot --backup (Join-Path $hotfixWorkRoot 'data-backup')
@@ -1030,6 +1078,7 @@ if ($CurrentUser) {
         }
         try {
             $installationPhase = 'archive'
+            Write-InstallStep 5 '封存舊程式並搬移舊資料'
             if ($HotfixManaged) {
                 $recoveryRecord = [ordered]@{
                     schema = 1; status = 'switch_started'; old_backup_app = $upgradeBackupApp
@@ -1066,7 +1115,7 @@ if ($CurrentUser) {
                 $migrationArgs += @("--legacy-config", $legacyConfigPath)
             }
             & $sourcePython @migrationArgs
-            if ($LASTEXITCODE -ne 0) { throw "舊版資料移轉未完成；已停止升級並保留舊 App。請先查看同名衝突原因，不會覆寫 Data。" }
+            if ($LASTEXITCODE -ne 0) { throw "舊版資料移轉未完成；已停止升級並保留舊 App。同名項目名稱已寫入安裝紀錄，不會覆寫 Data。" }
         }
     }
     New-Item -ItemType Directory -Path $appRoot -Force | Out-Null
@@ -1077,6 +1126,7 @@ if ($CurrentUser) {
     }
     New-Item -ItemType Directory -Path $dataRoot -Force | Out-Null
     $installationPhase = 'copy'
+    Write-InstallStep 6 '複製新程式'
     Copy-Item -Path (Join-Path $packageRoot "*") -Destination $appRoot -Recurse -Force
     # Runtime sidecars belong to the running portable instance, never to the
     # installation. Remove only copied, recognized sidecars, not source locks.
@@ -1093,6 +1143,7 @@ if ($CurrentUser) {
     $installedPython = Join-Path $appRoot "runtime\python\python.exe"
     Write-Host "[喵喵守護者+] 檔案已複製，正在驗證安裝目錄的完整校驗碼，請稍候…"
     $installationPhase = 'verify'
+    Write-InstallStep 7 '驗證新程式'
     & $installedPython (Join-Path $appRoot "tools\verify_portable.py") --root $appRoot
     if ($LASTEXITCODE -ne 0) { throw "安裝後完整性驗證失敗。" }
     $upgradeNewAppVerified = $true
@@ -1142,6 +1193,7 @@ if ($CurrentUser) {
     New-StartMenuLauncherShortcut $startMenuShortcut $appRoot
     if (-not $SkipStart) {
         $installationPhase = 'start'
+        Write-InstallStep 8 '啟動監控與健康檢查'
         if ($CurrentUser) {
             & $env:ComSpec /d /c ('"{0}"' -f $coreStartupLink)
             $dashboardPort = 8000

@@ -1326,7 +1326,7 @@ def create_app(
     @app.post("/api/v1/updates/{action}")
     def updates_action(request: Request, action: str, background_tasks: BackgroundTasks) -> dict:
         require_mutation(request)
-        if action not in {"check", "prepare", "apply"}:
+        if action not in {"check", "prepare", "prepare-full", "apply"}:
             raise HTTPException(status_code=400, detail="更新操作不合法。")
         if action == "apply":
             # Applying an update stops the Host that serves this route. Restrict
@@ -1338,7 +1338,11 @@ def create_app(
                 return updater.apply()
             except (OSError, RuntimeError, ValueError) as exc:
                 raise HTTPException(status_code=409, detail=str(exc)) from exc
-        background_tasks.add_task(updater.check if action == "check" else updater.prepare)
+        if action == "prepare-full":
+            # Explicit choice after the delta was shown as not applicable.
+            background_tasks.add_task(updater.prepare, True)
+        else:
+            background_tasks.add_task(updater.check if action == "check" else updater.prepare)
         return {"status": "queued", "message_zh_tw": "正在檢查或準備更新；監控持續。"}
 
 
@@ -2354,7 +2358,7 @@ def create_app(
                         quality = device["quality"]
                         if type(quality.get("width")) is int and type(quality.get("height")) is int:
                             result["original_source"] = {
-                                key: quality[key] for key in ("width", "height", "fps", "video_codec", "verified_at", "historical", "name")
+                                key: quality[key] for key in ("width", "height", "fps", "video_codec", "audio_codec", "verified_at", "historical", "name")
                                 if key in quality
                             }
                         break
@@ -2493,6 +2497,15 @@ def create_app(
             "retention_seconds",
             "ring_maximum_size_mb",
             "telegram_startup_notice",
+            "behavior_eating_seconds",
+            "behavior_drinking_seconds",
+            "behavior_litter_seconds",
+            "behavior_sleep_seconds",
+            "ai_load_target_percent",
+            "cpu_warning_c",
+            "cpu_critical_c",
+            "gpu_warning_c",
+            "gpu_critical_c",
         })
         return {
             "settings": updated,
@@ -2528,6 +2541,15 @@ def create_app(
             "event_video_max_bytes": 3 * 1024 ** 3,
             "dashboard_auto_open": False,
             "telegram_startup_notice": False,
+            "behavior_eating_seconds": 10.0,
+            "behavior_drinking_seconds": 5.0,
+            "behavior_litter_seconds": 10.0,
+            "behavior_sleep_seconds": 60.0,
+            "ai_load_target_percent": 40.0,
+            "cpu_warning_c": 85.0,
+            "cpu_critical_c": 95.0,
+            "gpu_warning_c": 80.0,
+            "gpu_critical_c": 85.0,
         }
         if not core.settings().get("analyzer_override", False):
             defaults["analyzer_mode"] = "yolo"
@@ -3719,7 +3741,7 @@ def create_app(
         if path == "/cameras":
             return RedirectResponse("/settings/source", status_code=307)
         title_map = {
-            "/help": "使用教學",
+            "/help": "使用說明",
             "/": "總覽",
             "/dashboard": "總覽",
             "/live": "即時畫面",

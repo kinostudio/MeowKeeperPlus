@@ -21,6 +21,9 @@ from urllib.parse import urlsplit
 
 REPOSITORY = "kinostudio/MeowKeeperPlus"
 MANIFEST_URL = f"https://github.com/{REPOSITORY}/releases/latest/download/update-manifest.json"
+# r121+ publish the small file delta under its own name; `update-manifest.json`
+# carries the full signed package so older installs can still update.
+DELTA_MANIFEST_URL = f"https://github.com/{REPOSITORY}/releases/latest/download/update-manifest-delta.json"
 MAX_ARCHIVE = 6 * 1024**3
 MAX_EXPANDED = 12 * 1024**3
 HOTFIX_TASK_NAME = "MeowKeeperPlus Update Worker"
@@ -172,6 +175,8 @@ class UpdateManager:
         self._manifest = None
         self._envelope = None
         self._prepared_dir = None
+        self._full_manifest = None
+        self._full_envelope = None
         self._hotfix_task_available_override = hotfix_task_available
         self.state = {"status": "not_checked", "message_zh_tw": "尚未檢查更新；不會自動停止監控。"}
 
@@ -339,48 +344,86 @@ class UpdateManager:
             "message_zh_tw": "正在準備更新；監控持續。",
         }
 
+    def _fetch_envelope(self, url, folder, key):
+        path = Path(folder) / ("manifest-" + uuid.uuid4().hex + ".json")
+        self._download(url, path, 65536)
+        envelope = json.loads(path.read_bytes())
+        return envelope, verify_envelope(envelope, key)
+
     def check(self):
+        """Prefer a signed delta; offer the signed full package only as an explicit choice."""
         if not self._lock.acquire(False):
             return
         try:
             self.state = {"status": "checking", "message_zh_tw": "正在檢查官方發布區…"}
+            self._manifest = self._envelope = self._full_manifest = self._full_envelope = None
             key = (self.app_root / "configs/update-public.pem").read_bytes()
             self.root.mkdir(parents=True, exist_ok=True)
-            with tempfile.TemporaryDirectory(dir=self.root) as folder:
-                path = Path(folder) / "manifest.json"
-                self._download(MANIFEST_URL, path, 65536)
-                envelope = json.loads(path.read_bytes())
-                manifest = verify_envelope(envelope, key)
             from meowkeeper.app.web.release_info import release_information
             current = release_information(self.app_root)["version"]
-            available = not re.fullmatch(r"r\d+", current) or int(manifest["version"][1:]) > int(current[1:])
-            if available and manifest.get("kind") != "file_delta":
-                self._manifest = self._envelope = None
-                self.state = {"status": "failed", "reason": "delta_unavailable",
-                              "message_zh_tw": "發布區尚未提供適用的差量包；不會自動下載完整包。監控持續。"}
+
+            def newer(manifest):
+                return not re.fullmatch(r"r\d+", current) or int(manifest["version"][1:]) > int(current[1:])
+
+            candidates = []
+            with tempfile.TemporaryDirectory(dir=self.root) as folder:
+                for url in (DELTA_MANIFEST_URL, MANIFEST_URL):
+                    try:
+                        candidates.append(self._fetch_envelope(url, folder, key))
+                    except Exception:  # noqa: BLE001, S112 - one missing asset must not hide the other.
+                        continue
+            if not candidates:
+                raise ValueError("no_signed_manifest")
+            delta_reason = "delta_unavailable"
+            for envelope, manifest in candidates:
+                if manifest.get("kind") != "file_delta" or not newer(manifest):
+                    continue
+                try:
+                    from meowkeeper.app.delta_update import validate_base
+                    validate_base(self.app_root, manifest)
+                except (OSError, ValueError, KeyError):
+                    delta_reason = "delta_base_mismatch"
+                    continue
+                self._manifest, self._envelope = manifest, envelope
+                self.state = {"status": "available", "version": manifest["version"], "package_kind": "delta",
+                              "download_bytes": manifest["size"],
+                              "message_zh_tw": "找到已簽章差量更新；只下載變更檔案，監控持續。"}
                 return
-            self._manifest = manifest if available else None
-            self._envelope = envelope if available else None
-            if available and manifest.get("kind") == "file_delta":
-                from meowkeeper.app.delta_update import validate_base
-                validate_base(self.app_root, manifest)
-            self.state = {"status": "available" if available else "current", "version": manifest["version"],
-                          "message_zh_tw": ("找到已簽章差量更新；只下載變更檔案，不會下載完整包。" if manifest.get("kind") == "file_delta" else "找到新版，簽章驗證成功；下載不會停止監控。") if available else "目前版本無需更新。"}
+            full = next(((envelope, manifest) for envelope, manifest in candidates
+                         if manifest.get("schema") == 1 and newer(manifest)), None)
+            if full is not None:
+                self._full_envelope, self._full_manifest = full
+                reason_text = ("目前安裝檔案與差量基準不同" if delta_reason == "delta_base_mismatch"
+                               else "這一版沒有適用的差量包")
+                self.state = {"status": "available", "version": full[1]["version"], "package_kind": "full",
+                              "full_available": True, "reason": delta_reason,
+                              "download_bytes": full[1]["size"],
+                              "message_zh_tw": (reason_text + "；可改下載官方簽章完整安裝包並自動替換程式。"
+                                                "設定、寵物、事件影片、記錄與 Log 都在 Data，不會被覆蓋。")}
+                return
+            latest = max((manifest["version"] for _envelope, manifest in candidates), key=lambda value: int(value[1:]))
+            if any(newer(manifest) for _envelope, manifest in candidates):
+                self.state = {"status": "failed", "reason": delta_reason,
+                              "message_zh_tw": "發布區的差量包不適用目前安裝，且沒有完整安裝包；監控持續。"}
+                return
+            self.state = {"status": "current", "version": latest, "message_zh_tw": "目前版本無需更新。"}
         except Exception as error:  # noqa: BLE001 - network cannot stop media
-            self._manifest = None
-            self._envelope = None
+            self._manifest = self._envelope = self._full_manifest = self._full_envelope = None
             self.state = {"status": "failed", "error_type": type(error).__name__,
-                          "message_zh_tw": "更新檢查未完成；可能版本基準／安裝檔案不符、網路不可達或簽章不符。不會自動下載完整包，原監控不受影響。"}
+                          "message_zh_tw": "更新檢查未完成；可能網路不可達、尚未發布或簽章不符。原監控不受影響。"}
         finally:
             self._lock.release()
 
-    def prepare(self):
+    def prepare(self, allow_full=False):
         if not self._lock.acquire(False):
             return
         folder = None
         try:
             if self.state.get("status") == "prepared":
                 return
+            if self._manifest is None and allow_full and self._full_manifest is not None:
+                # Explicit user choice in the Dashboard; never selected automatically.
+                self._manifest, self._envelope = self._full_manifest, self._full_envelope
             if self._manifest is None:
                 raise ValueError("請先檢查新版。")
             if self._envelope is None:

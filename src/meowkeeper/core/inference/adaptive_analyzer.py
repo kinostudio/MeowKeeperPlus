@@ -14,9 +14,20 @@ from meowkeeper.core.inference.gpu_telemetry import CachedGpuSampler
 
 
 class AdaptiveAnalyzer:
-    def __init__(self, analyzer: Any, *, fps: int, logger: Any, input_size: int = 640) -> None:
+    def __init__(self, analyzer: Any, *, fps: int, logger: Any, input_size: int = 640,
+                 thresholds: Any = None) -> None:
         self.analyzer = analyzer
-        self.policy = AdaptivePolicy(AdaptiveSettings(preferred_fps=fps, preferred_size=input_size))
+        mapping = {"ai_load_target_percent": "target_percent", "cpu_warning_c": "cpu_warning_c",
+                   "cpu_critical_c": "cpu_critical_c", "gpu_warning_c": "gpu_warning_c",
+                   "gpu_critical_c": "gpu_critical_c"}
+        overrides = {field: float(thresholds[key]) for key, field in mapping.items()
+                     if isinstance(thresholds, dict) and key in thresholds}
+        try:
+            settings = AdaptiveSettings(preferred_fps=fps, preferred_size=input_size, **overrides)
+        except (TypeError, ValueError):
+            # A bad saved threshold must never stop monitoring; keep the safe defaults.
+            settings = AdaptiveSettings(preferred_fps=fps, preferred_size=input_size)
+        self.policy = AdaptivePolicy(settings)
         self.logger = logger
         self._last_started: float | None = None
         self._latency = 0.0
@@ -58,7 +69,10 @@ class AdaptiveAnalyzer:
         threshold = self.policy.settings.cpu_warning_c if self.inference_backend == "CPU" else self.policy.settings.gpu_warning_c
         if self._temperature is not None and self._temperature >= threshold:
             return "thermal_pressure"
-        if self._load is not None and self._load >= self.policy.settings.target_percent:
+        # The local 40% target is for long-term AI load. Sending one small
+        # storyboard costs almost no local compute, so only defer the cloud
+        # request when the machine is close to saturation.
+        if self._load is not None and self._load >= max(85.0, self.policy.settings.target_percent + 30):
             return "compute_pressure"
         return None  # 感測器缺失不補造溫度；既有本機回退策略仍獨立執行。
 

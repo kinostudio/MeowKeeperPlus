@@ -320,7 +320,7 @@ class Phase2EventVideoTests(unittest.TestCase):
         self.assertEqual([record.path for record in ring.index.all()], [valid.resolve()])
 
     def _source_ts(self, *, audio: bool = False) -> Path:
-        source = self.root / ("audio.mp4" if audio else "cat.mp4")
+        source = self.root / ("audio.ts" if audio else "cat.mp4")
         if audio:
             command = [
                 str(self.ffmpeg),
@@ -344,6 +344,8 @@ class Phase2EventVideoTests(unittest.TestCase):
                 "yuv420p",
                 "-c:a",
                 "aac",
+                "-f",
+                "mpegts",
                 str(source),
             ]
         else:
@@ -442,6 +444,7 @@ class Phase2EventVideoTests(unittest.TestCase):
         self.assertTrue(service.wait_for_idle(20))
         row = store.get_media_event("event-1")
         service.close()
+        store.close()
         self.assertIsNotNone(row)
         self.assertEqual(row["clip_status"], "completed")
         self.assertEqual(row["telegram_status"], "disabled")
@@ -574,6 +577,7 @@ class Phase2EventVideoTests(unittest.TestCase):
         )
         row = store.get_media_event("low-disk")
         service.close()
+        store.close()
         self.assertEqual(row["clip_status"], "rejected_disk_low")
 
     def test_audio_stream_survives_segment_concat(self) -> None:

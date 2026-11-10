@@ -1,0 +1,50 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256">
+  <defs>
+    <clipPath id="disc"><circle cx="128" cy="128" r="120"/></clipPath>
+  </defs>
+  <circle cx="128" cy="128" r="124" fill="#FBF5EC"/>
+  <g clip-path="url(#disc)">
+    <circle cx="128" cy="128" r="120" fill="#EDA460"/>
+    <path d="M8,128 A120,120 0 0 1 248,128 A60,60 0 0 1 128,128 A60,60 0 0 0 8,128 Z" fill="#B3A597"/>
+    <!-- grey tabby stripes -->
+    <g fill="none" stroke="#7E6F62" stroke-width="9" stroke-linecap="round">
+      <path d="M70,40 q10,22 2,44"/>
+      <path d="M104,22 q12,24 4,52"/>
+      <path d="M140,20 q10,22 6,46"/>
+      <path d="M176,30 q6,18 2,34"/>
+    </g>
+    <!-- orange tabby stripes -->
+    <g fill="none" stroke="#C9773A" stroke-width="9" stroke-linecap="round">
+      <path d="M186,236 q-10,-22 -2,-44"/>
+      <path d="M152,234 q-12,-24 -4,-52"/>
+      <path d="M116,236 q-10,-22 -6,-46"/>
+      <path d="M80,226 q-6,-18 -2,-34"/>
+    </g>
+    <!-- divider ink line -->
+    <path d="M248,128 A60,60 0 0 1 128,128 A60,60 0 0 0 8,128" fill="none" stroke="#4A3A2E" stroke-width="5"/>
+  </g>
+  <!-- grey cat face (right lobe) -->
+  <g>
+    <path d="M160,112 l8,-26 l16,20 z M220,112 l-8,-26 l-16,20 z" fill="#B3A597" stroke="#4A3A2E" stroke-width="5" stroke-linejoin="round"/>
+    <path d="M165,104 l4,-11 l7,9 z M215,104 l-4,-11 l-7,9 z" fill="#F2B5B0"/>
+    <ellipse cx="190" cy="136" rx="34" ry="30" fill="#B3A597" stroke="#4A3A2E" stroke-width="5"/>
+    <ellipse cx="178" cy="132" rx="4.5" ry="6" fill="#3A2E25"/>
+    <ellipse cx="202" cy="132" rx="4.5" ry="6" fill="#3A2E25"/>
+    <path d="M186,144 h8 l-4,5 z" fill="#E58A86"/>
+    <path d="M182,152 q8,6 16,0" fill="none" stroke="#4A3A2E" stroke-width="3" stroke-linecap="round"/>
+  </g>
+  <!-- orange cat face (left lobe) -->
+  <g>
+    <path d="M36,112 l8,-26 l16,20 z M96,112 l-8,-26 l-16,20 z" fill="#EDA460" stroke="#4A3A2E" stroke-width="5" stroke-linejoin="round"/>
+    <path d="M41,104 l4,-11 l7,9 z M91,104 l-4,-11 l-7,9 z" fill="#F2B5B0"/>
+    <ellipse cx="66" cy="124" rx="34" ry="30" fill="#EDA460" stroke="#4A3A2E" stroke-width="5"/>
+    <ellipse cx="54" cy="120" rx="4.5" ry="6" fill="#3A2E25"/>
+    <ellipse cx="78" cy="120" rx="4.5" ry="6" fill="#3A2E25"/>
+    <path d="M62,132 h8 l-4,5 z" fill="#E58A86"/>
+    <path d="M58,140 q8,6 16,0" fill="none" stroke="#4A3A2E" stroke-width="3" stroke-linecap="round"/>
+  </g>
+  <!-- red ball shared in the middle -->
+  <circle cx="128" cy="128" r="20" fill="#E0534A" stroke="#4A3A2E" stroke-width="5"/>
+  <path d="M116,122 q8,-8 18,-4" fill="none" stroke="#F6A39C" stroke-width="4" stroke-linecap="round"/>
+  <circle cx="128" cy="128" r="122" fill="none" stroke="#4A3A2E" stroke-width="8"/>
+</svg>

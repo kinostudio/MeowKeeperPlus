@@ -160,3 +160,5 @@ body{font-variant-numeric:tabular-nums;background:var(--surface)}
 @media(max-width:520px){.review-evidence-body{flex-direction:column}.review-evidence-crop{width:100%;max-width:100%}.review-evidence-crop img{max-height:160px;margin:0 auto}}
 #pet-compare-results{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:14px}
 #pet-compare-results .card{min-height:0;min-width:0}
+
+.brand-logo{display:block;border-radius:50%;object-fit:contain}

@@ -5,6 +5,9 @@
     "avc1.640029", "avc1.64002A", "avc1.640033", "avc1.4D401F",
     "avc1.42E01E", "hvc1.1.6.L153.B0"
   ];
+  // Offer audio too: go2rtc only adds the camera's sound track to MSE when the
+  // browser lists an audio codec (G.711 is delivered as FLAC, AAC as mp4a).
+  const audioCandidates = ["mp4a.40.2", "mp4a.40.5", "flac", "opus"];
   const mimePattern = /^video\/mp4;\s*codecs="([A-Za-z0-9., ]{1,256})"$/;
 
   function supportedCodecs() {
@@ -15,11 +18,20 @@
     });
   }
 
+  function supportedAudioCodecs() {
+    if (!window.MediaSource || typeof MediaSource.isTypeSupported !== "function") return [];
+    return audioCandidates.filter(codec => {
+      try { return MediaSource.isTypeSupported(`audio/mp4; codecs="${codec}"`); }
+      catch (_) { return false; }
+    });
+  }
+
   function create({ video, compatibility = false, onStats = () => {}, onStatus = () => {}, onError = () => {} }) {
     let socket = null, mediaSource = null, sourceBuffer = null, objectUrl = null;
     let queue = [], queuedBytes = 0, totalBytes = 0, windowBytes = 0, lastStatsAt = null, frames = 0, lastPresentedFrames = null;
     let frameCallback = 0, statsTimer = 0, timeout = 0, closed = false, firstFrame = false, opening = false;
-    const codecs = supportedCodecs();
+    const videoCodecs = supportedCodecs();
+    const codecs = videoCodecs.length ? [...videoCodecs, ...supportedAudioCodecs()] : [];
 
     function fail(message) {
       if (closed) return;
@@ -224,5 +236,5 @@
     return { start, close, codecs };
   }
 
-  window.MeowKeeperMSE = { create, supportedCodecs };
+  window.MeowKeeperMSE = { create, supportedCodecs, supportedAudioCodecs };
 })();

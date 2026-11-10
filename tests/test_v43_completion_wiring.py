@@ -91,6 +91,7 @@ class V43CompletionWiringTests(unittest.TestCase):
             service=EventSemanticService(provider,journal=SemanticJobJournal(self.store))
             try:
                 service.pressure_probe=controller.semantic_pressure
+                service.pressure_wait_seconds=0  # persistent pressure: skip without waiting
                 result=service.submit(SemanticRequest(self.event,expected.encode())).result(2)
                 self.assertEqual(result.status,"skipped_pressure");self.assertFalse(result.request_dispatched)
             finally:service.close()

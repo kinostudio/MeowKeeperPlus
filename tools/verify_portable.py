@@ -16,6 +16,9 @@ PROHIBITED_TOP_LEVEL = {
     "tests",
     "Start-MeowKeeperPlus.cmd",
     "Start-MeowKeeperPlus-Tray.cmd",
+    # Retired separate launchers: the package has a single entry point.
+    "MeowKeeperPlusDashboard.cmd",
+    "MeowKeeperPlusTray.cmd",
 }
 ALLOWED_BUNDLED_DATA_PREFIX = "data/torch/hub/facebookresearch_dinov2_7764ea0f912e53c92e82eb78a2a1631e92725fc/"
 ALLOWED_BUNDLED_DATA_FILES = {"data/torch/hub/trusted_list"}
@@ -47,7 +50,12 @@ def _sha256(path: Path) -> str:
     return digest.hexdigest().upper()
 
 
-def verify_portable(root: Path, *, allow_runtime_locks: bool = False) -> dict[str, Any]:
+def verify_portable(
+    root: Path,
+    *,
+    allow_runtime_locks: bool = False,
+    allow_retired_r116_launchers: bool = False,
+) -> dict[str, Any]:
     package = root.resolve()
     manifest_path = package / "build_manifest.json"
     if not manifest_path.is_file():
@@ -56,6 +64,8 @@ def verify_portable(root: Path, *, allow_runtime_locks: bool = False) -> dict[st
         payload = json.loads(manifest_path.read_text(encoding="utf-8"))
     except (OSError, UnicodeError, json.JSONDecodeError) as exc:
         raise ValueError("build_manifest.json 無法讀取。") from exc
+    if allow_retired_r116_launchers and not str(payload.get("output", "")).endswith("-r116"):
+        raise ValueError("舊啟動器只允許出現在 r116 差量基準。")
     records = payload.get("files")
     if not isinstance(records, list) or not records:
         raise ValueError("build manifest 沒有可驗證的檔案清單。")
@@ -113,7 +123,12 @@ def verify_portable(root: Path, *, allow_runtime_locks: bool = False) -> dict[st
                 if relative not in ALLOWED_BUNDLED_DATA_FILES and not relative.startswith(ALLOWED_BUNDLED_DATA_PREFIX):
                     raise ValueError("發布包含未核准的 data 檔案；只允許固定 commit 的官方 DINOv2 source cache。")
 
-    prohibited = sorted(name for name in PROHIBITED_TOP_LEVEL if (package / name).exists())
+    retired_launchers = {"MeowKeeperPlusDashboard.cmd", "MeowKeeperPlusTray.cmd"}
+    prohibited = sorted(
+        name for name in PROHIBITED_TOP_LEVEL
+        if (package / name).exists()
+        and not (allow_retired_r116_launchers and name in retired_launchers)
+    )
     if prohibited:
         raise ValueError("發布包含有不得安裝的私人或開發資料：" + ", ".join(prohibited))
     for required in (

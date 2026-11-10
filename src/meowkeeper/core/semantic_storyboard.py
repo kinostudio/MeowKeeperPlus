@@ -76,7 +76,8 @@ class TrackStoryboard:
 def build_storyboards(samples: tuple[FrameEvidence, ...], tracks: tuple[str, ...],
                       trigger_at: datetime, *, frame_count: int = 4, canvas_size: str = "1536x1024",
                       jpeg_quality: int = 82, include_timestamps: bool = True,
-                      include_zones: bool = True, diagnose: bool = False) -> tuple[TrackStoryboard, ...]:
+                      include_zones: bool = True, diagnose: bool = False,
+                      minimum_frames: int | None = None) -> tuple[TrackStoryboard, ...]:
     """時間為相對事件觸發的觀察點，不冒充 MP4 PTS 或精準動作片段。"""
     from PIL import Image, ImageDraw, ImageOps
 
@@ -130,7 +131,8 @@ def build_storyboards(samples: tuple[FrameEvidence, ...], tracks: tuple[str, ...
             selected.append(sample)
             hashes.add(digest)
         selected = selected[-frame_count:]
-        if len(selected) < frame_count or (selected[-1].captured_at - selected[0].captured_at).total_seconds() < .25:
+        required = frame_count if minimum_frames is None else max(2, min(frame_count, minimum_frames))
+        if len(selected) < required or (selected[-1].captured_at - selected[0].captured_at).total_seconds() < .25:
             return reject(next((reason for reason in ("invalid_images", "duplicate_frames", "frames_too_close")
                                 if reason in rejected), "insufficient_frames"))
         width, height = sizes[canvas_size]
@@ -193,13 +195,24 @@ class FrameEvidenceBuffer:
                 samples = tuple(self._samples)
             try:
                 return build_storyboards(samples, tracks, trigger_at, diagnose=True, **self._storyboard_options)
-            except StoryboardEvidenceError as error:
-                reason = error.reason
+            except StoryboardEvidenceError:
+                pass  # keep waiting for more frames until the window closes
             with self._condition:
                 remaining = deadline - time.monotonic()
-                if self._closed or remaining <= 0:
-                    raise StoryboardEvidenceError("buffer_closed" if self._closed else reason)
+                if self._closed:
+                    raise StoryboardEvidenceError("buffer_closed")
+                if remaining <= 0:
+                    break
                 self._condition.wait(min(.25, remaining))
+        # Window over: a brief visit still yields a usable 2-3 frame board
+        # instead of dropping the cloud analysis for "insufficient frames".
+        with self._condition:
+            samples = tuple(self._samples)
+        try:
+            return build_storyboards(samples, tracks, trigger_at, diagnose=True, minimum_frames=2,
+                                     **self._storyboard_options)
+        except StoryboardEvidenceError as error:
+            raise StoryboardEvidenceError(error.reason) from None
 
     def close(self):
         with self._condition:
