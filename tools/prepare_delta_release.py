@@ -15,6 +15,22 @@ from verify_regression_gate import verify_package_evidence
 
 from meowkeeper.app.delta_update import digest, records, validate_manifest, version
 
+R116_RELEASE_SOURCE_BASELINE = {
+    "src/meowkeeper/app/web/state.py": (31065, "6c76ccd9482c006d8c67f232b5f121978f05c813d5b1700c055148867b4ba6fa"),
+}
+
+
+def validate_release_baseline_overrides(base_version: str, target_version: str, overrides: dict) -> None:
+    target_number = int(target_version.removeprefix("r"))
+    if base_version != "r116" or target_number < 118:
+        return
+    if set(overrides) != set(R116_RELEASE_SOURCE_BASELINE):
+        raise ValueError("r116 差量必須且只能包含已知 state.py 基準修正；請停止發布並補上精確來源覆寫。")
+    for name, (expected_size, expected_sha256) in R116_RELEASE_SOURCE_BASELINE.items():
+        path = overrides[name]
+        if not path.is_file() or path.stat().st_size != expected_size or digest(path) != expected_sha256:
+            raise ValueError("r116 差量的 state.py 基準修正大小或 SHA-256 不符；停止發布。")
+
 
 def build_delta(base: Path, target: Path, output: Path, key, *, base_overrides=None) -> dict:
     old_manifest = json.loads((base / "build_manifest.json").read_text(encoding="utf-8"))
@@ -66,14 +82,17 @@ def main():
     parser.add_argument("--signing-root", type=Path, default=ROOT)
     parser.add_argument("--base-source-override", action="append", default=[], help="核准已知第一方公開修正：src/相對路徑=來源檔案")
     args = parser.parse_args()
-    from Crypto.PublicKey import ECC
-    key = ECC.import_key((args.signing_root / "data/release-signing/ed25519-private.pem").read_bytes())
-    if key.public_key().export_key(format="PEM") != (ROOT / "configs/update-public.pem").read_text().strip():
-        raise ValueError("更新信任根不一致，停止差量簽署。")
     overrides = {}
     for value in args.base_source_override:
         name, file = value.split("=", 1)
         overrides[name] = Path(file)
+    base_manifest = json.loads((args.base / "build_manifest.json").read_text(encoding="utf-8"))
+    target_manifest = json.loads((args.target / "build_manifest.json").read_text(encoding="utf-8"))
+    validate_release_baseline_overrides(version(base_manifest), version(target_manifest), overrides)
+    from Crypto.PublicKey import ECC
+    key = ECC.import_key((args.signing_root / "data/release-signing/ed25519-private.pem").read_bytes())
+    if key.public_key().export_key(format="PEM") != (ROOT / "configs/update-public.pem").read_text().strip():
+        raise ValueError("更新信任根不一致，停止差量簽署。")
     print(json.dumps(build_delta(args.base, args.target, args.output, key, base_overrides=overrides)))
 
 

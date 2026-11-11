@@ -27,7 +27,8 @@ from meowkeeper.app.updates import UpdateManager, canonical, verify_envelope
 from tools.apply_verified_update import verify_and_stage
 from tools.bootstrap_delta import main as bootstrap_main
 from tools.bootstrap_delta import prepare
-from tools.prepare_delta_release import build_delta
+from tools.prepare_delta_release import build_delta, validate_release_baseline_overrides
+from tools.prepare_delta_release import main as prepare_release_main
 from tools.verify_portable import verify_portable
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -445,6 +446,29 @@ class DeltaUpdateTests(unittest.TestCase):
         (self.base / "src/demo.py").write_bytes(b"other")
         with self.assertRaises(ValueError):
             validate_base(self.base, manifest)
+
+    def test_r116_release_requires_exact_previously_supported_source_override(self):
+        source = ROOT / "src/meowkeeper/app/web/state.py"
+        validate_release_baseline_overrides("r116", "r121", {"src/meowkeeper/app/web/state.py": source})
+        with self.assertRaises(ValueError):
+            validate_release_baseline_overrides("r116", "r121", {})
+        with self.assertRaises(ValueError):
+            validate_release_baseline_overrides("r116", "r121", {"src/meowkeeper/app/web/state.py": self.target / "src/demo.py"})
+        with self.assertRaises(ValueError):
+            validate_release_baseline_overrides("r116", "r121", {
+                "src/meowkeeper/app/web/state.py": source,
+                "src/extra.py": self.target / "src/demo.py",
+            })
+
+    def test_release_cli_rejects_missing_r116_override_before_signing_or_output(self):
+        output = self.root / "must-not-exist"
+        argv = ["prepare_delta_release", "--base", str(self.base), "--target", str(self.target),
+                "--output", str(output), "--signing-root", str(self.root / "no-signer")]
+        with patch("sys.argv", argv), patch("Crypto.PublicKey.ECC.import_key") as import_key, \
+                self.assertRaisesRegex(ValueError, "r116 差量必須"):
+            prepare_release_main()
+        import_key.assert_not_called()
+        self.assertFalse(output.exists())
 
     def test_protected_worker_reverifies_and_stages_delta(self):
         for name, content in self._runtime_files().items():
