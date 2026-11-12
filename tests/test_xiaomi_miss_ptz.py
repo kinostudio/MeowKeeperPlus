@@ -181,7 +181,7 @@ class XiaomiMissPtzTests(unittest.TestCase):
 
     def test_live_template_exposes_protected_ptz_controls(self) -> None:
         template = (ROOT / "src" / "meowkeeper" / "app" / "web" / "templates" / "live.html").read_text(encoding="utf-8")
-        self.assertIn("Xiaomi MISS PTZ 方向控制", template)
+        self.assertIn('id="live-ptz-title">轉動鏡頭', template)
         self.assertIn("/api/v1/cameras/xiaomi/devices", template)
         self.assertIn("X-MeowKeeper-CSRF", template)
         self.assertIn('data-ptz-direction="left"', template)

@@ -3717,6 +3717,7 @@ def create_app(
     @app.get("/live", response_class=HTMLResponse)
     @app.get("/events", response_class=HTMLResponse)
     @app.get("/analytics", response_class=HTMLResponse)
+    @app.get("/settings", response_class=HTMLResponse)
     @app.get("/settings/source", response_class=HTMLResponse)
     @app.get("/settings/ai", response_class=HTMLResponse)
     @app.get("/settings/pets", response_class=HTMLResponse)
@@ -3732,7 +3733,7 @@ def create_app(
         path = str(request.url.path)
         if path == "/help":
             require_auth(request)
-        protected_pages = {"/", "/dashboard", "/live", "/events", "/analytics", "/settings/source", "/settings/ai", "/settings/pets", "/settings/telegram", "/settings/tailscale", "/diagnostics", "/logs", "/settings/advanced", "/cameras", "/cameras/xiaomi/setup"}
+        protected_pages = {"/", "/dashboard", "/live", "/events", "/analytics", "/settings", "/settings/source", "/settings/ai", "/settings/pets", "/settings/telegram", "/settings/tailscale", "/diagnostics", "/logs", "/settings/advanced", "/cameras", "/cameras/xiaomi/setup"}
         if path in protected_pages or path == "/help":
             if setup_redirect and not sessions.configured:
                 return RedirectResponse("/setup", status_code=307)
@@ -3747,9 +3748,10 @@ def create_app(
             "/live": "即時畫面",
             "/events": "事件與回報",
             "/analytics": "趨勢分析",
+            "/settings": "設定",
             "/settings/source": "來源與攝影機",
             "/settings/ai": "AI 與錄影",
-            "/settings/pets": "寵物檔案",
+            "/settings/pets": "貓咪檔案",
             "/settings/telegram": "通知設定",
             "/settings/tailscale": "連線與安全",
             "/cameras": "攝影機",
@@ -3765,6 +3767,7 @@ def create_app(
             "/analytics": "analytics.html",
             "/diagnostics": "diagnostics.html",
             "/logs": "logs.html",
+            "/settings": "settings.html",
             "/settings/source": "settings.html",
             "/settings/ai": "settings.html",
             "/settings/pets": "settings.html",

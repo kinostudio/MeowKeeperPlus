@@ -1,8 +1,31 @@
 {% extends "base.html" %}
 {% from "_help.html" import hint %}
 {% block content %}
-<div class="content-heading"><div><p class="eyebrow">設定</p><h2>{{ page_title }}</h2></div></div>
-{% if page_path == '/settings/source' %}
+<div class="content-heading"><div>{% if page_path == '/settings' %}<p class="eyebrow">設定</p>{% elif page_path != '/settings/pets' %}<a class="settings-back" href="/settings">← 設定</a>{% endif %}<h2>{{ page_title }}</h2></div></div>
+{% if page_path == '/settings' %}
+<p class="muted settings-intro">每張卡片先告訴你現在好不好，需要動手時再點進去。</p>
+<div class="settings-overview">
+  {% for key, title, link, action in [
+    ('camera', '攝影機', '/settings/source', '更換或重新配對'),
+    ('notify', '手機通知', '/settings/telegram', '調整通知'),
+    ('cats', '我的貓咪', '/settings/pets', '管理貓咪檔案'),
+    ('ai', '錄影與 AI', '/settings/ai', 'AI 參數與雲端 API'),
+    ('remote', '出門也能看', '/settings/tailscale', '設定遠端連線'),
+    ('computer', '這台電腦', '/diagnostics', '維護中心與技術資訊')] %}
+  <section class="set-card" id="set-{{ key }}" data-state="pending" aria-labelledby="set-{{ key }}-title">
+    <div class="set-card-head"><h3 id="set-{{ key }}-title">{{ title }}</h3><span class="state-chip" data-state="pending"><span class="status-tag-shape" aria-hidden="true"></span><span class="set-card-state">確認中</span></span></div>
+    <p class="set-card-detail muted">正在讀取…</p>
+    <a class="button secondary" href="{{ link }}">{{ action }}</a>
+  </section>
+  {% endfor %}
+</div>
+<section class="set-card set-card-wide" aria-labelledby="set-update-title">
+  <div class="set-card-head"><h3 id="set-update-title">程式更新與備份</h3></div>
+  <p class="muted">更新只換程式；設定、貓咪照片、事件影片與紀錄都保留。通常只下載有變更的檔案，失敗會自動回到舊版。</p>
+  <div class="actions"><a class="button secondary" href="/settings/advanced">檢查新版、備份與進階設定</a><a class="button secondary" href="/logs">查看日誌</a></div>
+</section>
+<script src="/static/js/settings-overview.js?v={{ ui_cache_key }}" defer></script>
+{% elif page_path == '/settings/source' %}
 <section class="panel">
   <div class="panel-heading"><h3>單一影音來源</h3><span id="source-runtime-status" class="muted">狀態讀取中…</span></div>
   <p>先選擇要看的來源、填入網址，再按「保存後開始監控」。小米攝影機請使用下方專用設定入口。預覽、辨識與錄影會共用同一個來源。</p>
@@ -43,16 +66,21 @@
 </section>
 <script src="/static/js/source.js" defer></script>
 {% elif page_path == '/settings/ai' %}
-<section class="panel">
-  <div class="panel-heading"><h3>AI 與行為參數</h3><span id="ai-runtime-status" class="muted">設定讀取中…</span></div>
+<section class="ai-settings-page">
+  <p class="muted settings-intro">常用的放在外面；不確定的進階參數保留預設即可。<span id="ai-runtime-status">設定讀取中…</span></p>
+  <div class="ai-status-strip soft-card">
     <div id="ai-adaptive-status" class="muted" role="status" aria-live="polite">正在讀取 AI 負載與回退狀態…</div>
     <p class="field-help">負載目標與溫度門檻可在下方「AI 負載保護」調整；超過時 AI 先降低張數或畫面大小，不會改攝影機畫質。讀不到溫度不視為低溫。</p>
-    <button id="ai-adaptive-retry" class="button secondary" type="button">依已保存的分析上限重新嘗試 AI</button>
+    <button id="ai-adaptive-retry" class="button secondary" type="button">恢復原本設定再試</button>
     <p class="field-help">降階後不會自動提高負載。確認溫度與記憶體正常後，可按此重試原本的解析度／FPS 上限；這不保證達到設定 FPS，若處理仍太慢或持續超載，保護機制會再次降階。</p>
+  </div>
   <p>第一次使用可保留預設值。若誤報太多，再調整信心門檻與通知間隔。保存後，請按上方「重新啟動服務」套用；監控會短暫中斷。</p>
-  <form id="ai-settings-form" class="settings-grid">
-    <fieldset class="fieldset-group settings-grid"><legend>推論引擎與分析畫質</legend>
-    <label>{{ term_help('execution', 'AI 運算裝置') }}
+  <form id="ai-settings-form" class="ai-settings-form">
+  <div class="ai-cards">
+    <section class="set-card ai-card" aria-labelledby="ai-local-title">
+      <div class="set-card-head"><h3 id="ai-local-title">找貓 AI（這台電腦）</h3></div>
+      <div class="settings-grid">
+      <label>AI 用哪個硬體算 {{ term_help('execution') }} <span class="restart-chip">重啟後生效</span>
       <select id="ai-inference-device">
         <option value="auto">自動（NVIDIA → Intel → CPU）</option>
         <option value="cpu">CPU 處理器</option>
@@ -61,121 +89,145 @@
       </select>
       {{ hint('ai-inference-device', '保存後重新啟動服務套用，下次啟動沿用。指定 GPU 不可用時降級 CPU，不偷偷改用另一張 GPU；請以上方實際後端為準。GPU 只加速模型，解碼、縮放與通知仍需 CPU。選擇 CPU 不會刪除內附 GPU 函式庫，也不會自動修改驅動。') }}
     </label>
-    <label>分析模式
+      <label>找貓方式
       <select id="ai-analyzer-mode"><option value="yolo">基本找貓（預設）</option><option value="v02">V0.2 追蹤與規則行為（實驗性）</option></select>
       <span id="ai-analyzer-note" class="muted">基本找貓用於貓咪事件；實驗性模式的身分與行為尚未完成家庭準確率驗收。更改需重新啟動服務。</span>
     </label>
-    <label>YOLO 貓咪信心門檻
+      <label>靈敏度（信心門檻）
       <input id="ai-confidence-threshold" type="number" min="0" max="1" step="0.01" required>
       {{ hint('ai-confidence-threshold', '建議先用 0.45。提高可減少部分誤報，但可能漏掉遠處或被遮住的貓；降低會更敏感。這是模型分數門檻，0.45 不代表 45% 準確率。') }}
     </label>
-    <label>身分融合相似度門檻
-      <input id="ai-identity-accepted-threshold" type="number" min="0" max="1" step="0.01" required>
-      {{ hint('ai-identity-accepted-threshold', '建議 0.62。多貓身分融合 DINOv2 視覺向量（85%）與 HSV 顏色特徵（15%）的最低確認門檻；最高分候選貓咪低於此值將判定為身分未確認（unknown）。變更需重新啟動 Host。') }}
-    </label>
-    <label>身分候選差距門檻
-      <input id="ai-identity-minimum-margin" type="number" min="0" max="1" step="0.01" required>
-      {{ hint('ai-identity-minimum-margin', '建議 0.05。第一名與第二名候選貓咪融合相似度的最小差距門檻；若兩隻貓得分差距小於此值，代表特徵過於接近難以區分，將判定為身分未確認（unknown）。變更需重新啟動 Host。') }}
-    </label>
-    <label>影像分析 FPS（最高 5）
+      <label>每秒看幾張畫面（最多 5）
       <input id="ai-analysis-fps" type="number" min="1" max="5" step="1" required>
       {{ hint('ai-analysis-fps', '每秒交給 AI 分析的畫面張數。5 較容易捕捉動作；電腦負載高可降低。這不會改變攝影機原始錄影幀率。') }}
       </label>
-      <label>AI 分析解析度（長邊）
+      <label>AI 看的畫面大小
         <select id="ai-analysis-width"><option value="640">640（最低負載，建議）</option><option value="960">960</option><option value="1280">1280</option><option value="1920">1920（最高負載）</option></select>
         {{ hint('ai-analysis-width', '這是模型分析畫面大小，不會改攝影機或錄影解析度。來源像素不足時不會放大補細節。尺寸越大越可能看清小目標，也越耗 CPU／GPU；遇到負載會逐級降回 640。變更需重新啟動 Host。') }}
       </label>
-    </fieldset>
-    <fieldset class="fieldset-group settings-grid"><legend>行為採樣與共享影格寬度</legend>
-    <label>行為採樣 FPS（實驗性）
+      </div>
+      <details class="adv">
+        <summary>進階：認貓與畫面寬度（不確定請保留預設）</summary>
+        <div class="settings-grid">
+      <label>認貓相似度門檻
+      <input id="ai-identity-accepted-threshold" type="number" min="0" max="1" step="0.01" required>
+      {{ hint('ai-identity-accepted-threshold', '建議 0.62。多貓身分融合 DINOv2 視覺向量（85%）與 HSV 顏色特徵（15%）的最低確認門檻；最高分候選貓咪低於此值將判定為身分未確認（unknown）。變更需重新啟動 Host。') }}
+    </label>
+      <label>兩隻貓最小差距
+      <input id="ai-identity-minimum-margin" type="number" min="0" max="1" step="0.01" required>
+      {{ hint('ai-identity-minimum-margin', '建議 0.05。第一名與第二名候選貓咪融合相似度的最小差距門檻；若兩隻貓得分差距小於此值，代表特徵過於接近難以區分，將判定為身分未確認（unknown）。變更需重新啟動 Host。') }}
+    </label>
+      <label>行為採樣 FPS（實驗性）
       <input id="ai-activity-fps" type="number" min="1" max="5" step="1" required>
       {{ hint('ai-activity-fps', '實驗性行為分析每秒取樣的張數；基本找貓模式不使用這項行為設定。先保留預設值。') }}
     </label>
-    <label>JPEG／AI 共用影格寬度上限
+      <label>JPEG／AI 共用影格寬度上限
       <select id="ai-preview-frame-width" aria-describedby="ai-preview-frame-width-help"><option value="640">640（省資源）</option><option value="1280">1280（720p 級）</option><option value="1920">1920（預設，保留 1080p）</option></select>
       {{ hint('ai-preview-frame-width', '這是共享 JPEG 分支的軟體上限，不是攝影機、錄影或流暢影片的最高畫質。橫向 16:9 的 1920 寬對應 1080p；MSE 原碼播放仍可能解碼 4K。共用影格寬度取此項、AI 需求及身分需求的最大值，不新增攝影機連線。較大會增加影格記憶體與 JPEG 處理成本；來源不足不會補細節。保存後重啟 Host 套用。') }}
     </label>
-    <label>身分裁切需要的共享影格寬度（實驗性）
+      <label>身分裁切需要的共享影格寬度（實驗性）
       <select id="ai-identity-frame-width" aria-describedby="ai-identity-frame-width-help"><option value="640">640（較省資源）</option><option value="960">960（折衷）</option><option value="1280">1280（預設，較清晰）</option></select>
       {{ hint('ai-identity-frame-width', '只在 V0.2 模式保留較清晰的共享影格，供貓咪身分裁切。提高會增加解碼後縮放與 JPEG 處理負載，不增加攝影機連線。若來源本來只有低畫質，不會放大補細節；請先在即時畫面選擇已驗證的較高畫質。貓咪裁切不足 96×96 時仍跳過身分辨識，不停止錄影。保存後重新啟動服務套用。') }}
     </label>
-    </fieldset>
-    <fieldset class="fieldset-group settings-grid"><legend>事件錄影與環形快取</legend>
-    <label>同類事件冷卻（秒）
-      <input id="ai-cooldown-seconds" type="number" min="0" max="86400" step="1" required>
-      {{ hint('ai-cooldown-seconds', '同類告警送出後，多久才允許下一次。180 秒就是 3 分鐘，可避免連續洗版；設為 0 可能產生大量通知。') }}
-    </label>
-    <label>事件預錄（秒）
+        </div>
+      </details>
+    </section>
+    <section class="set-card ai-card" aria-labelledby="ai-rec-title">
+      <div class="set-card-head"><h3 id="ai-rec-title">事件錄影</h3></div>
+      <div class="clip-bar" role="img" id="ai-clip-bar" aria-label="每段事件影片的組成">
+        <span class="clip-pre">發現前 <b id="ai-clip-pre">5</b> 秒</span><span class="clip-mark">發現</span><span class="clip-post">之後 <b id="ai-clip-post">10</b> 秒</span>
+      </div>
+      <div class="settings-grid">
+      <label>發現前錄幾秒
       <input id="ai-event-pre-seconds" type="number" min="0" max="120" step="1" required>
       {{ hint('ai-event-pre-seconds', '保留事件發生前幾秒，方便看清楚前因。建議 5 秒；不得超過下方快取時間。剛啟動時可能尚未累積足夠畫面。') }}
     </label>
-    <label>事件後錄（秒）
+      <label>發現後錄幾秒
       <input id="ai-event-post-seconds" type="number" min="0" max="180" step="1" required>
       {{ hint('ai-event-post-seconds', '事件發生後繼續錄幾秒。建議 10 秒；影片會等後錄完成再傳送，時間越長，通知影片越晚到。') }}
     </label>
-    <label>壓縮環形快取（秒）
-      <input id="ai-retention-seconds" type="number" min="10" max="120" step="1" required>
-      {{ hint('ai-retention-seconds', '循環保留最近多少秒的壓縮影音，舊片段會輪替。建議 60 秒；這不是事件影片保存天數。') }}
+      <label>同類事件多久通知一次（秒）
+      <input id="ai-cooldown-seconds" type="number" min="0" max="86400" step="1" required>
+      {{ hint('ai-cooldown-seconds', '同類告警送出後，多久才允許下一次。180 秒就是 3 分鐘，可避免連續洗版；設為 0 可能產生大量通知。') }}
     </label>
-    <label>環形快取上限（MB）
-      <input id="ai-ring-maximum-size-mb" type="number" min="16" max="4096" step="1" required>
-      {{ hint('ai-ring-maximum-size-mb', '暫存影音最多使用多少磁碟空間。建議 512 MB；高畫質來源若先達容量上限，實際可預錄時間可能變短。') }}
-    </label>
-    <label>事件影片保存天數
+      <label>事件影片保存天數
       <input id="ai-event-video-max-age-days" type="number" min="1" max="3650" step="1" required>
       {{ hint('ai-event-video-max-age-days', '事件影片保留多少天，超過會自動清除最舊的。建議 30 天；手動保存的截圖／影片不受影響。') }}
     </label>
-    <label>事件影片總容量上限（GB）
+      <label>事件影片最多佔用（GB）
       <input id="ai-event-video-max-gb" type="number" min="1" max="200" step="1" required>
       {{ hint('ai-event-video-max-gb', '事件影片最多佔用多少磁碟空間，超過時先刪最舊的事件影片。建議 3 GB；請依磁碟剩餘空間調整。') }}
     </label>
-    </fieldset>
-    <fieldset class="fieldset-group settings-grid"><legend>行為判斷門檻（試驗中，追蹤＋行為模式才使用）</legend>
-    <label>算作「吃飯」至少停留（秒）
+      </div>
+      <details class="adv">
+        <summary>進階：暫存影像（用來回看發現前的畫面）</summary>
+        <div class="settings-grid">
+      <label>暫存最近幾秒影像
+      <input id="ai-retention-seconds" type="number" min="10" max="120" step="1" required>
+      {{ hint('ai-retention-seconds', '循環保留最近多少秒的壓縮影音，舊片段會輪替。建議 60 秒；這不是事件影片保存天數。') }}
+    </label>
+      <label>暫存影像最多佔用（MB）
+      <input id="ai-ring-maximum-size-mb" type="number" min="16" max="4096" step="1" required>
+      {{ hint('ai-ring-maximum-size-mb', '暫存影音最多使用多少磁碟空間。建議 512 MB；高畫質來源若先達容量上限，實際可預錄時間可能變短。') }}
+    </label>
+        </div>
+      </details>
+    </section>
+  </div>
+  <details class="set-card adv-card" aria-labelledby="ai-behavior-title">
+    <summary id="ai-behavior-title">判斷吃飯、喝水、上廁所、睡覺 <span class="restart-chip">試驗中</span></summary>
+    <p class="muted">找貓方式選「追蹤＋行為」，並在下方「場景標記」圈出飯碗、水盆、貓砂盆後才會使用。秒數是貓咪在區域內停留多久才算數。</p>
+    <div class="settings-grid">
+      <label>算作「吃飯」至少停留（秒）
       <input id="ai-behavior-eating-seconds" type="number" min="1" max="120" step="1" required>
       {{ hint('ai-behavior-eating-seconds', '貓咪在你圈出的飯碗區靜止超過這個秒數，才記成吃飯。建議 10 秒；太短會把路過算成吃飯，太長會漏掉快速吃幾口。需要先在「場景標記」圈出飯碗區。') }}
     </label>
-    <label>算作「喝水」至少停留（秒）
+      <label>算作「喝水」至少停留（秒）
       <input id="ai-behavior-drinking-seconds" type="number" min="1" max="120" step="1" required>
       {{ hint('ai-behavior-drinking-seconds', '在水盆區靜止超過這個秒數才記成喝水。建議 5 秒。需要先圈出水盆區。') }}
     </label>
-    <label>算作「上廁所」至少停留（秒）
+      <label>算作「上廁所」至少停留（秒）
       <input id="ai-behavior-litter-seconds" type="number" min="1" max="300" step="1" required>
       {{ hint('ai-behavior-litter-seconds', '在貓砂盆區停留超過這個秒數才記成上廁所。建議 10 秒。') }}
     </label>
-    <label>算作「睡覺」至少靜止（秒）
+      <label>算作「睡覺」至少靜止（秒）
       <input id="ai-behavior-sleep-seconds" type="number" min="10" max="1800" step="10" required>
       {{ hint('ai-behavior-sleep-seconds', '在睡覺區幾乎不動超過這個秒數才記成睡覺，較短的算休息。建議 60 秒。') }}
     </label>
-    </fieldset>
-    <fieldset class="fieldset-group settings-grid"><legend>AI 負載保護</legend>
-    <label>長期負載目標（%）
+    </div>
+  </details>
+  <details class="set-card adv-card" aria-labelledby="ai-load-title">
+    <summary id="ai-load-title">電腦太忙或太熱時（負載保護）<span class="restart-chip">重啟後生效</span></summary>
+    <p class="muted">超過門檻時 AI 會先降低張數或畫面大小，太熱時暫停 AI；錄影與預覽照常。降速溫度必須低於暫停溫度。</p>
+    <div class="settings-grid">
+      <label>長期負載目標（%）
       <input id="ai-load-target-percent" type="number" min="10" max="90" step="5" required>
       {{ hint('ai-load-target-percent', '電腦長時間忙碌超過這個比例時，AI 會先降低每秒張數或畫面大小。建議 40%；不是瞬間上限，提高會讓電腦較吵、較熱。') }}
     </label>
-    <label>處理器：開始降速（°C）
+      <label>處理器：開始降速（°C）
       <input id="ai-cpu-warning-c" type="number" min="40" max="110" step="1" required>
       {{ hint('ai-cpu-warning-c', '處理器溫度持續高於這個值時，AI 先降一階。建議 85°C；必須低於下方暫停溫度。') }}
     </label>
-    <label>處理器：暫停 AI（°C）
+      <label>處理器：暫停 AI（°C）
       <input id="ai-cpu-critical-c" type="number" min="40" max="110" step="1" required>
       {{ hint('ai-cpu-critical-c', '超過這個溫度時暫停 AI 分析；錄影與預覽照常。建議 95°C。') }}
     </label>
-    <label>顯示卡：開始降速（°C）
+      <label>顯示卡：開始降速（°C）
       <input id="ai-gpu-warning-c" type="number" min="40" max="110" step="1" required>
       {{ hint('ai-gpu-warning-c', '顯示卡溫度持續高於這個值時，AI 先降一階。建議 80°C；筆電顯示卡較容易熱。') }}
     </label>
-    <label>顯示卡：暫停 AI（°C）
+      <label>顯示卡：暫停 AI（°C）
       <input id="ai-gpu-critical-c" type="number" min="40" max="110" step="1" required>
       {{ hint('ai-gpu-critical-c', '超過這個溫度時暫停 AI 分析。建議 85°C。') }}
     </label>
-    </fieldset>
-    <div class="actions settings-actions">
-      <button class="button" type="submit">保存 AI／行為設定</button>
-      <button class="button secondary" id="reset-ai-settings" type="button">恢復預設值</button>
     </div>
-  </form>
-  <p id="ai-message" class="muted" role="status"></p>
+  </details>
+  <div class="actions settings-actions settings-savebar">
+    <button class="button" type="submit">保存 AI／錄影設定</button>
+    <button class="button secondary" id="reset-ai-settings" type="button">恢復預設值</button>
+    <p id="ai-message" class="muted" role="status"></p>
+  </div>
+</form>
   <p class="muted">YOLO cat-only 與媒體事件參數已接線；寵物身分及家庭行為準確率仍是 experimental，不能把參數保存視為已完成辨識。</p>
 </section>
 <script src="/static/js/ai.js" defer></script>
@@ -280,7 +332,7 @@
       <div class="actions"><button class="button secondary" id="scene-preview-collage" type="button">預覽 API 參考拼貼</button></div>
       <figure id="scene-collage-figure" hidden><figcaption>僅包含已啟用的物件裁切，預設只在本機產生</figcaption><img id="scene-collage-preview" alt="由已登錄物件組成的本機 API 參考拼貼"></figure>
       <p id="scene-message" role="status" aria-live="polite"></p>
-      <p class="field-help">拼貼最多取目前來源已啟用的 8 個標記。前往下方「AI 動作分析管理中心」可選擇是否送出這張物件參考拼貼；不勾選就不會送出。</p>
+      <p class="field-help">拼貼最多取目前來源已啟用的 8 個標記。前往下方「雲端 AI 圖片分析」可選擇是否送出這張物件參考拼貼；不勾選就不會送出。</p>
     </div>
   </div>
 </details>

@@ -2,7 +2,6 @@
   "use strict";
   const root = document.getElementById("events-page-list");
   if (!root) return;
-  const notification = { sent: "已傳送", success: "已傳送", failed: "傳送失敗", pending: "等待傳送", queued: "等待傳送", disabled: "未啟用", skipped: "未傳送" };
   let page=0,busy=false;
   const playbackDialog=document.getElementById("event-playback-dialog"), playbackVideo=document.getElementById("event-playback-video");
   const playbackStatus=document.getElementById("event-playback-status"), playbackRetry=document.getElementById("event-playback-retry");
@@ -36,6 +35,114 @@
     startPlayback(false);
   }
   const previous=document.getElementById('events-previous'),next=document.getElementById('events-next'),filter=document.getElementById('events-kind-filter');
+  const pendingSection=document.getElementById("events-pending"), pendingList=document.getElementById("events-pending-list");
+  const pendingCount=document.getElementById("events-pending-count"), petChips=document.getElementById("events-pet-chips");
+  // Delivery status in the four-state language: ok / warn / alert / off.
+  const delivery = {
+    sent: ["ok", "已送達"], success: ["ok", "已送達"], failed: ["alert", "沒送出"],
+    pending: ["warn", "等待傳送"], queued: ["warn", "等待傳送"], disabled: ["off", "未啟用"], skipped: ["off", "未傳送"],
+  };
+  let items=[], view="all", petFilter=null;
+  const el=(tag, className, text)=>{const node=document.createElement(tag);if(className)node.className=className;if(text!==undefined)node.textContent=text;return node;};
+  const sameDay=(a,b)=>a.getFullYear()===b.getFullYear()&&a.getMonth()===b.getMonth()&&a.getDate()===b.getDate();
+  function names(item){
+    if(Array.isArray(item.predicted_names)&&item.predicted_names.length)return item.predicted_names;
+    if(item.pet_id&&item.pet_id!=="unknown")return [item.pet_id];
+    return [];
+  }
+  function whenText(item){
+    const date=new Date(item.trigger_at);
+    if(!Number.isFinite(date.getTime()))return "時間未提供";
+    const time=date.toLocaleTimeString("zh-TW",{hour:"numeric",minute:"2-digit"});
+    return sameDay(date,new Date())?time:`${date.toLocaleDateString("zh-TW",{month:"numeric",day:"numeric"})} ${time}`;
+  }
+  function whatText(item){
+    const who=names(item);
+    const subject=item.event_type!=="cat_detected"?"監控事件":who.length?who.join("、"):"有貓，還認不出是誰";
+    return item.posture_zh?`${subject}・${item.posture_zh}`:subject;
+  }
+  function needsReview(item){return item.event_type==="cat_detected"&&!item.has_human_review;}
+  function thumb(item){
+    const box=el("div","event-thumb");
+    if(item.snapshot_exists){
+      const img=el("img");img.loading="lazy";img.alt=`${whenText(item)} 事件畫面`;
+      img.src=`/api/v1/events/${encodeURIComponent(item.event_id)}/snapshot`;
+      img.addEventListener("error",()=>{img.remove();box.textContent="沒有畫面";},{once:true});
+      box.appendChild(img);
+    } else box.textContent="沒有畫面";
+    if(item.actual_duration_seconds!=null)box.appendChild(el("span","event-thumb-duration",`${Number(item.actual_duration_seconds).toFixed(0)} 秒`));
+    return box;
+  }
+  const review=(item)=>document.dispatchEvent(new CustomEvent("meowkeeper:review",{detail:item}));
+  function row(item){
+    const article=el("article","event-row");
+    article.appendChild(thumb(item));
+    article.appendChild(el("strong","event-when",whenText(item)));
+    const what=el("div","event-what");
+    what.appendChild(el("span","event-what-text",whatText(item)));
+    const tags=el("span","event-tags-container");
+    if(item.has_local_ai)tags.appendChild(el("span","event-tag tag-local-ai","本機辨識"));
+    if(item.has_cloud_ai)tags.appendChild(el("span","event-tag tag-cloud-ai","雲端辨識"));
+    if(item.has_human_review)tags.appendChild(el("span","event-tag tag-reviewed","你已確認"));
+    if(item.confidence!=null)tags.appendChild(el("span","event-tag",`信心 ${Math.round(item.confidence*100)}%`));
+    what.appendChild(tags);
+    article.appendChild(what);
+    const [state,label]=delivery[item.telegram_status]||["off","狀態待確認"];
+    const chip=el("span","state-chip",label);chip.dataset.state=state;
+    article.appendChild(chip);
+    const actions=el("div","actions event-actions");
+    if(item.clip_exists){
+      const play=el("button","button secondary","播放");play.type="button";
+      play.setAttribute("aria-label",`播放 ${whenText(item)} 的影片`);
+      play.addEventListener("click",()=>openPlayback(item));
+      const download=el("a","button secondary","下載");
+      download.href=`/api/v1/events/${encodeURIComponent(item.event_id)}/video`;download.setAttribute("download","");
+      download.setAttribute("aria-label",`下載 ${whenText(item)} 的影片`);
+      actions.append(play,download);
+    }
+    const detail=el("button","button secondary",needsReview(item)?"確認":"詳情");detail.type="button";
+    detail.setAttribute("aria-label",`${whenText(item)} 事件詳情與覆核`);
+    detail.addEventListener("click",()=>review(item));
+    actions.appendChild(detail);
+    article.appendChild(actions);
+    return article;
+  }
+  function pendingCard(item){
+    const card=el("article","event-pending-card");
+    card.appendChild(thumb(item));
+    const body=el("div","event-pending-body");
+    const who=names(item);
+    body.appendChild(el("strong","",`${whenText(item)}・${who.length?`可能是 ${who.join("、")}`:"認不出是誰"}`));
+    const go=el("button","button","看影片並確認");go.type="button";go.addEventListener("click",()=>review(item));
+    body.appendChild(go);
+    card.appendChild(body);
+    return card;
+  }
+  function render(){
+    const today=new Date();
+    const pending=items.filter(needsReview);
+    if(pendingCount)pendingCount.textContent=String(pending.length);
+    if(pendingSection){pendingSection.hidden=!pending.length||view==="pending";pendingList.replaceChildren(...pending.slice(0,4).map(pendingCard));}
+    // Per-cat chips from the cats seen on this page.
+    if(petChips){
+      const seen=[...new Set(items.flatMap(names))].slice(0,6);
+      petChips.replaceChildren(...seen.map((name)=>{
+        const chip=el("button","filter-chip",name);chip.type="button";chip.setAttribute("aria-pressed",String(petFilter===name));
+        chip.addEventListener("click",()=>{petFilter=petFilter===name?null:name;render();});
+        return chip;
+      }));
+    }
+    document.querySelectorAll("[data-events-view]").forEach((chip)=>chip.setAttribute("aria-pressed",String(chip.dataset.eventsView===view)));
+    const shown=items.filter((item)=>{
+      if(view==="pending"&&!needsReview(item))return false;
+      if(view==="today"){const date=new Date(item.trigger_at);if(!Number.isFinite(date.getTime())||!sameDay(date,today))return false;}
+      if(petFilter&&!names(item).includes(petFilter))return false;
+      return true;
+    });
+    root.replaceChildren(...shown.map(row));
+    if(!shown.length)root.textContent=items.length?"這一頁沒有符合篩選的事件。可換個篩選或翻到其他頁。":"這一頁沒有事件。";
+    root.scrollTop=0;
+  }
   async function loadPage() {
   if(busy)return;busy=true;if(previous)previous.disabled=true;if(next)next.disabled=true;
   try {
@@ -47,69 +154,9 @@
     }
     if (!response.ok) throw new Error();
     const data = await response.json();
-    root.replaceChildren();
-    const items=data.items||[];
+    items=data.items||[];
     if(next)next.disabled=items.length<50;
-    items.forEach((item) => {
-      const row = document.createElement("article"); row.className = "event-row";
-      const info = document.createElement("div");
-
-      // Dynamic Title
-      let titleText = "發現貓咪";
-      if (Array.isArray(item.predicted_names) && item.predicted_names.length === 1) {
-        titleText = `發現 ${item.predicted_names[0]}`;
-      } else if (Array.isArray(item.predicted_names) && item.predicted_names.length > 1) {
-        titleText = `發現 ${item.predicted_names.join("、")}`;
-      } else if (item.pet_id && item.pet_id !== "unknown") {
-        titleText = `發現 ${item.pet_id}`;
-      } else if (item.event_type !== "cat_detected") {
-        titleText = "監控事件";
-      }
-      const title = document.createElement("strong"); title.textContent = titleText;
-
-      // Tags Container
-      const tagsContainer = document.createElement("div"); tagsContainer.className = "event-tags-container";
-      if (item.has_local_ai) {
-        const localTag = document.createElement("span"); localTag.className = "event-tag tag-local-ai";
-        localTag.textContent = "🏷️ 本地辨識 (DINOv2)";
-        tagsContainer.appendChild(localTag);
-      }
-      if (item.has_cloud_ai) {
-        const cloudTag = document.createElement("span"); cloudTag.className = "event-tag tag-cloud-ai";
-        cloudTag.textContent = "🏷️ 雲端辨識";
-        tagsContainer.appendChild(cloudTag);
-      }
-
-      const detail = document.createElement("small"); detail.style.display = "block";
-      const date = new Date(item.trigger_at);
-      const time = Number.isFinite(date.getTime()) ? date.toLocaleString("zh-TW") : "時間尚未提供";
-
-      let petDesc = "尚未確認";
-      if (Array.isArray(item.predicted_names) && item.predicted_names.length) {
-        petDesc = item.predicted_names.join("、");
-      } else if (item.pet_id && item.pet_id !== "unknown") {
-        petDesc = item.pet_id;
-      }
-      const score = item.confidence == null ? "未提供" : `${Math.round(item.confidence * 100)}%`;
-      const duration = item.actual_duration_seconds == null ? "未提供" : `${Number(item.actual_duration_seconds).toFixed(1)} 秒`;
-      const posture = item.posture_zh ? `｜姿態：${item.posture_zh}` : "";
-      detail.textContent = `${time}｜身分：${petDesc} (${score})${posture}｜影片：${duration}｜通知：${notification[item.telegram_status] || "狀態待確認"}`;
-
-      info.append(title, tagsContainer, detail); row.appendChild(info);
-
-      // Unified Action Button: Consolidates video playback, AI comparison & review into one dialog
-      const actions = document.createElement("div"); actions.className = "actions";
-      const viewBtn = document.createElement("button"); viewBtn.type = "button";
-      viewBtn.className = "button";
-      viewBtn.textContent = "檢視詳情與覆核 →";
-      viewBtn.addEventListener("click", () => document.dispatchEvent(new CustomEvent("meowkeeper:review", { detail: item })));
-      actions.appendChild(viewBtn);
-      row.appendChild(actions);
-
-      root.appendChild(row);
-    });
-    if (!root.children.length) root.textContent = "這一頁沒有符合選項的事件。可切換顯示條件或頁數。";
-    root.scrollTop=0;
+    render();
     const label=document.getElementById('events-page-number');if(label)label.textContent=`第 ${page+1} 頁`;
   } catch (_) {
     root.textContent = "目前無法讀取事件。請確認服務仍在執行，再重新整理頁面；這不代表先前的紀錄已遺失。";
@@ -117,6 +164,9 @@
   }
   finally{busy=false;if(previous)previous.disabled=page===0;}
   }
+  document.querySelectorAll("[data-events-view]").forEach((chip)=>chip.addEventListener("click",()=>{view=chip.dataset.eventsView;render();}));
+  // A saved review changes "等你確認"; reload quietly when the review dialog closes.
+  document.getElementById("event-review-dialog")?.addEventListener("close",()=>loadPage());
   if(previous)previous.onclick=()=>{if(!busy&&page>0){page--;loadPage();}};
   if(next)next.onclick=()=>{if(!busy){page++;loadPage();}};
   if(filter)filter.onchange=()=>{page=0;loadPage();};

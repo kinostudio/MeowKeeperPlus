@@ -219,3 +219,26 @@
   loadAdaptive();
   document.addEventListener('meowkeeper:status',event=>loadAdaptive(event.detail));
 })();
+
+/* Clip composition bar: "發現前 N 秒｜發現｜之後 M 秒", proportional to the two inputs. */
+(() => {
+  const pre = document.getElementById("ai-event-pre-seconds");
+  const post = document.getElementById("ai-event-post-seconds");
+  const bar = document.getElementById("ai-clip-bar");
+  if (!pre || !post || !bar) return;
+  function render() {
+    const a = Math.max(0, Number(pre.value) || 0);
+    const b = Math.max(0, Number(post.value) || 0);
+    document.getElementById("ai-clip-pre").textContent = String(a);
+    document.getElementById("ai-clip-post").textContent = String(b);
+    bar.style.setProperty("--clip-pre", String(Math.max(a, 1)));
+    bar.style.setProperty("--clip-post", String(Math.max(b, 1)));
+    bar.setAttribute("aria-label", `每段事件影片：發現前 ${a} 秒，之後 ${b} 秒，共約 ${a + b} 秒`);
+  }
+  pre.addEventListener("input", render);
+  post.addEventListener("input", render);
+  // Values arrive after ai.js loads settings; observe the first fill.
+  const timer = setInterval(() => { if (pre.value !== "" || post.value !== "") { render(); clearInterval(timer); } }, 300);
+  setTimeout(() => clearInterval(timer), 15000);
+  render();
+})();

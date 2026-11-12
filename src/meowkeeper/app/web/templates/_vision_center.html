@@ -1,7 +1,7 @@
 {% from '_term_help.html' import term_help with context %}
 <section class="panel vision-center" aria-labelledby="vision-title">
-  <div class="panel-heading vision-title-row"><div><p class="eyebrow">選用功能 · 不影響本機守護</p><h3 id="vision-title">{{ term_help('ai_provider', 'AI 動作分析管理中心') }}</h3></div><span id="vision-overview-status" class="status-pill status-unknown">讀取中</span></div>
-  <p class="vision-intro">啟用後，系統會把事件中的{{ term_help('storyboard', '多時點貓框參考圖') }}透過{{ term_help('ai_queue', '分析排程') }}發送{{ term_help('ai_request', 'AI 服務請求') }}，協助整理活動候選標籤（超額或停用時會自動{{ term_help('ai_skip', '略過 AI 分析') }}）。不啟用也不影響本機監控、事件錄影與 Telegram 影片通知。</p>
+  <div class="panel-heading vision-title-row"><div><p class="eyebrow">選用</p><h3 id="vision-title">{{ term_help('ai_provider', '雲端 AI 圖片分析') }}</h3></div><span id="vision-overview-status" class="status-pill status-unknown">讀取中</span></div>
+  <p class="vision-intro">不開也能正常找貓、錄影和通知；開了會多一段「牠在做什麼」的描述。<small>啟用後，系統會把事件中的{{ term_help('storyboard', '多時點貓框參考圖') }}透過{{ term_help('ai_queue', '分析排程') }}發送{{ term_help('ai_request', 'AI 服務請求') }}，協助整理活動候選標籤（超額或停用時會自動{{ term_help('ai_skip', '略過 AI 分析') }}）。不啟用也不影響本機監控、事件錄影與 Telegram 影片通知。</small></p>
   <div class="vision-overview-grid" aria-label="AI 分析即時摘要">
     <article class="vision-summary-card"><span>目前狀態</span><strong id="vision-summary-state">讀取中</strong><small id="vision-summary-health">尚未確認服務</small></article>
     <article class="vision-summary-card"><span>服務與模型</span><strong id="vision-summary-model">尚未設定</strong><small id="vision-summary-provider">—</small></article>

@@ -49,6 +49,7 @@ class DashboardExperienceTests(unittest.TestCase):
                  ("events.html", "/events"), ("xiaomi_setup.html", "/cameras/xiaomi/setup"),
                  ("analytics.html", "/analytics"), ("logs.html", "/logs"),
                  ("diagnostics.html", "/diagnostics")]
+        pages += [("settings.html", "/settings")]
         pages += [("settings.html", "/settings/" + page)
                   for page in ("source", "ai", "telegram", "tailscale", "advanced")]
         for template, path in pages:

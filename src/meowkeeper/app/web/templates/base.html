@@ -64,7 +64,7 @@
       <a href="/settings/pets" title="貓咪檔案" class="{% if page_path == '/settings/pets' %}active{% endif %}"><span class="nav-link-text">貓咪檔案</span></a>
       <a href="/analytics" title="作息趨勢" class="{% if page_path == '/analytics' %}active{% endif %}"><span class="nav-link-text">作息趨勢</span></a>
       </div>
-      <a href="/settings/source" title="設定" class="nav-primary {% if page_path in settings_paths %}in-section{% endif %}">{{ icon('tools') }}<span class="nav-link-text">設定</span></a>
+      <a href="/settings" title="設定" class="nav-primary {% if page_path == '/settings' %}active{% elif page_path in settings_paths %}in-section{% endif %}">{{ icon('tools') }}<span class="nav-link-text">設定</span></a>
       <div class="nav-subpages" role="group" aria-label="設定">
       <a href="/settings/source" title="來源與攝影機" class="{% if page_path in ['/settings/source', '/cameras', '/cameras/xiaomi/setup'] %}active{% endif %}"><span class="nav-link-text">來源與攝影機</span></a>
       <a href="/settings/telegram" title="通知設定" class="{% if page_path == '/settings/telegram' %}active{% endif %}"><span class="nav-link-text">通知設定</span></a>
@@ -76,11 +76,14 @@
       </div>
     </nav>
     <main class="content" id="main-content" tabindex="-1">
+      {% if page_path in ['/settings/pets', '/analytics'] %}<nav class="section-tabs" aria-label="貓咪"><a href="/settings/pets"{% if page_path == '/settings/pets' %} aria-current="page"{% endif %}>貓咪檔案</a><a href="/analytics"{% if page_path == '/analytics' %} aria-current="page"{% endif %}>作息趨勢</a></nav>
+      {% elif page_path in ['/diagnostics', '/logs', '/cameras/xiaomi/setup'] %}<a class="settings-back" href="/settings">← 設定</a>{% endif %}
       {% block content %}{% endblock %}
       <footer class="footer"><span>MeowKeeper+ · 本地 AI 全天候守護每一隻貓咪</span><span id="release-version">{{ release_info.version }} · {{ release_info.date }} · {{ release_info.mode }}</span><span>關閉網頁，背景服務仍會繼續執行。</span></footer>
     </main>
   <dialog id="home-guide" class="home-guide guide-dialog" aria-labelledby="home-guide-title">
-    <div class="home-guide-head"><div><p class="eyebrow">使用說明</p><h3 id="home-guide-title" tabindex="-1">五步驟開始守護貓咪</h3><p id="home-guide-progress" class="field-help">正在確認設定進度</p></div><div class="actions"><a class="button secondary" href="/help">完整說明與常見問題</a><button id="home-guide-dismiss" class="button" type="button" autofocus>開始使用</button><button class="guide-close" type="button" data-guide-close aria-label="關閉使用說明">×</button></div></div>
+    <div class="home-guide-head"><div><p class="eyebrow">使用說明</p><h3 id="home-guide-title" tabindex="-1">五步驟開始守護貓咪</h3><p id="home-guide-progress" class="field-help">正在確認設定進度</p></div>
+<div class="actions"><a class="button secondary" href="/help">完整說明與常見問題</a><button id="home-guide-dismiss" class="button" type="button" autofocus>開始使用</button><button class="guide-close" type="button" data-guide-close aria-label="關閉使用說明">×</button></div></div>
     <ol class="home-guide-steps">
       <li data-guide-check="camera"><span class="guide-num" aria-hidden="true">1</span><div><strong>連接攝影機</strong><p>輸入 RTSP 位址或用小米精靈連線，看到畫面就算完成。</p><a href="/settings/source">前往來源與攝影機 →</a></div></li>
       <li data-guide-check="monitor"><span class="guide-num" aria-hidden="true">2</span><div><strong>啟動監控</strong><p>按右上角「啟動監控」，狀態標籤變成「監控中」就代表畫面和 AI 都在運作。</p></div></li>
@@ -92,5 +95,15 @@
   </div>
   <script src="/static/app.js?v={{ ui_cache_key }}" defer></script>
   <script src="/static/js/experience.js?v={{ ui_cache_key }}" defer></script>
+  <nav class="bottom-tabs" aria-label="主選單（手機）">
+    {% for href, label, ic, paths in [
+      ('/', '首頁', 'overview', ['/', '/dashboard']),
+      ('/live', '即時', 'camera', ['/live']),
+      ('/events', '事件', 'review', ['/events']),
+      ('/settings/pets', '貓咪', 'pet', ['/settings/pets', '/analytics']),
+      ('/settings', '設定', 'tools', ['/settings'] + settings_paths)] %}
+    <a href="{{ href }}" class="bottom-tab{% if page_path in paths %} tab-on{% endif %}"{% if page_path in paths %} aria-current="page"{% endif %}>{{ icon(ic) }}<span>{{ label }}</span></a>
+    {% endfor %}
+  </nav>
 </body>
 </html>

@@ -1,20 +1,14 @@
 {% extends "base.html" %}
 {% block content %}
-<div class="content-heading"><div><p class="eyebrow">看見牠的每一刻</p><h2>即時畫面</h2></div><small>顯示最近收到的畫面；預覽更新速度可能低於原始錄影幀率。開啟多個網頁仍共用同一來源。</small></div>
-<section class="panel">
+<div class="content-heading"><div><p class="eyebrow">看見牠的每一刻</p><h2>即時畫面</h2></div></div>
+<div class="live-layout">
+<section class="live-main" aria-label="即時影像">
   <div class="preview-stage">
     <img id="preview-image" class="preview-image" alt="MeowKeeper+ 即時影格" hidden>
     <div id="preview-empty" class="preview-empty" role="status" aria-live="polite">
       <span class="preview-empty-icon" aria-hidden="true">◉</span>
-      <strong>尚未收到即時影格</strong>
-      <span>Mock 僅供流程測試，不會產生真實影像。要查看畫面，請設定 RTSP、YouTube 或本機影片來源並開始監控。</span>
-    </div>
-    <div id="preview-ptz-directions" class="ptz-virtual-pad" role="group" aria-label="鏡頭方向；每次短步移動後讀回位置" hidden>
-      <button type="button" data-ptz-action="move" data-ptz-direction="up" aria-label="向上短步移動" title="向上">↑</button>
-      <button type="button" data-ptz-action="move" data-ptz-direction="down" aria-label="向下短步移動" title="向下">↓</button>
-      <button type="button" data-ptz-action="move" data-ptz-direction="left" aria-label="向左短步移動" title="向左">←</button>
-      <button type="button" data-ptz-action="move" data-ptz-direction="right" aria-label="向右短步移動" title="向右">→</button>
-      <button type="button" data-ptz-action="stop" aria-label="停止移動" title="停止（Esc）">■</button>
+      <strong>還沒有收到畫面</strong>
+      <span>請先到「設定 › 來源與攝影機」接上攝影機，再按右上角「啟動監控」。</span>
     </div>
     <output id="ptz-position-hud" class="ptz-position-hud" role="status" aria-live="polite" hidden>
       <svg id="ptz-position-hud-map" class="ptz-position-hud-map ptz-coordinate-map" viewBox="0 0 132 88" tabindex="-1" role="img" aria-label="鏡頭位置讀回參考圖；尚未讀取位置" aria-disabled="true" hidden>
@@ -32,30 +26,27 @@
     </output>
     <div class="preview-toolbar" aria-label="即時畫面操作">
       <button class="button secondary" type="button" data-save-capture="photo" aria-describedby="capture-help">截圖</button>
-      <button class="button secondary" type="button" data-save-capture="video" aria-describedby="capture-help">錄影（15秒）</button>
+      <button class="button secondary" type="button" data-save-capture="video" aria-describedby="capture-help">錄下剛才 15 秒</button>
     </div>
   </div>
-  <p id="preview-message" class="muted" role="status" aria-live="polite">正在確認來源與影格狀態…</p>
-  <p id="preview-metadata" class="muted" aria-live="polite">解析度：尚未取得｜FPS：尚未取得</p>
-  <p id="capture-help" class="field-help">截圖優先從既有影音快取保存原始解析度；無法取得時改用預覽並顯示實際尺寸。即時預覽仍可維持 1080p，截圖不另開攝影機連線。影片取按下按鈕之前的壓縮影音快取。保存於 Host 資料主目錄的 photo／video 資料夾（可攜版 data；安裝版 ProgramData 的 Data）。啟動初期片段可能不足 15 秒；畫面會回報實際長度。手動保存檔案由你保留，請定期整理磁碟。</p>
-  <p id="capture-result" role="status" aria-live="polite"></p>
-  <div class="actions" aria-label="即時畫面操作">
-    <button class="button secondary" data-action="refresh">重新讀取</button>
-  </div>
-</section>
-<div class="live-control-columns">
-<section class="panel" aria-labelledby="live-quality-title" id="live-quality-panel">
-  <div class="panel-heading">
-    <div>
-      <h3 id="live-quality-title">即時畫面畫質</h3>
-  <p id="live-quality-device" class="muted">只有已接入的單一 Xiaomi 來源可以切換；尚未接入時仍會顯示選項，但按鈕會停用。</p>
+  <p id="capture-result" class="live-capture-result" role="status" aria-live="polite"></p>
+  <section class="live-quality soft-card" aria-labelledby="live-quality-title" id="live-quality-panel">
+    <div class="live-quality-row">
+      <h3 id="live-quality-title">畫質</h3>
+      <div class="seg" role="group" aria-label="畫質快速切換" id="live-quality-seg">
+        <button type="button" data-quality-choice="low" aria-pressed="false">省流量</button>
+        <button type="button" data-quality-choice="auto" aria-pressed="false">自動</button>
+        <button type="button" data-quality-choice="high" aria-pressed="false">高畫質</button>
+      </div>
+      <span id="live-quality-status" class="status-pill status-unknown">尚未確認</span>
     </div>
-    <span id="live-quality-status" class="status-pill status-unknown">尚未確認</span>
-  </div>
-  <p class="field-help">選項會替換同一個本機 go2rtc stream，不會新增攝影機連線。預設為 subtype=1；切換期間畫面可能短暫等待重新取得影格。</p>
-  <div class="actions">
-    <label for="live-quality-profile">Xiaomi profile</label>
-    <select id="live-quality-profile" aria-describedby="live-quality-help" disabled>
+    <p id="live-quality-help" class="muted" role="status" aria-live="polite">尚未載入目前畫質。</p>
+    <details class="live-details">
+      <summary>進階畫質選項</summary>
+      <p id="live-quality-device" class="muted">只有已接入的單一 Xiaomi 來源可以切換；尚未接入時仍會顯示選項，但按鈕會停用。</p>
+      <div class="actions">
+        <label for="live-quality-profile">Xiaomi profile <small>代碼不是固定像素：通常 1／SD 是低畫質，2／HD 是高畫質；部分新機用 3，舊機可能不支援 3。請以目前攝影機的實測結果為準。預覽、錄影與 AI 共用同一個來源，切換時不會多連一次攝影機，畫面可能停 2～3 秒。</small></label>
+        <select id="live-quality-profile" aria-describedby="live-quality-help" disabled>
       <option value="subtype=1">subtype=1（SD）</option>
       <option value="subtype=2">subtype=2（通常 HD）</option>
       <option value="subtype=3">subtype=3（部分新機高畫質）</option>
@@ -65,40 +56,38 @@
       <option value="subtype=0">0（自動）</option>
       <option value="subtype=4">4（進階，需實測）</option>
       <option value="subtype=5">5（進階，需實測）</option>
-    </select>
-    <button class="button secondary" id="live-quality-apply" type="button" disabled>套用畫質</button>
-  </div>
-  <p id="live-quality-help" class="muted" role="status" aria-live="polite">尚未載入目前畫質。</p>
-  <p class="field-help">代碼不是固定像素：通常 1／SD 是低畫質，2／HD 是高畫質；部分新機用 3，舊機可能不支援 3。C701 社群回報 0～2 為 480p、3 為 2160p，並非所有韌體保證；026c02 也有 subtype=2 為 1920×1080 的實測。請以上方目前攝影機的驗證結果為準，不把另一台的規格當成此台規格。<a href="https://github.com/AlexxIT/go2rtc/issues/1982" target="_blank" rel="noopener noreferrer">go2rtc 機型回報</a>。預覽、錄影及 AI 共用單一來源；AI 分析尺寸可在「設定 → AI 與行為參數」調整，過載時會自動降階。</p>
+        </select>
+        <button class="button secondary" id="live-quality-apply" type="button" disabled>套用畫質</button>
+      </div>
+      <p class="field-help"><a href="https://github.com/AlexxIT/go2rtc/issues/1982" target="_blank" rel="noopener noreferrer">go2rtc 各機型畫質回報</a>；AI 分析尺寸可在「設定 › AI 與錄影」調整。</p>
+    </details>
+  </section>
+  <details class="live-details">
+    <summary>畫面資訊與說明</summary>
+    <p id="preview-message" class="muted" role="status" aria-live="polite">正在確認來源與影格狀態…</p>
+    <p id="preview-metadata" class="muted" aria-live="polite">解析度：尚未取得｜FPS：尚未取得</p>
+    <p id="capture-help" class="field-help">截圖優先從既有影音快取保存原始解析度；無法取得時改用預覽並顯示實際尺寸。即時預覽仍可維持 1080p，截圖不另開攝影機連線。影片取按下按鈕之前的壓縮影音快取。保存於 Host 資料主目錄的 photo／video 資料夾（可攜版 data；安裝版 ProgramData 的 Data）。啟動初期片段可能不足 15 秒；畫面會回報實際長度。手動保存檔案由你保留，請定期整理磁碟。</p>
+    <div class="actions"><button class="button secondary" data-action="refresh">重新讀取畫面</button></div>
+  </details>
 </section>
-<section class="panel" aria-labelledby="live-ptz-title">
-  <div class="panel-heading">
-    <div>
-      <h3 id="live-ptz-title">Xiaomi MISS PTZ 方向控制</h3>
-      <p id="live-ptz-device" class="muted">正在讀取目前接入的 Xiaomi 攝影機…</p>
+<aside class="live-side" aria-label="鏡頭控制">
+  <section class="panel live-ptz-card" aria-labelledby="live-ptz-title">
+    <div class="panel-heading">
+      <h3 id="live-ptz-title">轉動鏡頭</h3>
+      <span id="live-ptz-status" class="status-pill status-unknown">尚未確認</span>
     </div>
-    <span id="live-ptz-status" class="status-pill status-unknown">尚未確認</span>
-  </div>
-  <p id="live-ptz-message" class="muted" role="status" aria-live="polite">
-    PTZ 代表可轉動鏡頭的方向控制（轉動後{{ term_help('ptz_zone', '視角與標記區域') }}可能改變）。只有已接入且支援 Xiaomi MISS PTZ 的攝影機會顯示按鈕；不支援轉動的機型無法使用。
-  </p>
-  <a id="privacy-diagnostics-link" href="/diagnostics#xiaomi-control-diagnostics" class="button secondary" hidden>查看本次控制診斷</a>
-  <div id="live-ptz-controls" class="actions" hidden>
-    <button class="button secondary" type="button" data-ptz-refresh="true" aria-describedby="ptz-position-help">讀取目前位置</button>
-    <button class="button secondary" type="button" data-privacy-action="capture">保存目前為隱私位置</button>
-    <label for="privacy-mode">隱私方式</label>
-    <select id="privacy-mode">
-      <option value="position">轉到指定位置</option>
-      <option value="standby">隱私待機（MIoT 原生開關，需讀回確認）</option>
-    </select>
-    <small id="privacy-mode-help" class="field-help" data-help-for="privacy-mode">「指定位置」只轉開鏡頭；「隱私待機」先讀回並保存目前角度，再透過小米雲端關閉攝影機開關，畫面會中斷。恢復時會等待串流與 PTZ 重連、移回原角度並讀回確認；最多等待約 25 秒，失敗保留原位置供重試。舊版待機紀錄若沒有原座標，無法補猜位置。不代表切斷電源或實體遮罩。操作需網路與此裝置所屬的小米登入狀態。</small>
-    <button class="button secondary" type="button" data-privacy-action="set_mode">保存隱私方式</button>
-    <button class="button secondary" type="button" data-privacy-action="hide">啟用隱私模式</button>
-    <button class="button secondary" type="button" data-privacy-action="show">恢復監控</button>
-  </div>
-  <p id="ptz-position-result" role="status" aria-live="polite">目前位置：尚未讀取。</p>
-  <p id="ptz-position-help" class="muted">載入時自動讀取一次初始位置；每次短步移動前後查詢裝置，成功讀回後會在畫面疊加半透明座標圖 4 秒，並標示位置變化。讀取失敗或數字未變時會明確標示，不推算位置。水平與垂直數字是裝置座標，不是角度；圖點不代表房間方向或實際視野。保存隱私位置與「轉到指定位置」需先成功讀取位置；移動時每一步都讀回座標確認，誤差約 2 單位內視為到位。</p>
-  <figure aria-labelledby="ptz-map-caption" style="max-width:480px;margin:1rem 0">
+    <p id="live-ptz-device" class="muted">正在讀取目前接入的 Xiaomi 攝影機…</p>
+    <p id="live-ptz-message" class="muted" role="status" aria-live="polite">只有支援轉動的小米攝影機會出現方向按鈕；轉動後{{ term_help('ptz_zone', '視角與標記區域') }}可能改變。</p>
+    <a id="privacy-diagnostics-link" href="/diagnostics#xiaomi-control-diagnostics" class="button secondary" hidden>查看本次控制診斷</a>
+    <div class="live-ptz-body">
+      <div id="preview-ptz-directions" class="ptz-virtual-pad" role="group" aria-label="鏡頭方向；每次短步移動後讀回位置" hidden>
+        <button type="button" data-ptz-action="move" data-ptz-direction="up" aria-label="向上短步移動" title="向上">↑</button>
+        <button type="button" data-ptz-action="move" data-ptz-direction="down" aria-label="向下短步移動" title="向下">↓</button>
+        <button type="button" data-ptz-action="move" data-ptz-direction="left" aria-label="向左短步移動" title="向左">←</button>
+        <button type="button" data-ptz-action="move" data-ptz-direction="right" aria-label="向右短步移動" title="向右">→</button>
+        <button type="button" data-ptz-action="stop" aria-label="停止移動" title="停止（Esc）">■</button>
+      </div>
+      <figure class="live-ptz-map" aria-labelledby="ptz-map-caption">
     <svg id="ptz-coordinate-map" class="ptz-coordinate-map" viewBox="0 0 320 180" tabindex="-1" role="img" aria-label="鏡頭位置讀回參考圖；尚未讀取位置" aria-disabled="true" style="width:100%;height:auto">
       <rect x="30" y="15" width="260" height="140" rx="10" fill="#eee7dc" stroke="#85765f"/>
       <path d="M160 15V155 M30 85H290" stroke="#b8aa95" stroke-dasharray="4 4"/>
@@ -108,10 +97,51 @@
       <path class="ptz-position-trail" fill="none" stroke="#99451e" stroke-width="2" stroke-dasharray="4 4"/>
       <circle class="ptz-target-dot" r="7" fill="none" stroke="#99451e" stroke-width="2" visibility="hidden"/>
     </svg>
-    <figcaption id="ptz-map-caption" class="field-help">位置讀回參考圖：尚未讀取。圖示線性映射裝置 0～101 座標，不代表角度、房間方向或實際視野。成功讀取位置後可點選目標：系統以短步移動並讀回確認逐步定位（不使用未驗證的絕對定位指令）；方向鍵仍可用。</figcaption>
-  </figure>
-  <p class="field-help">畫面旁 ↑ ↓ ← → 每按一次短步移動並自動送出停止。此頁可使用鍵盤方向鍵，Esc 停止；輸入文字、選單操作時不控制鏡頭。若左右馬達異常，請只使用上下；命令送出不代表鏡頭已實際移動。</p>
-</section>
+        <figcaption id="ptz-map-caption" class="sr-only">位置讀回參考圖：尚未讀取。圖示線性映射裝置 0～101 座標，不代表角度、房間方向或實際視野。</figcaption>
+      </figure>
+    </div>
+    <p id="ptz-position-result" role="status" aria-live="polite">目前位置：尚未讀取。</p>
+    <div class="actions">
+      <button class="button secondary" type="button" id="ptz-refresh" data-ptz-refresh="true" aria-describedby="ptz-position-help" hidden>讀取目前位置</button>
+    </div>
+    <p class="field-help">鍵盤方向鍵也可以轉，Esc 停止。點下方的位置圖可以指定要轉去哪裡。</p>
+    <details class="live-details">
+      <summary>位置怎麼算？</summary>
+      <p id="ptz-position-help" class="muted">載入時自動讀取一次初始位置；每次短步移動前後查詢裝置，成功讀回後會在畫面疊加半透明座標圖 4 秒，並標示位置變化。讀取失敗或數字未變時會明確標示，不推算位置。水平與垂直數字是裝置座標，不是角度；圖點不代表房間方向或實際視野。保存隱私位置與「轉到指定位置」需先成功讀取位置；移動時每一步都讀回座標確認，誤差約 2 單位內視為到位。</p>
+      <p class="field-help">每按一次方向鍵只移動一小步並自動停止。若左右馬達異常，請只使用上下；命令送出不代表鏡頭已實際移動。</p>
+    </details>
+  </section>
+  <div id="live-ptz-controls" class="live-side-stack" hidden>
+    <section class="panel" aria-labelledby="live-spots-title" id="live-spots">
+      <h3 id="live-spots-title">常用位置</h3>
+      <ul id="live-spots-list" class="live-spots-list"></ul>
+      <p id="live-spots-message" class="muted" role="status" aria-live="polite">正在讀取已存的位置…</p>
+      <a class="button secondary" href="/settings/ai#scene-registry-panel">＋ 把目前畫面存成常用位置</a>
+    </section>
+    <section class="panel" aria-labelledby="live-privacy-title">
+      <h3 id="live-privacy-title">隱私模式</h3>
+      <p class="muted">開啟後鏡頭轉向你設定的「隱私位置」（例如牆面）；關閉時轉回原本的位置。</p>
+      <div class="actions">
+        <button class="button" type="button" data-privacy-action="hide">開啟隱私模式</button>
+        <button class="button secondary" type="button" data-privacy-action="show">關閉，恢復監控</button>
+      </div>
+      <details class="live-details">
+        <summary>設定隱私位置與方式</summary>
+        <div class="actions">
+          <button class="button secondary" type="button" data-privacy-action="capture">把目前位置存成隱私位置</button>
+        </div>
+        <label for="privacy-mode">隱私方式
+          <select id="privacy-mode">
+            <option value="position">轉到隱私位置</option>
+            <option value="standby">關閉攝影機畫面（隱私待機）</option>
+          </select>
+          <small id="privacy-mode-help" class="field-help" data-help-for="privacy-mode">「指定位置」只轉開鏡頭；「隱私待機」先讀回並保存目前角度，再透過小米雲端關閉攝影機開關，畫面會中斷。恢復時會等待串流與 PTZ 重連、移回原角度並讀回確認；最多等待約 25 秒，失敗保留原位置供重試。舊版待機紀錄若沒有原座標，無法補猜位置。不代表切斷電源或實體遮罩。操作需網路與此裝置所屬的小米登入狀態。</small>
+        </label>
+        <div class="actions"><button class="button secondary" type="button" data-privacy-action="set_mode">保存隱私方式</button></div>
+      </details>
+    </section>
+  </div>
+</aside>
 </div>
 <script>
 (function () {
@@ -382,6 +412,8 @@
   function setPtzControlsEnabled(enabled) {
     ptzControls.hidden = !enabled;
     directionControls.hidden = !enabled;
+    const refreshButton = document.getElementById("ptz-refresh");
+    if (refreshButton) { refreshButton.hidden = !enabled; refreshButton.disabled = !enabled; }
     directionControls.querySelectorAll("button").forEach((button) => { button.disabled = !enabled; });
     ptzControls.querySelectorAll("button").forEach((button) => { button.disabled = !enabled; });
     setPositionControls(enabled && positionReadbackVerified);
@@ -559,6 +591,8 @@
         nativeStandbyAvailable = privacy.standby_available === true;
         privacyRestorePending = privacy.restore_pending === true;
         ptzControls.hidden = false;
+        const refreshButton = document.getElementById("ptz-refresh");
+        if (refreshButton) { refreshButton.hidden = false; refreshButton.disabled = false; }
         setPositionControls(positionReadbackVerified);
       }
       setPtzMessage(ptz.enabled ? "實驗介面已啟用；按下方向鍵才會送出一次明確控制。"
@@ -792,7 +826,7 @@
   });
   window.addEventListener("blur", () => { if (ptzRequestInFlight) emergencyStop(); });
   qualityApply?.addEventListener("click", applyQuality);
-  ptzControls.querySelector("[data-ptz-refresh]")?.addEventListener("click", async (event) => {
+  document.getElementById("ptz-refresh")?.addEventListener("click", async (event) => {
     if (!activePtzDeviceId || ptzRequestInFlight) return;
     const button = event.currentTarget;
     ptzRequestInFlight = true;
@@ -833,6 +867,94 @@
   }
   if(document.readyState==="loading") document.addEventListener("DOMContentLoaded",schedule,{once:true});
   else schedule();
+})();
+</script>
+<script>
+/* Quick quality buttons drive the existing profile select + apply button; saved spots come from scene positions. */
+(() => {
+  "use strict";
+  const select = document.getElementById("live-quality-profile");
+  const apply = document.getElementById("live-quality-apply");
+  const seg = document.getElementById("live-quality-seg");
+  const CHOICES = { low: ["subtype=1", "subtype=sd"], auto: ["subtype=auto", "subtype=0"], high: ["subtype=2", "subtype=hd"] };
+  const available = (choice) => CHOICES[choice].find((value) => Array.from(select.options).some((option) => option.value === value));
+  function syncSeg() {
+    seg.querySelectorAll("[data-quality-choice]").forEach((button) => {
+      const value = available(button.dataset.qualityChoice);
+      button.disabled = select.disabled || apply.disabled || !value;
+      button.setAttribute("aria-pressed", String(Boolean(value) && select.value === value));
+    });
+  }
+  if (select && apply && seg) {
+    seg.addEventListener("click", (event) => {
+      const button = event.target.closest("[data-quality-choice]");
+      const value = button && available(button.dataset.qualityChoice);
+      if (!value || button.disabled) return;
+      select.value = value;
+      select.dispatchEvent(new Event("change"));
+      syncSeg();
+      apply.click();
+    });
+    select.addEventListener("change", syncSeg);
+    const observer = new MutationObserver(syncSeg);
+    observer.observe(select, { childList: true, attributes: true, attributeFilter: ["disabled"] });
+    observer.observe(apply, { attributes: true, attributeFilter: ["disabled"] });
+    syncSeg();
+  }
+
+  const list = document.getElementById("live-spots-list");
+  const spotMessage = document.getElementById("live-spots-message");
+  if (!list || !spotMessage) return;
+  const csrf = () => decodeURIComponent(document.cookie.split(";").map((value) => value.trim())
+    .find((value) => value.startsWith("meowkeeper_csrf="))?.split("=").slice(1).join("=") || "");
+  let busy = false;
+  async function loadSpots() {
+    try {
+      const response = await fetch("/api/v1/scene-registry", { cache: "no-store", credentials: "same-origin", headers: { Accept: "application/json" } });
+      if (!response.ok) throw new Error();
+      const data = await response.json();
+      const spots = (data.views || []).filter((view) => view.position_binding);
+      list.replaceChildren(...spots.map((view) => {
+        const item = document.createElement("li");
+        item.className = "live-spot";
+        const name = document.createElement("strong");
+        name.textContent = view.position_binding.preset_label || view.name;
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = "button secondary";
+        button.textContent = "轉過去";
+        button.setAttribute("aria-label", `轉到「${name.textContent}」`);
+        button.addEventListener("click", () => goTo(view.view_id, name.textContent));
+        item.append(name, button);
+        return item;
+      }));
+      spotMessage.textContent = spots.length ? "" : "還沒有存任何位置。在「AI 與錄影 › 場景標記」為畫面命名並綁定鏡頭位置後，就會出現在這裡。";
+    } catch (_error) {
+      list.replaceChildren();
+      spotMessage.textContent = "暫時讀不到已存的位置；請確認已設定來源。";
+    }
+  }
+  async function goTo(viewId, label) {
+    if (busy) return;
+    busy = true;
+    list.querySelectorAll("button").forEach((button) => { button.disabled = true; });
+    spotMessage.textContent = `正在轉到「${label}」，每一步都會讀回位置確認，最多約 45 秒…`;
+    try {
+      const response = await fetch(`/api/v1/scene-registry/views/${encodeURIComponent(viewId)}/restore-position`, {
+        method: "POST", cache: "no-store", credentials: "same-origin",
+        headers: { "Content-Type": "application/json", "X-MeowKeeper-CSRF": csrf() },
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.detail || "未確認到位。");
+      spotMessage.textContent = `已轉到「${label}」。${data.message_zh_tw || ""}`;
+    } catch (error) {
+      spotMessage.textContent = `沒有確認轉到「${label}」：${error.message || "請看畫面確認鏡頭位置。"}`;
+    } finally {
+      busy = false;
+      list.querySelectorAll("button").forEach((button) => { button.disabled = false; });
+    }
+  }
+  loadSpots();
 })();
 </script>
 {% endblock %}
