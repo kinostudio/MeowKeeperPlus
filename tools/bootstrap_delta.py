@@ -23,6 +23,35 @@ CREATE_NO_WINDOW = 0x08000000
 CREATE_NEW_PROCESS_GROUP = 0x00000200
 CREATE_BREAKAWAY_FROM_JOB = 0x01000000
 FINAL_STATES = {"applied", "failed", "rollback_failed"}
+BOOTSTRAP_FILES = (
+    "scripts/Apply-MeowKeeperPlusUpdate.ps1",
+    "tools/apply_verified_update.py",
+    "src/meowkeeper/app/delta_update.py",
+)
+
+
+def complete_bootstrap(app: Path, payload: Path, manifest: dict) -> None:
+    """A delta omits unchanged files; copy only signed, identical control files."""
+    target_path = payload / "build_manifest.json"
+    if delta.digest(target_path) != manifest["target_manifest_sha256"]:
+        raise ValueError("更新引導的目標清單校驗失敗；尚未啟動安裝。")
+    target = delta.records(json.loads(target_path.read_text(encoding="utf-8")))
+    base = delta.records(json.loads((app / "build_manifest.json").read_text(encoding="utf-8")))
+    for name in BOOTSTRAP_FILES:
+        expected = target.get(name)
+        if expected is None:
+            raise ValueError("更新套件缺少必要引導工具；尚未啟動安裝。")
+        destination = payload / name
+        if not destination.exists():
+            source = app / name
+            delta.plain(source)
+            if base.get(name) != expected or delta.digest(source) != expected["sha256"]:
+                raise ValueError("本機更新引導工具不符合目標簽章；尚未啟動安裝。")
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(source, destination)
+        delta.plain(destination)
+        if destination.stat().st_size != expected["size_bytes"] or delta.digest(destination) != expected["sha256"]:
+            raise ValueError("更新引導工具校驗失敗；尚未啟動安裝。")
 
 
 def prepare(app: Path, downloads: Path, payload: Path, version: str, fetch) -> dict:
@@ -116,7 +145,8 @@ def main() -> int:
         sys.path.insert(0, str(app / "src"))
         from meowkeeper.app.updates import UpdateManager
         downloader = UpdateManager(app, data)
-        prepare(app, downloads, payload, args.version, downloader._download)
+        manifest = prepare(app, downloads, payload, args.version, downloader._download)
+        complete_bootstrap(app, payload, manifest)
         if not args.apply:
             print("差量下載與簽章驗證完成，尚未停止監控或安裝。")
             return 0

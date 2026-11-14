@@ -10,6 +10,7 @@ from typing import ClassVar
 from unittest.mock import patch
 
 from meowkeeper.app.core_controller import RepositoryCoreController
+from meowkeeper.core.health import RetentionResult
 from meowkeeper.storage.database import SQLiteStore
 
 
@@ -87,6 +88,26 @@ class CoreMonitorRecoveryTests(unittest.TestCase):
         self.assertEqual(_FakeTimer.created[0].interval, 30)
         self.assertNotIn("private-token-must-not-be-logged", "\n".join(self.logs))
         self.assertNotIn("private-token-must-not-be-logged", str(status))
+
+    def test_retention_runs_without_frames_retries_and_stops_on_close(self):
+        self.controller._retention_retry_seconds = 0.02
+        self.controller._retention_interval_seconds = 0.02
+        with patch("meowkeeper.app.core_controller.cleanup_retained_files", side_effect=[
+            PermissionError("private-path"), RetentionResult((), 0, (), ("busy",)),
+            RetentionResult((), 0, ()),
+        ]) as cleanup:
+            import threading
+            worker = threading.Thread(target=self.controller._run_event_retention)
+            self.controller._retention_thread = worker
+            worker.start()
+            self.assertTrue(self._wait_for(lambda: cleanup.call_count >= 3))
+            self.controller.close()
+            self.assertFalse(worker.is_alive())
+            self.assertEqual(cleanup.call_args.kwargs["minimum_age_seconds"], 600)
+            self.assertNotIn("private-path", "\n".join(self.logs))
+            snapshot = self.controller.get_status()["metrics"]["event_retention"]
+            self.assertEqual(snapshot["status"], "passed")
+            self.assertIn("next_check_at", snapshot)
 
     def test_recovery_attempts_back_off_and_stop_at_configured_limit(self):
         with patch("meowkeeper.app.core_controller.threading.Timer", _FakeTimer):

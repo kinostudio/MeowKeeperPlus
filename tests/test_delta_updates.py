@@ -25,8 +25,8 @@ from meowkeeper.app.delta_update import (
 )
 from meowkeeper.app.updates import UpdateManager, canonical, verify_envelope
 from tools.apply_verified_update import verify_and_stage
+from tools.bootstrap_delta import BOOTSTRAP_FILES, complete_bootstrap, prepare
 from tools.bootstrap_delta import main as bootstrap_main
-from tools.bootstrap_delta import prepare
 from tools.prepare_delta_release import build_delta, validate_release_baseline_overrides
 from tools.prepare_delta_release import main as prepare_release_main
 from tools.verify_portable import verify_portable
@@ -156,6 +156,7 @@ class DeltaUpdateTests(unittest.TestCase):
             "src/demo.py": b"old", "src/deleted.py": b"delete",
             "tools/verify_portable.py": (ROOT / "tools/verify_portable.py").read_bytes(),
         }
+        content.update({name: (ROOT / name).read_bytes() for name in BOOTSTRAP_FILES})
         for name, data in content.items():
             path = self.base / name
             path.parent.mkdir(parents=True, exist_ok=True)
@@ -166,7 +167,7 @@ class DeltaUpdateTests(unittest.TestCase):
         (self.target / "src/deleted.py").unlink()
         (self.target / "src/added.py").write_bytes(b"added")
         module = self.target / "src/meowkeeper/app/delta_update.py"
-        module.parent.mkdir(parents=True)
+        module.parent.mkdir(parents=True, exist_ok=True)
         module.write_bytes((ROOT / "src/meowkeeper/app/delta_update.py").read_bytes())
         self.manifest(self.target, "r118")
         self.out = self.root / "output"
@@ -422,6 +423,30 @@ class DeltaUpdateTests(unittest.TestCase):
         prepare(self.base, downloads, self.root / "bootstrap", "r118", fetch)
         self.assertEqual(calls, ["update-manifest-delta.json", self.delta["asset"]])
         self.assertEqual((self.base / "src/demo.py").read_bytes(), b"old")
+
+    def test_bootstrap_reuses_unchanged_signed_control_files_without_full_download(self):
+        downloads = self.root / "control-download"
+        downloads.mkdir()
+        payload = self.root / "control-payload"
+        def fetch(url, destination, _limit):
+            shutil.copy2(self.out / url.rsplit("/", 1)[1], destination)
+        prepare(self.base, downloads, payload, "r118", fetch)
+        self.assertFalse((payload / BOOTSTRAP_FILES[0]).exists())
+        complete_bootstrap(self.base, payload, self.delta)
+        for name in BOOTSTRAP_FILES:
+            self.assertEqual(digest(payload / name), digest(self.target / name))
+        self.assertFalse((payload / "runtime").exists())
+        (payload / BOOTSTRAP_FILES[0]).write_bytes(b"tampered")
+        with self.assertRaises(ValueError):
+            complete_bootstrap(self.base, payload, self.delta)
+
+    def test_bootstrap_rejects_modified_local_control_file(self):
+        from meowkeeper.app.delta_update import extract_payload
+        payload = self.root / "bad-control"
+        extract_payload(self.archive, self.delta, payload)
+        (self.base / BOOTSTRAP_FILES[0]).write_bytes(b"tampered")
+        with self.assertRaises(ValueError):
+            complete_bootstrap(self.base, payload, self.delta)
 
     def test_copy_failure_never_changes_installed_files(self):
         before = digest(self.base / "build_manifest.json")

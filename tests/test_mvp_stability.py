@@ -98,6 +98,45 @@ class MvpStabilityTests(unittest.TestCase):
         self.assertGreater(snapshot.total_bytes, 0)
         self.assertFalse(snapshot.below_minimum)
 
+    def test_retention_locked_file_does_not_block_other_expired_files(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            locked, other = root / "locked.mp4", root / "other.mp4"
+            for p in (locked, other):
+                p.write_bytes(b"video")
+                stamp = (datetime.now(timezone.utc) - timedelta(days=31)).timestamp()
+                os.utime(p, (stamp, stamp))
+            unlink = Path.unlink
+            def remove(p, *args, **kwargs):
+                if p == locked:
+                    raise PermissionError("in use")
+                return unlink(p, *args, **kwargs)
+            with patch.object(Path, "unlink", remove):
+                result = cleanup_retained_files(root, max_age_days=30)
+            self.assertTrue(locked.exists())
+            self.assertFalse(other.exists())
+            self.assertEqual(result.skipped_busy, (str(locked),))
+
+    def test_retention_capacity_preserves_recent_writes_pinned_and_nonmedia(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            for name in ("recent.mp4", "old.mp4", "pinned.mp4", "meowkeeper.db"):
+                (root / name).write_bytes(b"x" * 20)
+            past = datetime.now(timezone.utc) - timedelta(days=2)
+            os.utime(root / "old.mp4", (past.timestamp(), past.timestamp()))
+            result = cleanup_retained_files(
+                root, max_age_days=30, max_bytes=1, pinned_paths=(root / "pinned.mp4",),
+                minimum_age_seconds=600, now=datetime.now(timezone.utc) + timedelta(seconds=601),
+            )
+            # All files are older than the write guard in this simulated clock.
+            self.assertIn(str(root / "old.mp4"), result.removed_files)
+            self.assertTrue((root / "pinned.mp4").exists())
+            self.assertTrue((root / "meowkeeper.db").exists())
+            (root / "recent.mp4").write_bytes(b"new")
+            result = cleanup_retained_files(root, max_age_days=0, max_bytes=1, minimum_age_seconds=600)
+            self.assertTrue((root / "recent.mp4").exists())
+            self.assertIn(str(root / "recent.mp4"), result.skipped_pinned)
+
     def test_rotating_logging_writes_utf8_file(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "logs" / "service.log"
