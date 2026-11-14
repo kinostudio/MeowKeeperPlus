@@ -15,7 +15,7 @@ import traceback
 import uuid
 from collections.abc import Callable, Mapping
 from dataclasses import asdict
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
@@ -152,7 +152,10 @@ class RepositoryCoreController(CoreController):
         self.retention_seconds = float(retention_seconds)
         self.event_video_max_age_days = int(event_video_max_age_days)
         self.event_video_max_bytes = int(event_video_max_bytes)
-        self._last_event_cleanup_at: float = 0.0
+        self._retention_stop = threading.Event()
+        self._retention_thread: threading.Thread | None = None
+        self._retention_interval_seconds = 21600
+        self._retention_retry_seconds = 300
         self.segment_seconds = float(segment_seconds)
         self.maximum_size_mb = int(maximum_size_mb)
         self.analysis_fps = int(analysis_fps)
@@ -480,6 +483,11 @@ class RepositoryCoreController(CoreController):
             self._metrics["source"] = {**self._metrics["source"], "status": "not_configured", "connections": 0}
             return {"action": "start", "status": self._state, "message_zh_tw": "尚未設定來源；Dashboard 已啟動，請先設定 RTSP、YouTube 或本地影片。"}
         self._stop_event.clear()
+        if self._retention_thread is None or not self._retention_thread.is_alive():
+            self._retention_thread = threading.Thread(
+                target=self._run_event_retention, name="meowkeeper-event-retention", daemon=True,
+            )
+            self._retention_thread.start()
         self._state = "starting"
         self._started_at = datetime.now(timezone.utc).isoformat()
         self._last_error = None
@@ -895,6 +903,7 @@ class RepositoryCoreController(CoreController):
         return {"status": "sent", "sent": sent, "message_zh_tw": f"Telegram 測試通知已傳送至 {sent} 位使用者。"}
 
     def close(self) -> None:
+        self._retention_stop.set()
         with self._lock:
             self._closing = True
             self._lifecycle_generation += 1
@@ -908,6 +917,39 @@ class RepositoryCoreController(CoreController):
         if self._daily_monitoring is not None:
             self._daily_monitoring.close()
             self._daily_monitoring = None
+        if self._retention_thread is not None:
+            self._retention_thread.join(timeout=2)
+
+    def _run_event_retention(self) -> None:
+        """磁碟清理不等待攝影機影格，也不占用 AI／錄影循環。"""
+        while not self._retention_stop.is_set():
+            with self._lock:
+                days, limit = self.event_video_max_age_days, self.event_video_max_bytes
+            delay = self._retention_interval_seconds
+            snapshot: dict[str, Any] = {"checked_at": datetime.now(timezone.utc).isoformat(),
+                                        "max_age_days": days, "max_bytes": limit}
+            try:
+                result = cleanup_retained_files(
+                    self.event_directory, max_age_days=days, max_bytes=limit,
+                    suffixes=(".mp4", ".mkv", ".ts"), minimum_age_seconds=600,
+                )
+                if result.skipped_busy:
+                    delay = self._retention_retry_seconds
+                snapshot.update(status="partial" if result.skipped_busy else "passed",
+                                removed_files=len(result.removed_files), removed_bytes=result.removed_bytes,
+                                protected_files=len(result.skipped_pinned), busy_files=len(result.skipped_busy))
+                self._log(f"[影片清理] 檢查完成：清理 {len(result.removed_files)} 支，"
+                          f"保護 {len(result.skipped_pinned)} 支，占用／變動略過 {len(result.skipped_busy)} 支；"
+                          f"下次檢查約 {delay // 60} 分鐘後。")
+            except (OSError, ValueError, RuntimeError, ArithmeticError) as exc:
+                delay = self._retention_retry_seconds
+                snapshot.update(status="failed", error_type=type(exc).__name__)
+                self._log(f"⚠️ 事件影片清理未完成（{type(exc).__name__}）；監控繼續，5 分鐘後重試。")
+            snapshot["next_check_at"] = (datetime.now(timezone.utc) + timedelta(seconds=delay)).isoformat()
+            with self._lock:
+                self._metrics["event_retention"] = snapshot
+            if self._retention_stop.wait(delay):
+                break
 
     def _run_monitor(self, generation: int) -> None:
         ingest: FfmpegMediaIngest | None = None
@@ -1064,23 +1106,6 @@ class RepositoryCoreController(CoreController):
                     frame.captured_at, cat_present=count > 0 if type(count) is int and count >= 0 else None,
                 )
                 self._update_runtime_metrics(frame, ingest, ring, analyzer)
-                now_mono = time.monotonic()
-                if now_mono - self._last_event_cleanup_at >= 21600:
-                    self._last_event_cleanup_at = now_mono
-                    try:
-                        p_res = cleanup_retained_files(
-                            self.event_directory,
-                            max_age_days=self.event_video_max_age_days,
-                            suffixes=(".mp4", ".mkv", ".ts"),
-                            max_bytes=self.event_video_max_bytes,
-                        )
-                        if p_res.removed_files:
-                            self._log(
-                                f"[影片清理] 定期清理已刪除 {len(p_res.removed_files)} 個過期影片，"
-                                f"釋放 {p_res.removed_bytes / (1024**2):.1f} MB。"
-                            )
-                    except (OSError, ValueError, RuntimeError):
-                        self._log("⚠️ 事件影片保留清理未完成；監控繼續，下次排程再試。")
                 with self._lock:
                     self._metrics["ai"]["dropped_frames"] = reader.dropped
                     self._metrics["ai"]["frame_reader"] = reader.snapshot()

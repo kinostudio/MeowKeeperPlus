@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import logging
+import math
 import shutil
 from collections.abc import Iterable
 from dataclasses import dataclass
@@ -71,6 +72,7 @@ class RetentionResult:
     removed_files: tuple[str, ...]
     removed_bytes: int
     skipped_pinned: tuple[str, ...]
+    skipped_busy: tuple[str, ...] = ()
 
 
 def _iter_files(directory: Path, suffixes: Iterable[str]) -> list[Path]:
@@ -80,7 +82,8 @@ def _iter_files(directory: Path, suffixes: Iterable[str]) -> list[Path]:
     return [
         item
         for item in directory.iterdir()
-        if item.is_file() and item.suffix.lower() in allowed
+        if (not item.is_symlink() and item.is_file() and item.suffix.lower() in allowed
+            and not getattr(item.lstat(), "st_file_attributes", 0) & 0x400)
     ]
 
 
@@ -91,6 +94,7 @@ def cleanup_retained_files(
     suffixes: Iterable[str] = (".mp4", ".mkv", ".ts", ".jpg", ".jpeg"),
     max_bytes: int | None = None,
     pinned_paths: Iterable[str | Path] = (),
+    minimum_age_seconds: float = 0,
     now: datetime | None = None,
 ) -> RetentionResult:
     """清理明確事件目錄中的過期／超量檔案。
@@ -103,39 +107,44 @@ def cleanup_retained_files(
         raise ValueError("檔案保留天數不可小於零。")
     if max_bytes is not None and max_bytes <= 0:
         raise ValueError("檔案容量上限必須大於零。")
+    if not math.isfinite(minimum_age_seconds) or minimum_age_seconds < 0:
+        raise ValueError("使用中影片保護時間不可小於零或非有限數值。")
     root = Path(directory).resolve()
     pinned = {Path(item).resolve() for item in pinned_paths}
     current = now or datetime.now(timezone.utc)
     cutoff = current - timedelta(days=max_age_days)
-    candidates = _iter_files(root, suffixes)
+    candidates = []
+    busy: list[str] = []
+    for item in _iter_files(root, suffixes):
+        try:
+            candidates.append((item, item.stat()))
+        except OSError:
+            busy.append(str(item))
     removed: list[str] = []
     skipped: list[str] = []
     removed_bytes = 0
 
-    for item in sorted(candidates, key=lambda path: path.stat().st_mtime):
-        if item in pinned:
+    current_bytes = sum(info.st_size for _, info in candidates)
+    for item, info in sorted(candidates, key=lambda pair: pair[1].st_mtime):
+        if (item in pinned or current.timestamp() - max(info.st_mtime, info.st_ctime) < minimum_age_seconds):
             skipped.append(str(item))
             continue
-        modified = datetime.fromtimestamp(item.stat().st_mtime, tz=timezone.utc)
-        if modified < cutoff:
-            size = item.stat().st_size
+        if info.st_mtime >= cutoff.timestamp() and (max_bytes is None or current_bytes <= max_bytes):
+            continue
+        try:
+            latest = item.stat()
+            if (latest.st_mtime_ns, latest.st_size) != (info.st_mtime_ns, info.st_size):
+                busy.append(str(item))
+                continue
             item.unlink()
             removed.append(str(item))
-            removed_bytes += size
+            removed_bytes += info.st_size
+            current_bytes -= info.st_size
+        except OSError:
+            # Windows readers/writers retain their file; one lock must not abort the sweep.
+            busy.append(str(item))
 
-    if max_bytes is not None:
-        remaining = [item for item in _iter_files(root, suffixes) if item not in pinned]
-        current_bytes = sum(item.stat().st_size for item in remaining)
-        for item in sorted(remaining, key=lambda path: path.stat().st_mtime):
-            if current_bytes <= max_bytes:
-                break
-            size = item.stat().st_size
-            item.unlink()
-            current_bytes -= size
-            removed.append(str(item))
-            removed_bytes += size
-
-    return RetentionResult(tuple(removed), removed_bytes, tuple(skipped))
+    return RetentionResult(tuple(removed), removed_bytes, tuple(skipped), tuple(busy))
 
 
 def configure_rotating_logging(
