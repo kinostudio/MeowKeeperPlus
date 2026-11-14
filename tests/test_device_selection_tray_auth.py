@@ -18,10 +18,10 @@ class DeviceAndTrayAuthTests(unittest.TestCase):
         root = Path(__file__).resolve().parents[1]
         program = r'''
 const fs=require('fs'),vm=require('vm'),assert=require('assert');
-const items={}; const el=id=>items[id]||(items[id]={value:'1',listeners:{},addEventListener(k,f){this.listeners[k]=f},replaceChildren(){},appendChild(){}});
+const items={}; const el=id=>items[id]||(items[id]={value:'1',style:{setProperty(){}},setAttribute(){},listeners:{},addEventListener(k,f){this.listeners[k]=f},replaceChildren(){},appendChild(){}});
 const calls=[];
 const context={document:{cookie:'',hidden:true,getElementById:el,createElement:()=>({}),addEventListener(){}},
- window:{setInterval(){},confirm:()=>true},fetch:async(path,options={})=>{
+ setInterval(){return 1},clearInterval(){},setTimeout(){return 1},window:{setInterval(){},confirm:()=>true},fetch:async(path,options={})=>{
  calls.push({path,options});return {ok:true,json:async()=>path==='/api/v1/settings'?{settings:{inference_device:'intel:gpu'}}:{}};
 }};
 vm.createContext(context);vm.runInContext(fs.readFileSync(process.argv[1],'utf8'),context);

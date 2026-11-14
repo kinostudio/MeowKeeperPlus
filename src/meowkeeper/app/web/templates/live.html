@@ -8,6 +8,7 @@
     <div id="preview-empty" class="preview-empty" role="status" aria-live="polite">
       <span class="preview-empty-icon" aria-hidden="true">◉</span>
       <strong>還沒有收到畫面</strong>
+      <span>Mock 僅供流程測試，不會產生真實影像。要查看畫面，請設定攝影機或影片來源並啟動監控。</span>
       <span>請先到「設定 › 來源與攝影機」接上攝影機，再按右上角「啟動監控」。</span>
     </div>
     <output id="ptz-position-hud" class="ptz-position-hud" role="status" aria-live="polite" hidden>
@@ -468,6 +469,7 @@
       const option = document.createElement("option");
       option.value = String(item.value || "");
       option.textContent = String(item.label || option.value);
+      if (active.quality?.name === option.value) option.dataset.verifiedHighest = "true";
       qualityProfile.appendChild(option);
     });
     const selected = String(active.selected_profile || "subtype=1");
@@ -876,8 +878,16 @@
   const select = document.getElementById("live-quality-profile");
   const apply = document.getElementById("live-quality-apply");
   const seg = document.getElementById("live-quality-seg");
-  const CHOICES = { low: ["subtype=1", "subtype=sd"], auto: ["subtype=auto", "subtype=0"], high: ["subtype=2", "subtype=hd"] };
-  const available = (choice) => CHOICES[choice].find((value) => Array.from(select.options).some((option) => option.value === value));
+  const CHOICES = { low: ["subtype=1", "subtype=sd"], auto: ["subtype=auto", "subtype=0"], high: ["subtype=3", "subtype=2", "subtype=hd"] };
+  const available = (choice) => {
+    const options = Array.from(select.options);
+    if (choice === "high") {
+      const verified = options.find((option) => option.dataset.verifiedHighest === "true"
+        && !["subtype=1", "subtype=sd", "subtype=auto", "subtype=0"].includes(option.value));
+      if (verified) return verified.value;
+    }
+    return CHOICES[choice].find((value) => options.some((option) => option.value === value));
+  };
   function syncSeg() {
     seg.querySelectorAll("[data-quality-choice]").forEach((button) => {
       const value = available(button.dataset.qualityChoice);

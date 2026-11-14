@@ -3,7 +3,7 @@
   --ink:#3e3027;--muted:#6b5b4d;--line:#e3d3bd;--line-strong:#3e3027;--surface:#f6eee2;--panel:#fffdf8;--paper:#fbf4e9;
   --accent:#e08a3c;--accent-ink:#8a4512;--danger:#94271d;
   --ok-bg:#e3efdc;--ok-ink:#2c5627;--warn-bg:#fce9cf;--warn-ink:#7f430c;--alert-bg:#f8dcd7;--alert-ink:#94271d;--off-bg:#eee7dd;--off-ink:#5a4e43;
-  --hand:"LXGW WenKai TC","Klee One","DFKai-SB","BiauKai","KaiTi","Kaiti TC",serif;
+  --hand:var(--sans);
   --sans:"Noto Sans TC","Microsoft JhengHei UI","Microsoft JhengHei","PingFang TC","Segoe UI",system-ui,sans-serif;
   --wobble:20px 24px 22px 26px;
   font-family:var(--sans);

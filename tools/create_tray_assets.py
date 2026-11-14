@@ -1,17 +1,12 @@
-"""Create deterministic Tray/launcher/web icons from the brand SVGs.
+"""Package approved transparent watercolor PNGs into multi-frame Tray ICOs.
 
-Sources: assets/brand/meowkeeper-logo.svg (32 px and up) and
-meowkeeper-logo-small.svg (16–24 px: two-tone cat head + red ball, readable
-in the notification area). A status badge marks ready / waiting / error.
-Requires `rsvg-convert` (librsvg) on the build machine; generated files are
-committed, so end users and the Windows build never need it.
+--tray-only does not touch Web assets or require the SVG renderer.
 """
 
 from __future__ import annotations
 
-import io
+import argparse
 import shutil
-import subprocess
 from pathlib import Path
 
 from PIL import Image, ImageDraw
@@ -21,48 +16,37 @@ BRAND = ROOT / "assets" / "brand"
 TARGET = ROOT / "assets" / "tray"
 WEB = ROOT / "src" / "meowkeeper" / "app" / "web" / "static" / "icons"
 SIZES = (16, 20, 24, 32, 48, 64, 128, 256)
-SMALL_LIMIT = 24
-INK = (62, 48, 39, 255)
-BADGES = {
-    "ready": (92, 160, 96, 255),
-    "waiting": (231, 165, 52, 255),
-    "error": (200, 64, 56, 255),
-}
+STATES = ("ready", "waiting", "error")
 
 
-def render(svg: Path, size: int) -> Image.Image:
-    converter = shutil.which("rsvg-convert")
-    if converter is None:
-        raise RuntimeError("需要 rsvg-convert 產生圖示；產物已提交，終端使用者不需要。")
-    png = subprocess.run([converter, "-w", str(size), "-h", str(size), str(svg)],
-                         check=True, capture_output=True, timeout=60, shell=False).stdout
-    return Image.open(io.BytesIO(png)).convert("RGBA")
+def with_badge(source: Image.Image, state: str) -> Image.Image:
+    """Composite only the corner symbol; never repaint or rescale the cats."""
+    colors = {"ready": "#356b35", "waiting": "#bd7a16", "error": "#aa3029"}
+    size = source.width
+    radius = round(size * .135)
+    cx = cy = size - radius - round(size * .04)
+    layer = Image.new("RGBA", source.size)
+    draw = ImageDraw.Draw(layer)
+    width = max(2, round(size * .015))
+    draw.ellipse((cx-radius, cy-radius, cx+radius, cy+radius), fill=colors[state], outline="#fffaf0", width=width)
+    if state == "ready":
+        draw.line([(cx-radius*.5,cy),(cx-radius*.1,cy+radius*.35),(cx+radius*.5,cy-radius*.4)], fill="white", width=width*2, joint="curve")
+    elif state == "waiting":
+        draw.line([(cx,cy-radius*.55),(cx,cy),(cx+radius*.42,cy+radius*.25)], fill="white", width=width*2, joint="curve")
+    else:
+        draw.line([(cx,cy-radius*.52),(cx,cy+radius*.1)],fill="white",width=width*2)
+        r=width
+        draw.ellipse((cx-r,cy+radius*.4-r,cx+r,cy+radius*.4+r),fill="white")
+    return Image.alpha_composite(source, layer)
 
 
-def base(size: int) -> Image.Image:
-    small = size <= SMALL_LIMIT
-    return render(BRAND / ("meowkeeper-logo-small.svg" if small else "meowkeeper-logo.svg"), size)
-
-
-def with_badge(image: Image.Image, state: str) -> Image.Image:
-    size = image.width
-    radius = max(3.0, size * (0.2 if size <= SMALL_LIMIT else 0.17))
-    centre = size - radius - max(0.5, size * 0.01)
-    badged = image.copy()
-    draw = ImageDraw.Draw(badged)
-    outline = max(1, round(size / 24))
-    box = (centre - radius, centre - radius, centre + radius, centre + radius)
-    draw.ellipse(box, fill=BADGES[state], outline=(255, 255, 255, 255), width=outline)
-    if state == "error" and size >= 32:
-        bar = max(2, round(radius * 0.28))
-        draw.rectangle((centre - bar / 2, centre - radius * 0.55, centre + bar / 2, centre + radius * 0.15), fill=(255, 255, 255, 255))
-        draw.ellipse((centre - bar / 2, centre + radius * 0.3, centre + bar / 2, centre + radius * 0.3 + bar), fill=(255, 255, 255, 255))
-    elif state == "waiting" and size >= 32:
-        dot = max(1.5, radius * 0.16)
-        for offset in (-0.45, 0, 0.45):
-            x = centre + offset * radius
-            draw.ellipse((x - dot, centre - dot, x + dot, centre + dot), fill=(255, 255, 255, 255))
-    return badged
+def tray_frames(name: str) -> list[Image.Image]:
+    with Image.open(BRAND / name) as image:
+        if image.mode != "RGBA" or image.getchannel("A").getextrema() != (0, 255):
+            raise ValueError("Tray 來源圖必須有真正透明背景與不透明前景。")
+        if image.width != image.height or image.width < max(SIZES):
+            raise ValueError("Tray 來源圖必須為至少 256 像素的正方形。")
+        return [image.resize((size, size), Image.Resampling.LANCZOS) for size in SIZES]
 
 
 def save_ico(frames: list[Image.Image], path: Path) -> None:
@@ -72,17 +56,24 @@ def save_ico(frames: list[Image.Image], path: Path) -> None:
 
 
 def main() -> int:
+    parser = argparse.ArgumentParser(description="將已確認的雙貓狀態圖封裝成 Tray 圖示。")
+    parser.add_argument("--tray-only", action="store_true", help="只更新 Tray／啟動圖示，不改 Web 圖示。")
+    args = parser.parse_args()
     TARGET.mkdir(parents=True, exist_ok=True)
-    WEB.mkdir(parents=True, exist_ok=True)
-    plain = {size: base(size) for size in SIZES}
-    save_ico(list(plain.values()), TARGET / "meowkeeper.ico")
-    for state in BADGES:
-        frames = [with_badge(plain[size], state) for size in SIZES]
+    save_ico(tray_frames("meowkeeper-cats-watercolor-v1.png"), TARGET / "meowkeeper.ico")
+    for state in STATES:
+        with Image.open(BRAND / "meowkeeper-cats-watercolor-v1.png") as source:
+            with_badge(source, state).save(BRAND / f"meowkeeper-cats-{state}.png", optimize=True)
+        frames = tray_frames(f"meowkeeper-cats-{state}.png")
         for name in (f"meowkeeper-earth-{state}.ico", f"meowkeeper-{state}.ico"):
             save_ico(frames, TARGET / name)
-    shutil.copyfile(BRAND / "meowkeeper-logo.svg", WEB / "meowkeeper-logo.svg")
+    if args.tray_only:
+        return 0
+    WEB.mkdir(parents=True, exist_ok=True)
+    shutil.copyfile(BRAND / "meowkeeper-cats-watercolor-v1.png", WEB / "meowkeeper-logo.png")
     for size in (32, 192, 512):
-        (render(BRAND / "meowkeeper-logo.svg", size)).save(WEB / f"meowkeeper-{size}.png", optimize=True)
+        with Image.open(BRAND / "meowkeeper-cats-watercolor-v1.png") as source:
+            source.resize((size,size),Image.Resampling.LANCZOS).save(WEB / f"meowkeeper-{size}.png", optimize=True)
     return 0
 
 

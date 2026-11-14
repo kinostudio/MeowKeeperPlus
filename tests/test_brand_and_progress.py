@@ -6,35 +6,72 @@ import re
 import unittest
 from pathlib import Path
 
-from PIL import Image
+from PIL import Image, ImageChops
 
 from meowkeeper.tray.main import _icon_frame
+from tools.create_tray_assets import SIZES, tray_frames, with_badge
 
 ROOT = Path(__file__).resolve().parents[1]
 STATES = ("ready", "waiting", "error")
 
 
 class BrandIconTests(unittest.TestCase):
-    def test_tray_icons_contain_hand_tuned_small_frames(self) -> None:
+    def test_state_badges_never_repaint_cats(self) -> None:
+        with Image.open(ROOT / "assets/brand/meowkeeper-cats-watercolor-v1.png") as source:
+            original = source.tobytes()
+            for state in STATES:
+                result = with_badge(source, state)
+                bounds = ImageChops.difference(source, result).convert("RGB").getbbox()
+                self.assertIsNotNone(bounds)
+                self.assertGreaterEqual(bounds[0], int(source.width * .68))
+                self.assertGreaterEqual(bounds[1], int(source.height * .68))
+                self.assertEqual(source.tobytes(), original)
+                self.assertEqual(result.crop((0,0,source.width,int(source.height*.68))).tobytes(),
+                                 source.crop((0,0,source.width,int(source.height*.68))).tobytes())
+
+    def test_dashboard_uses_modern_sans_and_same_logo_source(self) -> None:
+        css = (ROOT / "src/meowkeeper/app/web/static/css/warm.css").read_text(encoding="utf-8")
+        self.assertIn("--hand:var(--sans)", css)
+        self.assertNotIn('"DFKai-SB"', css)
+        self.assertNotIn('"KaiTi"', css)
+        self.assertEqual((ROOT / "assets/brand/meowkeeper-cats-watercolor-v1.png").read_bytes(),
+                         (ROOT / "src/meowkeeper/app/web/static/icons/meowkeeper-logo.png").read_bytes())
+
+    def test_tray_icons_contain_all_small_frames(self) -> None:
         for name in ("meowkeeper", *(f"meowkeeper-earth-{state}" for state in STATES)):
-            icon = Image.open(ROOT / "assets/tray" / f"{name}.ico")
-            self.assertTrue({(16, 16), (20, 20), (24, 24), (32, 32), (256, 256)} <= set(icon.info["sizes"]), name)
+            with Image.open(ROOT / "assets/tray" / f"{name}.ico") as icon:
+                self.assertTrue({(size, size) for size in SIZES} <= set(icon.info["sizes"]), name)
 
     def test_tray_uses_matching_frame_not_shrunken_artwork(self) -> None:
         for size, expected in ((16, 16), (20, 20), (24, 24), (32, 32), (40, 48)):
-            frame = _icon_frame(Image.open(ROOT / "assets/tray/meowkeeper-earth-ready.ico"), size)
+            with Image.open(ROOT / "assets/tray/meowkeeper-earth-ready.ico") as icon:
+                frame = _icon_frame(icon, size)
             self.assertEqual(frame.size, (expected, expected))
 
     def test_states_are_distinguishable_at_16_px(self) -> None:
         corners = set()
         for state in STATES:
-            frame = _icon_frame(Image.open(ROOT / f"assets/tray/meowkeeper-earth-{state}.ico"), 16)
+            with Image.open(ROOT / f"assets/tray/meowkeeper-earth-{state}.ico") as icon:
+                frame = _icon_frame(icon, 16)
             corners.add(frame.getpixel((12, 12))[:3])
         self.assertEqual(len(corners), 3)
 
+    def test_tray_frames_match_new_transparent_state_sources(self) -> None:
+        for state in STATES:
+            expected = tray_frames(f"meowkeeper-cats-{state}.png")
+            for size, frame in zip(SIZES, expected):
+                with Image.open(ROOT / f"assets/tray/meowkeeper-earth-{state}.ico") as icon:
+                    actual = _icon_frame(icon, size)
+                self.assertEqual(actual.tobytes(), frame.tobytes(), (state, size))
+                self.assertEqual(actual.getpixel((0, 0))[3], 0)
+            self.assertEqual(
+                (ROOT / f"assets/tray/meowkeeper-earth-{state}.ico").read_bytes(),
+                (ROOT / f"assets/tray/meowkeeper-{state}.ico").read_bytes(),
+            )
+
     def test_web_and_shortcuts_use_the_new_logo(self) -> None:
         base = (ROOT / "src/meowkeeper/app/web/templates/base.html").read_text(encoding="utf-8")
-        self.assertIn("/static/icons/meowkeeper-logo.svg", base)
+        self.assertIn("/static/icons/meowkeeper-logo.png", base)
         manifest = json.loads((ROOT / "src/meowkeeper/app/web/static/manifest.json").read_text(encoding="utf-8"))
         self.assertTrue({"192x192", "512x512"} <= {icon["sizes"] for icon in manifest["icons"]})
         for icon in manifest["icons"]:

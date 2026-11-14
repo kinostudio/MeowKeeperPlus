@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import re
+import subprocess
 import unittest
 from pathlib import Path
 
@@ -113,6 +114,52 @@ class PhoneLayoutTests(unittest.TestCase):
             html = render(name, path)
             found = re.findall(r'\bid="([^"]+)"', html)
             self.assertEqual(len(found), len(set(found)), path)
+
+
+class RuntimeRegressionTests(unittest.TestCase):
+    def run_node(self, program, script):
+        root = WEB.parents[3]
+        result = subprocess.run(
+            [str(root / "vendor/javascript/node.exe"), "-e", program, str(script)],
+            capture_output=True, text=True, encoding="utf-8", timeout=20, check=False,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_notification_needs_positive_delivery_evidence(self):
+        self.run_node(r'''
+const vm=require('vm'),fs=require('fs'),assert=require('assert');
+const cards={},listeners={};
+const card=id=>cards[id]??=( {dataset:{},parts:{},querySelector(s){return this.parts[s]??={dataset:{},textContent:''}}} );
+const document={querySelector:()=>({}),getElementById:card,addEventListener:(n,f)=>listeners[n]=f};
+vm.runInNewContext(fs.readFileSync(process.argv[1],'utf8'),{document,fetch:async()=>({ok:true,json:async()=>({items:[]})})});
+function update(t){listeners['meowkeeper:status']({detail:{status:'running',metrics:{telegram:t,ai:{fps:3}}}});return cards['set-notify'].querySelector('.set-card-state').textContent;}
+for(const success_count of [undefined,null,0,'2'])assert.equal(update({enabled:true,success_count}),'已啟用，待確認');
+assert.equal(update({enabled:true,success_count:2}),'已成功傳送');
+assert.equal(update({enabled:true,status:'failed',success_count:2}),'傳送失敗');
+assert.equal(update({enabled:false,success_count:2}),'未啟用');
+assert(!cards['set-ai'].querySelector('.set-card-detail').textContent.includes('事件錄影開啟'));
+''', STATIC / "js/settings-overview.js")
+
+    def test_high_quality_includes_three_and_prefers_verified_profile(self):
+        self.run_node(r'''
+const vm=require('vm'),fs=require('fs'),assert=require('assert');
+const text=fs.readFileSync(process.argv[1],'utf8');
+const start=text.indexOf('(() => {',text.indexOf('/* Quick quality'));
+const script=text.slice(start,text.indexOf('  const list =',start))+'})();';
+for(const [values,verified,wanted] of [[['subtype=3'],null,'subtype=3'],[['subtype=2','subtype=3'],null,'subtype=3'],[['subtype=2','subtype=3'],'subtype=2','subtype=2'],[['subtype=1','subtype=2','subtype=3'],'subtype=1','subtype=3']]){
+ const select={options:values.map(value=>({value,dataset:{verifiedHighest:String(value===verified)}})),value:'',disabled:false,addEventListener(){},dispatchEvent(){}};
+ let applied=0,listener;
+ const apply={disabled:false,click(){applied++}},button={dataset:{qualityChoice:'high'},setAttribute(){}};
+ const seg={querySelectorAll:()=>[button],addEventListener(n,f){listener=f}};
+ vm.runInNewContext(script,{document:{getElementById:id=>({'live-quality-profile':select,'live-quality-apply':apply,'live-quality-seg':seg}[id])},MutationObserver:class{observe(){}},Event:class{}});
+ listener({target:{closest:()=>button}});assert.equal(select.value,wanted);assert.equal(applied,1);
+}
+''', TEMPLATES / "live.html")
+
+    def test_closed_field_tooltips_do_not_contribute_scroll_width(self):
+        css = (STATIC / "css/term-help.css").read_text(encoding="utf-8")
+        self.assertIn("label .field-help.field-tip{display:none}", css)
+        self.assertIn(".field-tip-anchor.open .field-tip{display:block", css)
 
 
 if __name__ == "__main__":

@@ -30,13 +30,14 @@
     else setCard("camera", "alert", "沒有畫面", "監控已啟動，但攝影機畫面中斷或還沒送到；請檢查來源設定。");
 
     if (!telegram.enabled) setCard("notify", "off", "未啟用", "還沒接上 Telegram；有事件時手機不會收到通知。");
-    else if (Number(telegram.failure_count || 0) > 0 && telegram.status === "failed") setCard("notify", "alert", "沒送出", `最近傳送失敗；已成功送出 ${telegram.success_count || 0} 則。`);
-    else setCard("notify", "ok", "送得到", `Telegram 已接上；這次啟動後已送出 ${telegram.success_count || 0} 則。`);
+    else if (telegram.status === "failed") setCard("notify", "alert", "傳送失敗", "最近傳送失敗；請到通知設定查看原因。");
+    else if (typeof telegram.success_count === "number" && telegram.success_count > 0) setCard("notify", "ok", "已成功傳送", `這次啟動後 Telegram 已接受 ${telegram.success_count} 則通知；不代表收件者已閱讀。`);
+    else setCard("notify", "warn", "已啟用，待確認", "通知已啟用，但這次啟動後尚無成功傳送紀錄。");
 
     const aiFps = Number(ai.fps || 0);
     const device = ai.device && ai.device !== "unknown" ? `${ai.device}・` : "";
     if (payload.status !== "running") setCard("ai", "off", "未監控", "監控啟動後才會開始找貓與錄影。");
-    else if (aiFps > 0) setCard("ai", "ok", "運作中", `找貓：${device}每秒 ${aiFps} 張・事件錄影開啟`);
+    else if (aiFps > 0) setCard("ai", "ok", "正在分析", `找貓：${device}每秒 ${aiFps} 張；錄影快取狀態請見即時畫面。`);
     else setCard("ai", "warn", "尚未分析", "畫面有了，但 AI 還沒開始找貓；可能在載入模型或因負載保護暫停。");
 
     const free = gb(disk.free_bytes);

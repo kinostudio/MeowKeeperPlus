@@ -10,7 +10,7 @@ Windows 本地寵物監控：共用攝影機影音來源、事件影片、Telegr
 - [一般使用指南](docs/PUBLIC_USER_GUIDE.md)
 - Windows 發布包內附 Python、FFmpeg 與必要模型；一般使用者不必建立 venv 或執行 pip。
 - 安裝與更新由使用者執行發布包中的安裝入口；Git 原始碼更新不會自動升級正式 Host。
-- [r115 候選版與分階段驗收](docs/R115_CANDIDATE.md)：候選建置不等同正式部署或實機更新／回滾已通過。
+- [R122 介面與品牌更新](docs/R122_RELEASE_NOTES.md)：包含雙貓 Logo、無襯線字體與手機版面；隔離驗收不等於正式機更新已完成。
 
 ## 原始碼協作
 
@@ -24,7 +24,7 @@ Windows 本地寵物監控：共用攝影機影音來源、事件影片、Telegr
 身分與行為辨識仍為 experimental。硬體效能、CPU 測溫、PTZ 及連續播放須依目標設備驗收；單元測試不能取代家庭實拍或長時間測試。
 
 私人設定、金鑰、資料庫、攝影機畫面、實機量測與操作紀錄只保存在使用者本機。安全管理見 [安全規範](docs/SECURITY.md)。
-# 安全更新整合候選
+## 安全差量更新
 
 已發布 [r120 差量 hotfix 候選](https://github.com/kinostudio/MeowKeeperPlus/releases/tag/r120)：保留前版修正，補上已使用安裝版的正常快取／日誌基準辨識；r116 請改用 r120 工具，不必刪檔。ZIP 約 1.38 MB，不重新下載未變 runtime／CUDA／FFmpeg／模型。完整 1,089 項、回歸 188 項、帶執行期產物的實際重建、原 r116 runtime 準備及包內 HTTP 啟動通過；公開下載／簽章／雜湊再驗通過。正式換版／回滾仍待實機驗收。[適用基準與更新命令](docs/DELTA_HOTFIX.md#r120-更新命令)。
 

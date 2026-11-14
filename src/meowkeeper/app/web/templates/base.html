@@ -2,12 +2,12 @@
 {% from '_icons.html' import icon %}
 {% from '_term_help.html' import term_help with context %}
 {% if release_info is not defined %}{% set release_info = {"version": "版本未驗證", "date": "尚未提供", "mode": "未知執行方式", "cache_key": "redesign-20261012"} %}{% endif %}
-{% set ui_cache_key = release_info.cache_key ~ "-ui11" %}
+{% set ui_cache_key = release_info.cache_key ~ "-ui12" %}
 <html lang="zh-Hant">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <link rel="icon" type="image/svg+xml" href="/static/icons/meowkeeper-logo.svg?v={{ ui_cache_key }}">
+  <link rel="icon" type="image/png" href="/static/icons/meowkeeper-logo.png?v={{ ui_cache_key }}">
   <link rel="icon" type="image/png" sizes="32x32" href="/static/icons/meowkeeper-32.png?v={{ ui_cache_key }}">
   <link rel="apple-touch-icon" href="/static/icons/meowkeeper-192.png?v={{ ui_cache_key }}">
   <link rel="stylesheet" href="/static/style.css?v={{ ui_cache_key }}">
@@ -35,7 +35,7 @@
   {% if preview_banner %}<p class="notice" role="note">{{ preview_banner }}</p>{% endif %}
   <header class="topbar">
     <a class="brand" href="/dashboard" aria-label="喵喵守護者+ 總覽">
-      <img class="brand-mark brand-logo" src="/static/icons/meowkeeper-logo.svg?v={{ ui_cache_key }}" width="40" height="40" alt="" aria-hidden="true">
+      <img class="brand-mark brand-logo" src="/static/icons/meowkeeper-logo.png?v={{ ui_cache_key }}" width="40" height="40" alt="" aria-hidden="true">
       <div><p class="eyebrow">MeowKeeper+ — Local AI Pet Guardian</p><h1>喵喵守護者<span>+</span></h1></div>
     </a>
     <div class="topbar-actions">

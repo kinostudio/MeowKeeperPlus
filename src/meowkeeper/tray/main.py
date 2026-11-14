@@ -90,11 +90,7 @@ def _tray_icon_size() -> int:
 
 
 def _icon_frame(image: Any, size: int) -> Any:
-    """Pick the hand-tuned ICO frame instead of shrinking the 256 px artwork.
-
-    Frames up to 24 px use the simplified two-tone cat-head design; pystray
-    re-encodes whatever image it receives, so the right frame must be chosen here.
-    """
+    """Pick the packaged frame matching Windows DPI before pystray re-encodes it."""
     sizes = sorted(getattr(image, "info", {}).get("sizes") or ())
     if not sizes:
         return image
@@ -110,7 +106,8 @@ def _load_image(status: str = "ready") -> Any:
 
         path = _asset_path(status)
         if path.is_file():
-            return _icon_frame(Image.open(path), _tray_icon_size())
+            with Image.open(path) as image:
+                return _icon_frame(image, _tray_icon_size())
         image = Image.new("RGBA", (64, 64), (73, 55, 40, 255))
         ImageDraw.Draw(image).ellipse((10, 10, 54, 54), fill=(206, 214, 164, 255))
         return image
